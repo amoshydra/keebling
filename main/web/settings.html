@@ -155,6 +155,20 @@
   </section>
 
   <section>
+    <h2>Backup</h2>
+    <p class="note">Everything you would otherwise have to re-enter: the device
+      settings and the macros stored in <strong>this browser</strong>. It does
+      not include your WiFi password, which lives in a separate store, so after
+      a restore you may need to rejoin the network.</p>
+    <div class="row" style="margin:10px 0">
+      <button id="backupSave" class="primary">Download backup</button>
+      <button id="backupLoad">Restore from file</button>
+      <input type="file" id="backupFile" accept="application/json,.json" hidden>
+    </div>
+    <p class="note" id="backupNote"></p>
+  </section>
+
+  <section>
     <h2>Diagnostics</h2>
     <div class="row" style="margin-bottom:10px">
       <button id="logsLoad">Load logs</button>

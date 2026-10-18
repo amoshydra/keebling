@@ -178,6 +178,116 @@ document.getElementById('logsLoad').addEventListener('click', async () => {
   }
 });
 
+// ---------------------------------------------------------------- backup
+// Two stores, one file. Settings live on the device; macros live in this
+// browser. A backup that covered only one of them would be a trap - the whole
+// point of exporting macros is that they do not travel on their own.
+const BACKUP_VERSION = 1;
+const MACRO_STORE_KEY = 'esp32remote.macros';
+
+function setBackupNote(text, warn) {
+  const el = document.getElementById('backupNote');
+  el.className = 'note' + (warn ? ' warn' : '');
+  el.textContent = text || '';
+}
+
+function readStoredMacros() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(MACRO_STORE_KEY) || '[]');
+    return Array.isArray(raw) ? raw : [];
+  } catch (_) {
+    // An unreadable store exports without macros rather than failing outright.
+    return [];
+  }
+}
+
+function collectBackup() {
+  const device = Object.assign({}, appSettings);
+  delete device.macros;        // a legacy device key; macros are browser-side now
+
+  return {
+    app: 'esp32-remote',
+    version: BACKUP_VERSION,
+    exported: new Date().toISOString(),
+    device,
+    macros: readStoredMacros(),
+  };
+}
+
+function backupSummary(b) {
+  const n = Object.keys(b.device || {}).length;
+  const m = (b.macros || []).length;
+  return `${n} device setting${n === 1 ? '' : 's'} and ${m} macro${m === 1 ? '' : 's'}`;
+}
+
+document.getElementById('backupSave').addEventListener('click', () => {
+  const b = collectBackup();
+  const blob = new Blob([JSON.stringify(b, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `esp32-remote-${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  setBackupNote(`Downloaded ${backupSummary(b)}.`);
+});
+
+document.getElementById('backupLoad').addEventListener('click', () => {
+  document.getElementById('backupFile').click();
+});
+
+document.getElementById('backupFile').addEventListener('change', async (e) => {
+  const file = e.target.files && e.target.files[0];
+  e.target.value = '';         // so the same file can be chosen twice in a row
+  if (!file) return;
+
+  let b;
+  try {
+    b = JSON.parse(await file.text());
+  } catch (_) {
+    setBackupNote('That file is not readable as JSON.', true);
+    return;
+  }
+  if (!b || b.app !== 'esp32-remote' || b.version !== BACKUP_VERSION) {
+    setBackupNote('Not a backup from this project, or from a version this page does ' +
+                  'not understand. Nothing was changed.', true);
+    return;
+  }
+
+  // The device first. If it refuses, the browser's macros are left alone and the
+  // message says which half did not apply rather than implying both did.
+  let devicePart = 'no device settings in the file';
+  if (b.device && typeof b.device === 'object') {
+    const incoming = Object.assign({}, b.device);
+    delete incoming.macros;
+    Object.assign(appSettings, incoming);
+    try {
+      const r = await saveSettingsToDevice();
+      devicePart = r.ok ? 'device settings restored'
+                        : `the device refused the settings (HTTP ${r.status})`;
+    } catch (_) {
+      devicePart = 'the device could not be reached, so its settings were not restored';
+    }
+  }
+
+  let macroPart = 'no macros in the file';
+  const macros = Array.isArray(b.macros) ? b.macros : [];
+  if (macros.length) {
+    try {
+      localStorage.setItem(MACRO_STORE_KEY, JSON.stringify(macros));
+      macroPart = `${macros.length} macro${macros.length === 1 ? '' : 's'} restored`;
+    } catch (_) {
+      macroPart = 'the macros could not be stored (private mode?)';
+    }
+  }
+
+  readIntoForm();
+  const failed = !devicePart.startsWith('device settings restored');
+  const reloadHint = (devicePart.startsWith('device settings restored') && macros.length)
+    ? ' Reload the Macros page to see them.' : '';
+  setBackupNote(`${devicePart}; ${macroPart}.${reloadHint}`, failed);
+});
+
 // ---------------------------------------------------------------- HID descriptor
 // Enough of the HID report descriptor grammar to make the descriptor readable:
 // item prefix, then the global/local state that main items inherit.

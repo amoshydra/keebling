@@ -385,7 +385,102 @@ __webTests.push({
   },
 });
 
-// ---------------------------------------------------------------- macro DSL
+// ---------------------------------------------------------------- backup
+__webTests.push({
+  page: 'settings',
+  name: 'backup collects the device settings and this browser\'s macros',
+  fn: async () => {
+    localStorage.setItem('esp32remote.macros',
+      JSON.stringify([{ name: 'Phone Only', steps: '{ENTER}' }]));
+
+    const b = collectBackup();
+    __assert(b.app === 'esp32-remote' && b.version === 1,
+      `envelope: ${JSON.stringify({ app: b.app, version: b.version })}`);
+    __assert(b.device && b.device.usb_product === 'ESP32 Remote',
+      `device part: ${JSON.stringify(b.device)}`);
+    __assert(!('macros' in b.device),
+      'the device part still carries a legacy macros key');
+    __assert(Array.isArray(b.macros) && b.macros.some((m) => m.name === 'Phone Only'),
+      `macro part: ${JSON.stringify(b.macros)}`);
+  },
+});
+
+__webTests.push({
+  page: 'settings',
+  name: 'a backup restores into both stores',
+  fn: async () => {
+    const payload = {
+      app: 'esp32-remote',
+      version: 1,
+      device: { usb_product: 'Restored Name', screen_timeout_s: 45 },
+      macros: [{ name: 'From File', steps: '{VOLUMEUP}' }],
+    };
+    const input = document.getElementById('backupFile');
+    const dt = new DataTransfer();
+    dt.items.add(new File([JSON.stringify(payload)], 'backup.json',
+      { type: 'application/json' }));
+    input.files = dt.files;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    await __sleep(400);
+
+    __assert(document.getElementById('usbProduct').value === 'Restored Name',
+      `the form shows ${document.getElementById('usbProduct').value}`);
+    __assert(document.getElementById('screenTimeout').value === '45',
+      `the timeout is ${document.getElementById('screenTimeout').value}`);
+    __assert(document.getElementById('screenTimeoutVal').textContent === '45 s',
+      'the timeout label was not redrawn');
+
+    const stored = JSON.parse(localStorage.getItem('esp32remote.macros') || '[]');
+    __assert(stored.some((m) => m.name === 'From File'), `macros: ${JSON.stringify(stored)}`);
+
+    const note = document.getElementById('backupNote').textContent;
+    __assert(note.includes('device settings restored'), `note: ${note}`);
+    __assert(/\d+ macros? restored/.test(note), `note: ${note}`);
+    __assert(note.includes('Reload the Macros page'), `note: ${note}`);
+  },
+});
+
+__webTests.push({
+  page: 'settings',
+  name: 'a file that is not a backup changes nothing',
+  fn: async () => {
+    const before = document.getElementById('usbProduct').value;
+    const input = document.getElementById('backupFile');
+    const dt = new DataTransfer();
+    dt.items.add(new File(['{"app":"something-else","version":9}'], 'other.json',
+      { type: 'application/json' }));
+    input.files = dt.files;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    await __sleep(200);
+
+    __assert(document.getElementById('usbProduct').value === before,
+      'a foreign file was applied');
+    const note = document.getElementById('backupNote').textContent;
+    __assert(note.includes('Nothing was changed'), `note: ${note}`);
+  },
+});
+
+__webTests.push({
+  page: 'settings',
+  name: 'a corrupt backup file is refused, not half-applied',
+  fn: async () => {
+    const before = document.getElementById('usbProduct').value;
+    const input = document.getElementById('backupFile');
+    const dt = new DataTransfer();
+    dt.items.add(new File(['{not json at all'], 'broken.json', { type: 'application/json' }));
+    input.files = dt.files;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    await __sleep(200);
+
+    __assert(document.getElementById('usbProduct').value === before,
+      'a corrupt file changed the form');
+    const note = document.getElementById('backupNote').textContent;
+    __assert(note.includes('not readable as JSON'), `note: ${note}`);
+  },
+});
+
+
+// ---------------------------------------------------------------- HID descriptor
 __webTests.push({
   page: 'settings',
   name: 'HID descriptor decodes into a readable tree',
@@ -403,6 +498,9 @@ __webTests.push({
   },
 });
 
+// ---------------------------------------------------------------- macro DSL
+// Driven directly rather than through the page, so a failure names the token
+// rather than a DOM element.
 __webTests.push({
   page: 'macros',
   name: 'DSL: the worked example parses to media key, text, Enter',

@@ -280,6 +280,12 @@ try {
     'screen text reached the device with its line break',
     `last payload carried ${JSON.stringify(lastSettings.screen_text)}`);
 
+  // The restore's device half: the form showing a new value is not evidence the
+  // device was told, and this is the payload the restore produced.
+  report(lastSettings.usb_product === 'Restored Name',
+    'the restored settings reached the device',
+    `last payload carried usb_product ${JSON.stringify(lastSettings.usb_product)}`);
+
   // Macros live in the browser now, so this check runs the other way round:
   // the page must never have put them on the device...
   const withMacros = payloads.find((p) => Array.isArray(p.macros) && p.macros.length);
