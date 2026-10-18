@@ -7,6 +7,7 @@ idf_component_register(
         "input_state.c"
         "security.c"
         "bsp/esp_lcd_st7735.c"
+        "qr/qrcodegen.c"
     INCLUDE_DIRS "."
     EMBED_FILES
         "web/index.html"

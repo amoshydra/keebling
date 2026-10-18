@@ -1,6 +1,7 @@
 #include "display.h"
 
 #include "bsp/esp_lcd_st7735.h"
+#include "qr/qrcodegen.h"
 
 #include "driver/ledc.h"
 #include "esp_lcd_panel_io.h"
@@ -41,6 +42,9 @@ static const char *TAG = "display";
 static esp_lcd_panel_handle_t s_panel = NULL;
 static bool s_ok = false;
 static uint8_t s_fb[FB_SIZE];   // RGB565, high byte first (matches panel byte order)
+
+// While the boot QR is on screen, status updates must not draw over it.
+static bool s_qr_active = false;
 
 // display_status() is called from the WiFi event task, the WebSocket task and
 // the tick task. The framebuffer is shared, so every mutation plus its flush
@@ -272,29 +276,121 @@ static void draw_char(int x, int y, char c, uint16_t fg, uint16_t bg) {
     }
 }
 
+// Caller must hold s_fb_lock.
+static void draw_text(int x, int y, const char *text, uint16_t fg, uint16_t bg) {
+    while (*text && x + 6 <= LCD_W) {
+        draw_char(x, y, *text++, fg, bg);
+        x += 6;
+    }
+}
+
 void display_status(int line, const char *text) {
     if (!s_ok || !s_fb_lock || !text) {
         ESP_LOGI(TAG, "LCD[%d]: %s", line, text ? text : "");
         return;
     }
     if (line < 0) return;
+    if (s_qr_active) return;          // the boot QR owns the screen
     int y = line * 8;
     if (y + 8 > LCD_H) return;
 
-    // One lock for clear + draw + flush, so two tasks cannot interleave.
     xSemaphoreTake(s_fb_lock, portMAX_DELAY);
 
     for (int px = 0; px < LCD_W; px++) {
         size_t off = (size_t)(y * LCD_W + px) * 2;
         s_fb[off] = 0x00; s_fb[off + 1] = 0x00;
     }
+    draw_text(1, y, text, 0xFFFF, 0x0000);
 
-    int x = 1;
-    while (*text && x + 6 <= LCD_W) {
-        draw_char(x, y, *text++, 0xFFFF, 0x0000);
-        x += 6;
+    flush_locked();
+    xSemaphoreGive(s_fb_lock);
+}
+
+void display_text(int x, int y, const char *text) {
+    if (!s_ok || !s_fb_lock || !text) return;
+    xSemaphoreTake(s_fb_lock, portMAX_DELAY);
+    draw_text(x, y, text, 0xFFFF, 0x0000);
+    flush_locked();
+    xSemaphoreGive(s_fb_lock);
+}
+
+void display_clear(void) {
+    if (!s_ok || !s_fb_lock) return;
+    xSemaphoreTake(s_fb_lock, portMAX_DELAY);
+    s_qr_active = false;
+    memset(s_fb, 0, sizeof(s_fb));
+    flush_locked();
+    xSemaphoreGive(s_fb_lock);
+}
+
+// Render the device code as a QR on the left half, white-on-black with a light
+// quiet zone (scanners need that margin to be the *light* colour).
+//
+// Payload is the bare 12-character code, not a URL: the code never changes
+// while the URL can (DHCP address, mDNS name), and 12 bytes fits version 1 at
+// EC level Q, which keeps the modules large enough to actually scan.
+bool display_qr(const char *text) {
+    if (!s_ok || !s_fb_lock || !text) return false;
+
+    // Static: these are 4 KB buffers, too big for the stack.
+    static uint8_t qr[qrcodegen_BUFFER_LEN_MAX];
+    static uint8_t tmp[qrcodegen_BUFFER_LEN_MAX];
+
+    // boostEcl=true raises the error-correction level as far as the version
+    // allows without growing it - free robustness for a small payload.
+    if (!qrcodegen_encodeText(text, tmp, qr, qrcodegen_Ecc_LOW,
+                              qrcodegen_VERSION_MIN, qrcodegen_VERSION_MAX,
+                              qrcodegen_Mask_AUTO, true)) {
+        ESP_LOGW(TAG, "QR encode failed for %zu chars", strlen(text));
+        return false;
+    }
+
+    const int n = qrcodegen_getSize(qr);
+    const int quiet = 2;                       // modules of light margin
+    const int total = n + quiet * 2;
+    int scale = LCD_H / total;                 // largest whole module that fits
+    if (scale < 1) scale = 1;
+    const int side = total * scale;
+    const int ox = 2;
+    const int oy = (LCD_H - side) / 2;
+
+    xSemaphoreTake(s_fb_lock, portMAX_DELAY);
+    s_qr_active = true;
+
+    // light quiet zone / background
+    for (int y = 0; y < side; y++) {
+        int fy = oy + y;
+        if (fy < 0 || fy >= LCD_H) continue;
+        for (int x = 0; x < side; x++) {
+            int fx = ox + x;
+            if (fx < 0 || fx >= LCD_W) continue;
+            size_t off = (size_t)(fy * LCD_W + fx) * 2;
+            s_fb[off] = 0xFF; s_fb[off + 1] = 0xFF;
+        }
+    }
+
+    // dark modules
+    for (int my = 0; my < n; my++) {
+        for (int mx = 0; mx < n; mx++) {
+            if (!qrcodegen_getModule(qr, mx, my)) continue;
+            int bx = ox + (quiet + mx) * scale;
+            int by = oy + (quiet + my) * scale;
+            for (int dy = 0; dy < scale; dy++) {
+                int fy = by + dy;
+                if (fy < 0 || fy >= LCD_H) continue;
+                for (int dx = 0; dx < scale; dx++) {
+                    int fx = bx + dx;
+                    if (fx < 0 || fx >= LCD_W) continue;
+                    size_t off = (size_t)(fy * LCD_W + fx) * 2;
+                    s_fb[off] = 0x00; s_fb[off + 1] = 0x00;
+                }
+            }
+        }
     }
 
     flush_locked();
     xSemaphoreGive(s_fb_lock);
+
+    ESP_LOGI(TAG, "QR: %d x %d modules, %d px/module (%d px square)", n, n, scale, side);
+    return true;
 }

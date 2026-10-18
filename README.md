@@ -52,16 +52,32 @@ If `flash` fails to connect: hold **BOOT**, start the flash, release BOOT once
 
 ## Use
 
-1. Flash, then power-cycle the board (see *Reflashing*).
-2. Read the **12-character code** off the LCD.
+1. Power-cycle the board.
+2. **Scan the QR on the LCD** with your phone — it carries the 12-character
+   device code, and your phone will offer to copy it. The QR stays up for 20
+   seconds, then the status screen takes over (power-cycle to see it again).
 3. Join WiFi **`esp-remote`** — the **code is the WiFi password**.
-4. Open **http://192.168.4.1** and enter the same code when prompted.
-5. Click/tap the pad to capture the pointer. Your mouse now drives the host.
+4. Open **http://192.168.4.1** and paste the code when prompted.
+5. Tap the pad to capture the pointer. Your mouse now drives the host.
    **Esc** releases.
 
 The code is remembered in `localStorage`, so step 4 is a one-time thing per
 browser. You can also skip it entirely with
 `http://192.168.4.1/?token=YOURCODE`.
+
+### Why the QR holds the code and not a URL
+
+A URL would be more convenient — scan, and the page opens already
+authenticated — but the URL is the part that moves (DHCP address now, possibly
+a different one once STA mode exists, or an mDNS name). The code never changes.
+
+Encoding the bare 12 characters also keeps the payload to 12 bytes, which fits
+QR **version 1** and lets the modules be 3px (0.41 mm) instead of 2px
+(0.27 mm). A URL needs version 3 for the same screen, and 0.27 mm modules are
+much harder to scan off a 0.96" panel.
+
+`qrcodegen` is vendored under `main/qr/` (Nayuki, MIT) and `boostEcl` is
+enabled, so a small payload gets upgraded to EC level Q for free.
 
 ## Security model
 
@@ -202,9 +218,10 @@ Recovery from it is a plain power cycle.
 ## Notes / limitations
 
 - **The LCD is the trust boundary.** It shows the device code permanently, so
-  anyone who can read the screen can control the host. Line 6 shows the last
-  reset reason (`power-on`, `software`, `wdt`, `brownout`) as a debugging aid
-  since there is no usable serial console.
+  anyone who can read the screen can control the host. The pairing QR shows it
+  even more legibly for the first 20 seconds. Line 6 shows the last reset
+  reason (`power-on`, `software`, `wdt`, `brownout`) as a debugging aid since
+  there is no usable serial console.
 - **macOS pointer acceleration** applies to any relative HID mouse. The gain slider
   compensates; for exact 1:1 you'd need a helper app posting `CGEvent`s.
 - **No serial console over USB** while TinyUSB owns the port. `ESP_LOGI` output goes

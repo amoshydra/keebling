@@ -16,6 +16,17 @@ void display_flush(void);
 // Draw a status line (line 0..9). 160x80 landscape => 26 chars x 10 lines.
 void display_status(int line, const char *text);
 
+// Draw text at an absolute pixel position (used beside the boot QR).
+void display_text(int x, int y, const char *text);
+
+// Wipe the screen and hand it back to display_status().
+void display_clear(void);
+
+// Render `text` as a QR code on the left of the screen, with a light quiet
+// zone. While this is up, display_status() calls are ignored - call
+// display_clear() to take the screen back. Returns false if it did not fit.
+bool display_qr(const char *text);
+
 // Shared line layout, so main.c and web_server.c agree on the screen.
 #define LCD_LINE_TITLE   0
 #define LCD_LINE_NET     1
