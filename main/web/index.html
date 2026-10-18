@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>ESP32 Remote</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, -apple-system, sans-serif; background: #111; color: #eee;
+         height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
+  #status { padding: 8px 12px; background: #1c1c1c; font-size: 13px;
+            display: flex; justify-content: space-between; align-items: center; }
+  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; }
+  .dot.on { background:#4caf50; } .dot.off { background:#f44336; }
+  .dot.warn { background:#ff9800; }
+  #pad { flex:1; background:#181818; touch-action:none; cursor:crosshair;
+         position:relative; display:flex; align-items:center; justify-content:center; }
+  #hint { color:#555; font-size:14px; text-align:center; padding:0 20px; pointer-events:none;
+          position:absolute; }
+  #pad.captured #hint { display:none; }
+  #pad.captured { background:#101018; }
+  #controls { padding:8px; background:#1c1c1c; display:flex; gap:6px; flex-wrap:wrap;
+              align-items:center; }
+  button { padding:9px 14px; border:none; border-radius:7px; background:#333; color:#eee;
+           font-size:14px; -webkit-tap-highlight-color:transparent; }
+  button:active { background:#555; }
+  button.primary { background:#1976d2; }
+  button.danger  { background:#b3261e; }
+  label { font-size:13px; display:flex; align-items:center; gap:6px; }
+  input[type=range] { width:110px; }
+  #kbd { display:none; padding:8px; background:#151515; }
+  #kbd.show { display:block; }
+  .row { display:flex; gap:4px; margin-bottom:4px; }
+  .k { flex:1; padding:9px 2px; text-align:center; background:#2c2c2c; border-radius:4px;
+       font-size:12px; user-select:none; -webkit-tap-highlight-color:transparent; }
+  .k.w2 { flex:2; } .k.w3 { flex:3; } .k.space { flex:7; }
+  .k.mod { background:#3a3a3a; }
+  .k.active { background:#1976d2; }
+  .k.arrow { flex:0 0 42px; }
+</style>
+</head>
+<body>
+<div id="status">
+  <span><span class="dot off" id="dot"></span><span id="statusText">disconnected</span></span>
+  <span id="mode">tap pad to capture</span>
+</div>
+
+<div id="pad">
+  <div id="hint">Click / tap here to capture the pointer.<br>Then your mouse moves the remote cursor.<br>Esc releases.</div>
+</div>
+
+<div id="controls">
+  <button id="bLeft">L</button>
+  <button id="bRight">R</button>
+  <button id="bMid">M</button>
+  <button id="bKbd">⌨ Keyboard</button>
+  <button id="bRelease" class="danger">Release All</button>
+  <button id="bBoot" title="Reboot into USB firmware download mode (for reflashing)">⤓ Bootloader</button>
+  <label>Gain <input type="range" id="gain" min="0.2" max="4" step="0.1" value="1">
+    <span id="gainVal">1.0×</span></label>
+</div>
+
+<div id="kbd"></div>
+
+<script src="app.js"></script>
+</body>
+</html>

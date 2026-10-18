@@ -1,0 +1,278 @@
+#include "display.h"
+
+#include "bsp/esp_lcd_st7735.h"
+
+#include "driver/ledc.h"
+#include "esp_lcd_panel_io.h"
+#include "esp_lcd_panel_ops.h"
+#include "esp_lcd_panel_vendor.h"
+#include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+
+#include <string.h>
+
+static const char *TAG = "display";
+
+// ---- T-Dongle-S3 pins (from LILYGO's official bsp_lcd example) ----
+#define PIN_MOSI  3
+#define PIN_CLK   5
+#define PIN_CS    4
+#define PIN_DC    2
+#define PIN_RST   1
+#define PIN_BCKL  38     // NOTE: active LOW on this board
+
+#define LCD_HOST  SPI2_HOST
+
+// LILYGO run this panel in LANDSCAPE: 160 wide x 80 tall.
+#define LCD_W  160
+#define LCD_H  80
+
+// Backlight is active low and driven by LEDC PWM (0 duty = full brightness).
+#define BCKL_TIMER     LEDC_TIMER_1
+#define BCKL_CHANNEL   LEDC_CHANNEL_1
+#define BCKL_MODE      LEDC_LOW_SPEED_MODE
+#define BCKL_RES       LEDC_TIMER_8_BIT
+#define BCKL_FREQ_HZ   1000
+
+#define FB_SIZE (LCD_W * LCD_H * 2)
+
+static esp_lcd_panel_handle_t s_panel = NULL;
+static bool s_ok = false;
+static uint8_t s_fb[FB_SIZE];   // RGB565, high byte first (matches panel byte order)
+
+// ---- 5x7 font, ASCII 32..127, column-major, bit0 = top row ----
+static const uint8_t FONT5X7[96][5] = {
+    {0x00,0x00,0x00,0x00,0x00}, // space
+    {0x00,0x00,0x5F,0x00,0x00}, // !
+    {0x00,0x07,0x00,0x07,0x00}, // "
+    {0x14,0x7F,0x14,0x7F,0x14}, // #
+    {0x24,0x2A,0x7F,0x2A,0x12}, // $
+    {0x23,0x13,0x08,0x64,0x62}, // %
+    {0x36,0x49,0x55,0x22,0x50}, // &
+    {0x00,0x05,0x03,0x00,0x00}, // '
+    {0x00,0x1C,0x22,0x41,0x00}, // (
+    {0x00,0x41,0x22,0x1C,0x00}, // )
+    {0x14,0x08,0x3E,0x08,0x14}, // *
+    {0x08,0x08,0x3E,0x08,0x08}, // +
+    {0x00,0x50,0x30,0x00,0x00}, // ,
+    {0x08,0x08,0x08,0x08,0x08}, // -
+    {0x00,0x60,0x60,0x00,0x00}, // .
+    {0x20,0x10,0x08,0x04,0x02}, // /
+    {0x3E,0x51,0x49,0x45,0x3E}, // 0
+    {0x00,0x42,0x7F,0x40,0x00}, // 1
+    {0x42,0x61,0x51,0x49,0x46}, // 2
+    {0x21,0x41,0x45,0x4B,0x31}, // 3
+    {0x18,0x14,0x12,0x7F,0x10}, // 4
+    {0x27,0x45,0x45,0x45,0x39}, // 5
+    {0x3C,0x4A,0x49,0x49,0x30}, // 6
+    {0x01,0x71,0x09,0x05,0x03}, // 7
+    {0x36,0x49,0x49,0x49,0x36}, // 8
+    {0x06,0x49,0x49,0x29,0x1E}, // 9
+    {0x00,0x36,0x36,0x00,0x00}, // :
+    {0x00,0x56,0x36,0x00,0x00}, // ;
+    {0x08,0x14,0x22,0x41,0x00}, // <
+    {0x14,0x14,0x14,0x14,0x14}, // =
+    {0x00,0x41,0x22,0x14,0x08}, // >
+    {0x02,0x01,0x51,0x09,0x06}, // ?
+    {0x32,0x49,0x79,0x41,0x3E}, // @
+    {0x7E,0x11,0x11,0x11,0x7E}, // A
+    {0x7F,0x49,0x49,0x49,0x36}, // B
+    {0x3E,0x41,0x41,0x41,0x22}, // C
+    {0x7F,0x41,0x41,0x22,0x1C}, // D
+    {0x7F,0x49,0x49,0x49,0x41}, // E
+    {0x7F,0x09,0x09,0x09,0x01}, // F
+    {0x3E,0x41,0x49,0x49,0x7A}, // G
+    {0x7F,0x08,0x08,0x08,0x7F}, // H
+    {0x00,0x41,0x7F,0x41,0x00}, // I
+    {0x20,0x40,0x41,0x3F,0x01}, // J
+    {0x7F,0x08,0x14,0x22,0x41}, // K
+    {0x7F,0x40,0x40,0x40,0x40}, // L
+    {0x7F,0x02,0x0C,0x02,0x7F}, // M
+    {0x7F,0x04,0x08,0x10,0x7F}, // N
+    {0x3E,0x41,0x41,0x41,0x3E}, // O
+    {0x7F,0x09,0x09,0x09,0x06}, // P
+    {0x3E,0x41,0x51,0x21,0x5E}, // Q
+    {0x7F,0x09,0x19,0x29,0x46}, // R
+    {0x46,0x49,0x49,0x49,0x31}, // S
+    {0x01,0x01,0x7F,0x01,0x01}, // T
+    {0x3F,0x40,0x40,0x40,0x3F}, // U
+    {0x1F,0x20,0x40,0x20,0x1F}, // V
+    {0x3F,0x40,0x38,0x40,0x3F}, // W
+    {0x63,0x14,0x08,0x14,0x63}, // X
+    {0x07,0x08,0x70,0x08,0x07}, // Y
+    {0x61,0x51,0x49,0x45,0x43}, // Z
+    {0x00,0x7F,0x41,0x41,0x00}, // [
+    {0x02,0x04,0x08,0x10,0x20}, // backslash
+    {0x00,0x41,0x41,0x7F,0x00}, // ]
+    {0x04,0x02,0x01,0x02,0x04}, // ^
+    {0x40,0x40,0x40,0x40,0x40}, // _
+    {0x00,0x01,0x02,0x04,0x00}, // `
+    {0x20,0x54,0x54,0x54,0x78}, // a
+    {0x7F,0x48,0x44,0x44,0x38}, // b
+    {0x38,0x44,0x44,0x44,0x20}, // c
+    {0x38,0x44,0x44,0x48,0x7F}, // d
+    {0x38,0x54,0x54,0x54,0x18}, // e
+    {0x08,0x7E,0x09,0x01,0x02}, // f
+    {0x0C,0x52,0x52,0x52,0x3E}, // g
+    {0x7F,0x08,0x04,0x04,0x78}, // h
+    {0x00,0x44,0x7D,0x40,0x00}, // i
+    {0x20,0x40,0x44,0x3D,0x00}, // j
+    {0x7F,0x10,0x28,0x44,0x00}, // k
+    {0x00,0x41,0x7F,0x40,0x00}, // l
+    {0x7C,0x04,0x18,0x04,0x78}, // m
+    {0x7C,0x08,0x04,0x04,0x78}, // n
+    {0x38,0x44,0x44,0x44,0x38}, // o
+    {0x7C,0x14,0x14,0x14,0x08}, // p
+    {0x08,0x14,0x14,0x18,0x7C}, // q
+    {0x7C,0x08,0x04,0x04,0x08}, // r
+    {0x48,0x54,0x54,0x54,0x20}, // s
+    {0x04,0x3F,0x44,0x40,0x20}, // t
+    {0x3C,0x40,0x40,0x20,0x7C}, // u
+    {0x1C,0x20,0x40,0x20,0x1C}, // v
+    {0x3C,0x40,0x30,0x40,0x3C}, // w
+    {0x44,0x28,0x10,0x28,0x44}, // x
+    {0x0C,0x50,0x50,0x50,0x3C}, // y
+    {0x44,0x64,0x54,0x4C,0x44}, // z
+    {0x00,0x08,0x36,0x41,0x00}, // {
+    {0x00,0x00,0x7F,0x00,0x00}, // |
+    {0x00,0x41,0x36,0x08,0x00}, // }
+    {0x08,0x04,0x08,0x10,0x08}, // ~
+    {0x00,0x06,0x09,0x09,0x06}, // DEL
+};
+
+// ---------------------------------------------------------------------------
+// Backlight (LEDC PWM, active low: duty 0 => full brightness)
+// ---------------------------------------------------------------------------
+
+static void backlight_init(void) {
+    ledc_timer_config_t timer = {
+        .speed_mode = BCKL_MODE,
+        .duty_resolution = BCKL_RES,
+        .timer_num = BCKL_TIMER,
+        .freq_hz = BCKL_FREQ_HZ,
+        .clk_cfg = LEDC_AUTO_CLK,
+    };
+    ledc_timer_config(&timer);
+
+    ledc_channel_config_t ch = {
+        .gpio_num = PIN_BCKL,
+        .speed_mode = BCKL_MODE,
+        .channel = BCKL_CHANNEL,
+        .intr_type = LEDC_INTR_DISABLE,
+        .timer_sel = BCKL_TIMER,
+        .duty = 255,      // active low => 255 = off
+        .hpoint = 0,
+    };
+    ledc_channel_config(&ch);
+}
+
+// ---------------------------------------------------------------------------
+// Public
+// ---------------------------------------------------------------------------
+
+void display_init(void) {
+    backlight_init();
+
+    spi_bus_config_t bus = ST7735_PANEL_BUS_SPI_CONFIG(PIN_CLK, PIN_MOSI, FB_SIZE);
+    esp_err_t err = spi_bus_initialize(LCD_HOST, &bus, SPI_DMA_CH_AUTO);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "spi_bus_initialize failed: %s - display disabled", esp_err_to_name(err));
+        return;   // NON-FATAL
+    }
+
+    esp_lcd_panel_io_handle_t io = NULL;
+    esp_lcd_panel_io_spi_config_t io_config = ST7735_PANEL_IO_SPI_CONFIG(PIN_CS, PIN_DC, NULL, NULL);
+    err = esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)LCD_HOST, &io_config, &io);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "new_panel_io_spi failed: %s - display disabled", esp_err_to_name(err));
+        return;   // NON-FATAL
+    }
+
+    esp_lcd_panel_dev_config_t panel_config = {
+        .reset_gpio_num = PIN_RST,
+        .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_BGR,
+        .data_endian = LCD_RGB_DATA_ENDIAN_LITTLE,
+        .bits_per_pixel = 16,
+    };
+    err = esp_lcd_new_panel_st7735(io, &panel_config, &s_panel);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "new_panel_st7735 failed: %s - display disabled", esp_err_to_name(err));
+        return;   // NON-FATAL
+    }
+
+    err = esp_lcd_panel_reset(s_panel);
+    if (err == ESP_OK) err = esp_lcd_panel_init(s_panel);
+    if (err == ESP_OK) err = esp_lcd_panel_invert_color(s_panel, true);
+    if (err == ESP_OK) err = esp_lcd_panel_set_gap(s_panel, 1, 26);
+    if (err == ESP_OK) err = esp_lcd_panel_swap_xy(s_panel, true);
+    if (err == ESP_OK) err = esp_lcd_panel_mirror(s_panel, false, true);
+    if (err == ESP_OK) err = esp_lcd_panel_disp_on_off(s_panel, true);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "panel setup failed: %s - display disabled", esp_err_to_name(err));
+        s_panel = NULL;
+        return;   // NON-FATAL
+    }
+
+    s_ok = true;
+    memset(s_fb, 0, sizeof(s_fb));
+    display_backlight(255);
+    ESP_LOGI(TAG, "Display ready (%dx%d landscape)", LCD_W, LCD_H);
+}
+
+void display_backlight(uint8_t level) {
+    // level 0..255, where 255 = brightest. Panel is active low.
+    uint32_t duty = 255 - level;
+    ledc_set_duty(BCKL_MODE, BCKL_CHANNEL, duty);
+    ledc_update_duty(BCKL_MODE, BCKL_CHANNEL);
+}
+
+void display_fill(uint16_t color) {
+    if (!s_ok) return;
+    uint8_t hi = color >> 8, lo = color & 0xFF;
+    for (size_t i = 0; i < sizeof(s_fb); i += 2) { s_fb[i] = hi; s_fb[i + 1] = lo; }
+}
+
+void display_flush(void) {
+    if (!s_ok || !s_panel) return;
+    esp_lcd_panel_draw_bitmap(s_panel, 0, 0, LCD_W, LCD_H, s_fb);
+}
+
+static void draw_char(int x, int y, char c, uint16_t fg, uint16_t bg) {
+    if (c < 32 || c > 127) c = '?';
+    const uint8_t *glyph = FONT5X7[(int)c - 32];
+    for (int col = 0; col < 6; col++) {
+        uint8_t bits = (col < 5) ? glyph[col] : 0;   // 6th column = inter-char gap
+        for (int row = 0; row < 8; row++) {
+            int px = x + col, py = y + row;
+            if (px < 0 || px >= LCD_W || py < 0 || py >= LCD_H) continue;
+            uint16_t color = (bits & (1 << row)) ? fg : bg;
+            size_t off = (size_t)(py * LCD_W + px) * 2;
+            s_fb[off] = color >> 8;
+            s_fb[off + 1] = color & 0xFF;
+        }
+    }
+}
+
+void display_status(int line, const char *text) {
+    if (!s_ok) {
+        ESP_LOGI(TAG, "LCD[%d]: %s", line, text);
+        return;
+    }
+    if (line < 0) return;
+    int y = line * 8;
+    if (y + 8 > LCD_H) return;
+
+    // clear the whole line, then draw
+    for (int px = 0; px < LCD_W; px++) {
+        size_t off = (size_t)(y * LCD_W + px) * 2;
+        s_fb[off] = 0x00; s_fb[off + 1] = 0x00;
+    }
+
+    int x = 1;
+    while (*text && x + 6 <= LCD_W) {
+        draw_char(x, y, *text++, 0xFFFF, 0x0000);
+        x += 6;
+    }
+    display_flush();
+}
