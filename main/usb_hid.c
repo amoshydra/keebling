@@ -188,8 +188,7 @@ int usb_hid_poll_interval_ms(void) { return HID_POLL_MS; }
 const char *usb_hid_product_name(void) { return s_product; }
 
 // String descriptors by index, for the diagnostics endpoint. Index 3 (serial)
-// is still the compile-time "0001", so two of these dongles report the same
-// serial number - see the README.
+// is derived from the eFuse MAC at init, so units stay distinguishable.
 const char *usb_hid_string(int index) {
     if (index < 0 || index >= (int)(sizeof(s_strings) / sizeof(s_strings[0]))) return "";
     if (index == 0) return "";             // language ID is not a C string

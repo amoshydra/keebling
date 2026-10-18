@@ -39,6 +39,7 @@ bool display_qr(const char *text);
 #define LCD_LINE_WIFI    5
 #define LCD_LINE_RESET   6    // why the chip last reset (diagnostic)
 #define LCD_LINE_CODE    7    // the device code stays visible at all times
+#define LCD_LINE_BOOT_HINT 8  // "tap BOOT: view"
 #define LCD_LINE_PANIC   9
 
 // Backlight on/off.

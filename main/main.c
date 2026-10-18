@@ -15,18 +15,38 @@
 #include "security.h"
 #include "wifi_manager.h"
 #include "log_buffer.h"
+#include "settings.h"
 
 static const char *TAG = "main";
 
 #define PIN_BOOT_BUTTON  GPIO_NUM_0
 
-// How long the pairing QR stays up before the status screen takes over.
+// How long the pairing QR stays up at boot before the status screen takes over.
 #define QR_SHOW_MS          20000
 
-// Holding BOOT this long wipes the stored network and restarts into AP mode.
-// It has to be a runtime gesture: holding BOOT during power-on triggers the
-// ROM's download mode instead of booting this firmware.
-#define BOOT_LONG_PRESS_MS   3000
+// Button gestures. Escalating holds, so the destructive action needs the
+// longest press and cannot be triggered by fumbling. A release between TAP and
+// PANIC does nothing at all, which is deliberate.
+//
+//   tap  (<600 ms)      cycle display mode
+//   hold (>=3 s)        release all held inputs (panic)
+//   hold (>=10 s)       forget the saved network and restart
+#define BOOT_TAP_MS           600
+#define BOOT_PANIC_MS        3000
+#define BOOT_FORGET_MS      10000
+
+// What the LCD is showing. Cycled with a tap. Kept in RAM only: a reboot
+// always brings the QR back, so cycling into "off" can never strand you.
+typedef enum {
+    DISP_QR = 0,
+    DISP_STATUS,
+    DISP_OFF,
+    // Future: DISP_CUSTOM - a settings-supplied image or text.
+    DISP_MODE_COUNT
+} display_mode_t;
+
+static display_mode_t s_mode = DISP_QR;
+static bool s_boot_qr_pending = true;   // the automatic QR -> status demotion
 
 // Shown on the LCD so a reboot can be diagnosed without a serial console.
 static const char *reset_reason_str(esp_reset_reason_t r) {
@@ -51,10 +71,7 @@ static const char *reset_reason_str(esp_reset_reason_t r) {
     }
 }
 
-static bool s_qr_showing;
-
-// Right-hand panel beside the QR, or the full status screen.
-// x = 80 leaves 13 characters before the edge.
+// Right-hand panel beside the QR. x = 80 leaves 13 characters.
 static void draw_qr_panel(void) {
     display_text_line(80, 0, "ESP32 Remote");
     if (wifi_mgr_state() == WIFI_MGR_STA) {
@@ -72,7 +89,6 @@ static void draw_qr_panel(void) {
 
 static void show_status_screen(void) {
     display_clear();
-    s_qr_showing = false;
 
     display_status(LCD_LINE_TITLE, "ESP32 Remote");
 
@@ -96,20 +112,66 @@ static void show_status_screen(void) {
 
     snprintf(l, sizeof(l), "code: %s", security_code());
     display_status(LCD_LINE_CODE, l);
+
+    display_status(LCD_LINE_BOOT_HINT, "tap BOOT: view");
+}
+
+// Draw whatever the current mode calls for.
+static void apply_display_mode(void) {
+    switch (s_mode) {
+    case DISP_QR:
+        display_clear();
+        if (!display_qr(security_code())) {
+            s_mode = DISP_STATUS;      // payload would not fit: fall back
+            apply_display_mode();
+            return;
+        }
+        display_backlight(255);
+        draw_qr_panel();
+        break;
+
+    case DISP_STATUS:
+        display_backlight(255);
+        show_status_screen();
+        break;
+
+    case DISP_OFF:
+        display_backlight(0);
+        break;
+
+    default:
+        break;
+    }
+}
+
+// Re-draw after something changed, but never light up a deliberately dark
+// screen.
+static void refresh_display(void) {
+    if (s_mode == DISP_OFF) return;
+    apply_display_mode();
+}
+
+static void cycle_display_mode(void) {
+    s_mode = (display_mode_t)((s_mode + 1) % DISP_MODE_COUNT);
+    ESP_LOGI(TAG, "display mode -> %d", (int)s_mode);
+    if (s_mode == DISP_OFF) {
+        display_backlight(0);
+    } else {
+        apply_display_mode();
+    }
 }
 
 // ---------------------------------------------------------------------------
 // Housekeeping task
 //
 // - releases held keys if the browser stops heartbeating (input_state.c)
-// - BOOT short press = panic (release everything)
-// - BOOT long press  = wipe network credentials and restart in AP mode
-// - times the pairing QR out to the status screen
+// - BOOT tap / 3 s / 10 s as described above
+// - demotes the boot QR to the status screen
 // - keeps the LCD in step with the WiFi state
 // ---------------------------------------------------------------------------
 static void tick_task(void *arg) {
     bool prev_pressed = false;
-    bool reverted = false;
+    bool panic_done = false;
     int64_t pressed_at = 0;
     const int64_t start = esp_timer_get_time();
 
@@ -122,49 +184,72 @@ static void tick_task(void *arg) {
 
         const int64_t now = esp_timer_get_time();
 
-        // Pairing QR -> status screen
-        if (s_qr_showing && (now - start) > (int64_t)QR_SHOW_MS * 1000) {
-            reverted = true;
-            show_status_screen();
+        // Boot QR demotes itself once, unless a tap already moved on.
+        if (s_boot_qr_pending && (now - start) > (int64_t)QR_SHOW_MS * 1000) {
+            s_boot_qr_pending = false;
+            if (s_mode == DISP_QR) {
+                s_mode = DISP_STATUS;
+                apply_display_mode();
+            }
         }
 
-        // Keep the screen in step with the network
+        // WiFi state changes keep the screen current.
         wifi_mgr_state_t st = wifi_mgr_state();
         int clients = wifi_mgr_client_count();
         if (st != last_state || clients != last_clients) {
             last_state = st;
             last_clients = clients;
-            if (s_qr_showing) draw_qr_panel();
-            else show_status_screen();
+            refresh_display();
         }
-
-        // An AP client leaving must not leave a key held.
         if (clients < last_clients) input_release_all();
 
-        // BOOT button
+        // ---- BOOT button ----
         bool pressed = (gpio_get_level(PIN_BOOT_BUTTON) == 0);
-        if (pressed && !prev_pressed) {
-            ESP_LOGW(TAG, "PANIC: BOOT pressed - releasing all inputs");
-            input_release_all();
-            pressed_at = now;
-        }
-        if (pressed && pressed_at &&
-            (now - pressed_at) > (int64_t)BOOT_LONG_PRESS_MS * 1000) {
-            ESP_LOGW(TAG, "BOOT held %d ms - forgetting network credentials",
-                     BOOT_LONG_PRESS_MS);
-            wifi_mgr_forget();
-            display_clear();
-            display_status(LCD_LINE_TITLE, "network forgotten");
-            display_status(LCD_LINE_NET, "restarting in AP");
-            vTaskDelay(pdMS_TO_TICKS(800));
-            esp_restart();
-        }
-        if (!pressed) pressed_at = 0;
-        prev_pressed = pressed;
 
+        if (pressed && !prev_pressed) {
+            pressed_at = now;
+            panic_done = false;
+        }
+
+        if (pressed && pressed_at) {
+            const int64_t held = now - pressed_at;
+
+            if (held >= (int64_t)BOOT_FORGET_MS * 1000) {
+                ESP_LOGW(TAG, "BOOT held %d ms - forgetting network",
+                         BOOT_FORGET_MS);
+                wifi_mgr_forget();
+                display_backlight(255);
+                display_clear();
+                display_status(LCD_LINE_TITLE, "network forgotten");
+                display_status(LCD_LINE_NET, "restarting in AP");
+                vTaskDelay(pdMS_TO_TICKS(800));
+                esp_restart();
+            }
+
+            if (!panic_done && held >= (int64_t)BOOT_PANIC_MS * 1000) {
+                ESP_LOGW(TAG, "BOOT held %d ms - releasing all inputs",
+                         BOOT_PANIC_MS);
+                input_release_all();
+                panic_done = true;
+                if (s_mode != DISP_OFF) display_status(LCD_LINE_PANIC, "! released !");
+            }
+        }
+
+        // Decide on release, so a press shorter than the panic threshold is a
+        // tap and anything in between does nothing.
+        if (!pressed && prev_pressed) {
+            const int64_t held = now - pressed_at;
+            if (!panic_done && held < (int64_t)BOOT_TAP_MS * 1000) {
+                s_boot_qr_pending = false;
+                cycle_display_mode();
+            }
+            if (!panic_done && s_mode != DISP_OFF) display_status(LCD_LINE_PANIC, "");
+            pressed_at = 0;
+        }
+
+        prev_pressed = pressed;
         vTaskDelay(pdMS_TO_TICKS(20));
     }
-    (void)reverted;
 }
 
 void app_main(void) {
@@ -176,14 +261,13 @@ void app_main(void) {
     display_status(LCD_LINE_TITLE, "ESP32 Remote");
 
     // A boot loop is otherwise a black box: the LCD keeps its content across a
-    // reset, so showing the reason and a step marker means the last thing on
-    // screen before the reset identifies where it died.
+    // reset, so the reason and the last step identify where it died.
     char rline[32];
     snprintf(rline, sizeof(rline), "reset: %s", reset_reason_str(esp_reset_reason()));
     display_status(LCD_LINE_RESET, rline);
     display_status(LCD_LINE_HINT,  "step 1 nvs");
 
-    // --- NVS is required by security, WiFi credentials and WiFi itself ---
+    // --- NVS is required by security, settings, WiFi credentials and WiFi ---
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
@@ -191,11 +275,12 @@ void app_main(void) {
     }
     ESP_ERROR_CHECK(ret);
 
-    // --- Device code: loaded from NVS, or generated on first boot ---
+    // --- Device code + settings (both live in NVS) ---
     display_status(LCD_LINE_HINT, "step 2 security");
     security_init();
+    settings_init();   // before usb_hid_init: the USB name comes from here
 
-    // --- BOOT button as panic switch / network reset ---
+    // --- BOOT button ---
     gpio_config_t boot_cfg = {
         .pin_bit_mask = (1ULL << PIN_BOOT_BUTTON),
         .mode = GPIO_MODE_INPUT,
@@ -229,15 +314,10 @@ void app_main(void) {
     }
 
     // --- Pairing screen ---
-    if (display_qr(security_code())) {
-        s_qr_showing = true;
-        draw_qr_panel();
-    } else {
-        show_status_screen();
-    }
+    s_mode = DISP_QR;
+    apply_display_mode();
 
     xTaskCreate(tick_task, "tick", 4096, NULL, 5, NULL);
 
-    ESP_LOGI(TAG, "Ready. The code on the LCD is both the SoftAP password and "
-                  "the web UI token. Open the device's address in a browser.");
+    ESP_LOGI(TAG, "Ready. Tap BOOT to cycle QR / status / off.");
 }
