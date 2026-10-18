@@ -188,7 +188,10 @@ try {
 
   const targets = [
     { page: 'control', url: `${base}/?token=${CODE}`, reloadFirst: true, metrics: PHONE },
-    { page: 'settings', url: `${base}/settings.html?token=${CODE}`, metrics: DESKTOP },
+    // A stored stylesheet before the settings pass, so its reset-all button has
+    // something to undo.
+    { page: 'settings', url: `${base}/settings.html?token=${CODE}`, metrics: DESKTOP,
+      storedUiFiles: { 'style.css': '/* uploaded before the settings pass */' } },
     { page: 'macros', url: `${base}/macros.html?token=${CODE}`, metrics: PHONE,
       seedStorage: { 'esp32remote.macros': MACROS_STORED } },
     // Before the migration pass: that one clears localStorage, which takes the
@@ -199,9 +202,16 @@ try {
     { page: 'macros-migrate', url: `${base}/macros.html?token=${CODE}`, metrics: PHONE,
       clearStorage: true,
       legacyMacros: [{ name: 'Left Behind', steps: '{ENTER}' }] },
+    // The upload page, with nothing stored: every file is the built-in one.
+    { page: 'ui', url: `${base}/ui.html?token=${CODE}`, metrics: PHONE },
+    // ...and the recovery story: index.html has been replaced by a broken
+    // upload, so the upload page has to still work and be able to reset it.
+    { page: 'ui-broken', url: `${base}/ui.html?token=${CODE}`, metrics: PHONE,
+      storedUiFiles: { 'index.html': '<html><body>broken' } },
   ];
 
   let settingsSaves = [];
+  let uiResetsAtSettings = 0;   // /ui/reset calls when the settings pass ended
   let migrationMark = 0;        // device.saved length when the migration pass began
 
   for (const target of targets) {
@@ -219,6 +229,9 @@ try {
     if (target.legacyMacros) {
       device.settings = { usb_product: 'Legacy Product', macros: target.legacyMacros };
       migrationMark = device.saved.length;
+    }
+    for (const [name, body] of Object.entries(target.storedUiFiles || {})) {
+      device.uiFiles.set(name, Buffer.from(body));
     }
 
     await page.goto(target.url);
@@ -251,7 +264,10 @@ try {
     }
 
     // What the settings page itself saved, before later pages add their own.
-    if (target.page === 'settings') settingsSaves = device.saved.slice();
+    if (target.page === 'settings') {
+      settingsSaves = device.saved.slice();
+      uiResetsAtSettings = device.uiResets;
+    }
   }
 
   // The stubbed device records what it was sent, which is how we check the
@@ -298,6 +314,35 @@ try {
   report(afterMigration.some((p) => !('macros' in p) && p.usb_product === 'Legacy Product'),
     'the migrated macro list was taken off the device',
     `payloads after the migration pass: ${JSON.stringify(afterMigration)}`);
+
+  // The settings page's reset-all button has to have reached the device, not
+  // just updated its own note.
+  report(uiResetsAtSettings > 0, 'the settings page reset reached the device',
+    'the stub saw no /ui/reset call during the settings pass');
+
+  // The fallback rule itself, straight at the stub: a stored file wins, and an
+  // empty one counts as absent so it cannot shadow a working page. This is the
+  // contract ui_fs_open() implements on the device; the page tests above only
+  // exercise the happy path.
+  const embeddedCss = readFileSync(path.join(HERE, '..', '..', 'main', 'web', 'style.css'), 'utf8');
+
+  device.uiFiles.set('style.css', Buffer.alloc(0));
+  const emptyServed = await (await fetch(`${base}/style.css`)).text();
+  report(emptyServed === embeddedCss,
+    'a zero-length stored file falls back to the embedded copy',
+    `served ${emptyServed.length} bytes; the embedded copy is ${embeddedCss.length}`);
+  const emptyList = await (await fetch(`${base}/ui/files?token=${CODE}`)).json();
+  const emptyEntry = emptyList.files.find((f) => f.name === 'style.css');
+  report(emptyEntry.stored === false,
+    'a zero-length file is reported as not stored',
+    `the listing says ${JSON.stringify(emptyEntry)}`);
+
+  device.uiFiles.set('style.css', Buffer.from('/* stored by the runner */'));
+  const storedServed = await (await fetch(`${base}/style.css`)).text();
+  report(storedServed === '/* stored by the runner */',
+    'a stored file is served in preference to the embedded copy',
+    `served "${storedServed.slice(0, 40)}"`);
+  device.uiFiles.delete('style.css');
 
   console.log(`\n${passed} passed, ${failures} failed`);
 } finally {

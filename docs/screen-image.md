@@ -59,6 +59,12 @@ shared with the macros.
 
 ## If the LittleFS web-UI plan lands
 
+**It landed.** The partition is `ui`, 320 KB, appended after the app at
+`0x410000` so nvs does not move; uploads go through `POST /ui/upload`, whose
+whitelist is the asset table in `web_server.c`. A `screen.img` would therefore
+need an entry there — with a zero-length embedded placeholder, since a
+zero-length file is treated as absent — or the whitelist extended.
+
 Store `screen.img` as a file there and drop the raw partition. Sizing becomes
 the UI plus the image: `wc -c main/web/*` is 92,708 B today, so 256 KB is
 comfortable for both. Marginal cost versus the raw partition is ~30 lines of

@@ -16,6 +16,7 @@
 #include "wifi_manager.h"
 #include "log_buffer.h"
 #include "settings.h"
+#include "ui_fs.h"
 
 static const char *TAG = "main";
 
@@ -365,8 +366,15 @@ void app_main(void) {
         display_status(LCD_LINE_NET, "wifi init FAILED");
     }
 
+    // --- Uploaded UI files (LittleFS). Non-fatal: without it the embedded
+    //     copies are served and uploads report that there is no filesystem ---
+    display_status(LCD_LINE_HINT, "step 6 ui files");
+    if (ui_fs_init() != ESP_OK) {
+        display_status(LCD_LINE_NET, "ui fs FAILED");
+    }
+
     // --- HTTP + WebSocket, which also starts WiFi ---
-    display_status(LCD_LINE_HINT, "step 6 http");
+    display_status(LCD_LINE_HINT, "step 7 http");
     if (web_server_start() != ESP_OK) {
         ESP_LOGE(TAG, "web_server_start failed - HID still available");
         display_status(LCD_LINE_NET, "WiFi FAILED");

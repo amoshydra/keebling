@@ -38,7 +38,8 @@ So a test failure means the shipped code is wrong, not a reimplementation of it.
 Pages are visited at the size they are used at: the control and macro pages at a
 phone viewport, the settings page and a second control-page pass at a desktop
 one. The test groups are named `control`, `settings`, `macros`,
-`control-desktop` and `control` (again, for the phone-layout assertions).
+`control-desktop`, `ui`, `ui-broken` and `control` (again, for the phone-layout
+assertions).
 
 ## What is covered
 
@@ -80,6 +81,25 @@ one. The test groups are named `control`, `settings`, `macros`,
   limit, and deletes on a second tap
 - the added macro actually reached the device (checked server-side)
 
+**UI files page**
+- the page lists every UI file and says whether it is the built-in copy or an
+  upload, with `index.html` listed once
+- an upload is served in its place, and resetting brings the built-in copy back
+  (both checked by fetching the file, not by reading the page)
+- a name outside the whitelist — `../style.css`, `evil.txt`, `style.css.tmp` —
+  is refused with 400 by upload and reset alike, and changes nothing
+- an over-size file is refused with 413 by the endpoint, and the page refuses
+  it before sending anything; an empty file is refused at both layers too
+- the `/ui/*` endpoints answer 403 without the access code
+- the settings page's reset-all reaches the device and restores the embedded
+  file (checked server-side)
+- with a broken `index.html` stored, `ui.html` still loads from the firmware
+  and can reset it
+
+The runner also checks the fallback rule itself, straight at the stub: a stored
+file is served in preference to the embedded one, and a **zero-length** stored
+file counts as absent, so an empty or interrupted upload cannot shadow a
+working page.
 
 ## Keeping it honest
 

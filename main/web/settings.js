@@ -163,6 +163,32 @@ document.getElementById('wifiForget').addEventListener('click', async () => {
   setTimeout(() => location.reload(), 8000);
 });
 
+// ---------------------------------------------------------------- web UI files
+// The upload page handles individual files; this is the way back when the
+// uploaded page that would do the resetting is itself broken.
+document.getElementById('uiOpen').addEventListener('click', () => {
+  location.href = 'ui.html';
+});
+
+document.getElementById('uiResetAll').addEventListener('click', async () => {
+  const note = document.getElementById('uiNote');
+  if (!confirm('Delete every uploaded UI file and go back to the built-in copies?')) return;
+  note.className = 'note';
+  note.textContent = 'resetting…';
+  try {
+    const r = await apiPost('/ui/reset?all=1');
+    if (!r.ok) {
+      note.className = 'note warn';
+      note.textContent = `Reset failed (HTTP ${r.status}).`;
+      return;
+    }
+    note.textContent = 'Uploaded files deleted; the built-in pages are back.';
+  } catch (_) {
+    note.className = 'note warn';
+    note.textContent = 'Reset failed — the device is unreachable.';
+  }
+});
+
 // ---------------------------------------------------------------- logs
 document.getElementById('logsLoad').addEventListener('click', async () => {
   const panel = document.getElementById('logs');

@@ -9,6 +9,7 @@ idf_component_register(
         "settings.c"
         "wifi_manager.c"
         "log_buffer.c"
+        "ui_fs.c"
         "bsp/esp_lcd_st7735.c"
         "qr/qrcodegen.c"
     INCLUDE_DIRS "."
@@ -22,4 +23,6 @@ idf_component_register(
         "web/macros.html"
         "web/macros.js"
         "web/macro.js"
+        "web/ui.html"
+        "web/ui.js"
 )

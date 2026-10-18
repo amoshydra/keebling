@@ -3,3 +3,6 @@
 nvs,      data, nvs,     0x9000,  0x6000,
 phy_init, data, phy,     0xf000,  0x1000,
 factory,  app,  factory, 0x10000, 4M,
+# Web UI files, written over WiFi. Appended after the app (which ends at
+# 0x410000) so no existing partition moves and NVS survives the change.
+ui,       data, littlefs, 0x410000, 320K,

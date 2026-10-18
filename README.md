@@ -45,7 +45,8 @@ idf.py build
 idf.py -p /dev/ttyACM0 flash
 ```
 
-`esp_tinyusb` is fetched from the ESP Component Registry on the first build.
+`esp_tinyusb` and `joltwallet/littlefs` are fetched from the ESP Component
+Registry on the first build.
 
 If `flash` fails to connect: hold **BOOT**, start the flash, release BOOT once
 "Connecting…" appears.
@@ -106,6 +107,25 @@ A list left on the device by an older build is adopted on first load and then
 removed from the device, so a list that was there yesterday does not look lost.
 If the browser refuses the write — private mode, or a full origin — the page
 says so instead of showing a list that was never stored.
+
+### Updating the web UI
+
+The pages are built into the firmware, but the device also carries a 320 KB
+LittleFS partition that is served in preference to them. ⚙ Settings →
+**Open UI files page** lists every file, says whether the device is serving the
+built-in copy or one that was uploaded, and offers **Upload…** and **Reset to
+built-in** per file. Changes are live on the next page load — no restart and no
+reflash, which matters because flashing this board means BOOT, replug and a
+power cycle.
+
+An upload replaces the built-in copy until it is reset, so a bad edit can break
+a page — but not permanently. A missing, empty or half-written file is never
+served: the built-in copy is the floor, and an upload is renamed into place
+only once it is complete. If an uploaded `index.html` breaks the control page,
+`ui.html` still comes from the firmware and can reset it; if `ui.html` itself
+is broken, Settings' **Reset UI to built-in** deletes every upload at once.
+Uploads are token-gated, limited to the UI's own file names and capped at 64 KB
+per file.
 
 ### Button gestures
 
@@ -252,10 +272,13 @@ are snapshots of current state, so this maps 1:1 onto the hardware with no queue
 
 | Endpoint | Auth | Purpose |
 |---|---|---|
-| `GET /`, `/settings.html`, `/macros.html`, `/style.css`, `/*.js` | none | the web UI (embedded assets) |
+| `GET /`, `/settings.html`, `/macros.html`, `/ui.html`, `/style.css`, `/*.js` | none | the web UI — a stored copy when one was uploaded, the embedded asset otherwise |
 | `GET /auth?token=` | token | validate a code (204 or 403) |
 | `GET /ws?token=` | token | control channel |
 | `POST /bootloader?token=` | token | reboot into USB download mode |
+| `GET /ui/files?token=` | token | each UI file: stored on the device or still embedded |
+| `POST /ui/upload?token=&name=` | token | store one UI file (raw body, 64 KB cap) |
+| `POST /ui/reset?token=&name=` (or `&all=1`) | token | delete stored copies, restoring the embedded ones |
 
 ## Layout
 
@@ -264,12 +287,15 @@ main/
   main.c          app entry, BOOT panic button, watchdog task
   usb_hid.c/.h    TinyUSB composite HID (keyboard + mouse + consumer)
   input_state.c/.h held-state tracking, mutex, release/watchdog logic
-  web_server.c/.h SoftAP + HTTP + WebSocket, embedded assets
+  web_server.c/.h SoftAP + HTTP + WebSocket, embedded assets, upload endpoints
+  ui_fs.c/.h      LittleFS mount and file plumbing for the uploaded UI
   display.c/.h    ST7735 driver, 80×160 framebuffer, 5×7 font (non-fatal)
   web/            the UI, embedded into the binary: index.html + pad.js for the
-                  control page, settings.html + settings.js, and macros.html +
-                  macros.js + macro.js (the macro DSL)
-partitions.csv    4 MB app partition
+                  control page, settings.html + settings.js, macros.html +
+                  macros.js + macro.js (the macro DSL), and ui.html + ui.js
+                  (uploading the rest over WiFi)
+partitions.csv    4 MB app partition, then a 320 KB LittleFS partition for
+                  uploaded UI files — appended so nvs and the app do not move
 sdkconfig.defaults
 test/web/         browser-driven UI tests, no npm dependencies
 docs/             design notes for work not yet done

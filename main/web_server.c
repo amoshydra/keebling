@@ -18,8 +18,10 @@
 #include "wifi_manager.h"
 #include "log_buffer.h"
 #include "settings.h"
+#include "ui_fs.h"
 
 #include <ctype.h>
+#include <stdio.h>
 #include <string.h>
 
 static const char *TAG = "web_server";
@@ -48,27 +50,38 @@ extern const unsigned char macros_js_start[]     asm("_binary_macros_js_start");
 extern const unsigned char macros_js_end[]       asm("_binary_macros_js_end");
 extern const unsigned char macro_js_start[]      asm("_binary_macro_js_start");
 extern const unsigned char macro_js_end[]        asm("_binary_macro_js_end");
+extern const unsigned char ui_html_start[]       asm("_binary_ui_html_start");
+extern const unsigned char ui_html_end[]         asm("_binary_ui_html_end");
+extern const unsigned char ui_js_start[]         asm("_binary_ui_js_start");
+extern const unsigned char ui_js_end[]           asm("_binary_ui_js_end");
 
 typedef struct {
-    const char *path;
+    const char *path;     // request URI
     const char *type;
+    const char *file;     // name on the filesystem, and the upload whitelist
     const unsigned char *start;
     const unsigned char *end;
 } static_asset_t;
 
 // Static assets are public: they hold no secrets, and the page has to load
 // before the user can supply the access code.
+//
+// This table is also the upload whitelist: only names that appear here can be
+// written, so a request cannot invent a path. "/" and "/index.html" are the
+// same file; the listing endpoint collapses them.
 static const static_asset_t s_assets[] = {
-    { "/",              "text/html",              index_html_start,    index_html_end },
-    { "/index.html",    "text/html",              index_html_start,    index_html_end },
-    { "/style.css",     "text/css",               style_css_start,     style_css_end },
-    { "/common.js",     "application/javascript", common_js_start,     common_js_end },
-    { "/pad.js",        "application/javascript", pad_js_start,        pad_js_end },
-    { "/settings.html", "text/html",              settings_html_start, settings_html_end },
-    { "/settings.js",   "application/javascript", settings_js_start,   settings_js_end },
-    { "/macros.html",   "text/html",              macros_html_start,   macros_html_end },
-    { "/macros.js",     "application/javascript", macros_js_start,     macros_js_end },
-    { "/macro.js",      "application/javascript", macro_js_start,      macro_js_end },
+    { "/",              "text/html",              "index.html",    index_html_start,    index_html_end },
+    { "/index.html",    "text/html",              "index.html",    index_html_start,    index_html_end },
+    { "/style.css",     "text/css",               "style.css",     style_css_start,     style_css_end },
+    { "/common.js",     "application/javascript", "common.js",     common_js_start,     common_js_end },
+    { "/pad.js",        "application/javascript", "pad.js",        pad_js_start,        pad_js_end },
+    { "/settings.html", "text/html",              "settings.html", settings_html_start, settings_html_end },
+    { "/settings.js",   "application/javascript", "settings.js",   settings_js_start,   settings_js_end },
+    { "/macros.html",   "text/html",              "macros.html",   macros_html_start,   macros_html_end },
+    { "/macros.js",     "application/javascript", "macros.js",     macros_js_start,     macros_js_end },
+    { "/macro.js",      "application/javascript", "macro.js",      macro_js_start,      macro_js_end },
+    { "/ui.html",       "text/html",              "ui.html",       ui_html_start,       ui_html_end },
+    { "/ui.js",         "application/javascript", "ui.js",         ui_js_start,         ui_js_end },
 };
 #define ASSET_COUNT (sizeof(s_assets) / sizeof(s_assets[0]))
 
@@ -454,16 +467,283 @@ static esp_err_t restart_handler(httpd_req_t *req) {
 // HTTP handlers
 // ---------------------------------------------------------------------------
 
+// Streams the stored copy of `name`, or returns ESP_ERR_NOT_FOUND when there
+// is nothing servable and the embedded copy should be used instead. Sending
+// in chunks keeps a 16 KB macros.js off the stack.
+static esp_err_t serve_stored(httpd_req_t *req, const char *name) {
+    FILE *f = ui_fs_open(name);
+    if (!f) return ESP_ERR_NOT_FOUND;
+
+    char buf[512];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), f)) > 0) {
+        if (httpd_resp_send_chunk(req, buf, n) != ESP_OK) {
+            fclose(f);
+            return ESP_FAIL;   // headers are out; the embedded copy is no help
+        }
+    }
+    bool truncated = ferror(f);
+    fclose(f);
+    if (truncated) return ESP_FAIL;
+
+    return httpd_resp_send_chunk(req, NULL, 0);
+}
+
 static esp_err_t static_handler(httpd_req_t *req) {
     for (size_t i = 0; i < ASSET_COUNT; i++) {
-        if (strcmp(req->uri, s_assets[i].path) == 0) {
-            httpd_resp_set_type(req, s_assets[i].type);
-            return httpd_resp_send(req, (const char *)s_assets[i].start,
-                                   s_assets[i].end - s_assets[i].start);
-        }
+        if (strcmp(req->uri, s_assets[i].path) != 0) continue;
+
+        httpd_resp_set_type(req, s_assets[i].type);
+
+        // An uploaded file wins over the built-in one. An empty file counts as
+        // absent (ui_fs_open), so a zero-length upload cannot shadow a working
+        // page - the embedded copy is always the floor.
+        if (serve_stored(req, s_assets[i].file) == ESP_OK) return ESP_OK;
+
+        return httpd_resp_send(req, (const char *)s_assets[i].start,
+                               s_assets[i].end - s_assets[i].start);
     }
     httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "not found");
     return ESP_FAIL;
+}
+
+// ---------------------------------------------------------------------------
+// UI files on the device
+//
+// The front end can be updated over WiFi instead of by flashing: uploads land
+// on the LittleFS partition and are served in preference to the embedded
+// copies. Deleting one brings the built-in copy back, so the worst an upload
+// can do is need a reset - never a reflash.
+// ---------------------------------------------------------------------------
+
+// Largest single file the device will store. The biggest today is macros.js at
+// around 17 KB, and the planned screen image is about 32 KB; 64 KB leaves room
+// for both without letting one request exhaust the 320 KB partition.
+#define UI_UPLOAD_MAX (64 * 1024)
+
+// Longest name in the asset table is "settings.html".
+#define UI_NAME_MAX 32
+
+// The asset table is the whitelist. A name that is not one of the UI's own
+// files has no entry, so there is nothing to build a path from.
+static const static_asset_t *asset_by_file(const char *name) {
+    for (size_t i = 0; i < ASSET_COUNT; i++) {
+        if (strcmp(s_assets[i].file, name) == 0) return &s_assets[i];
+    }
+    return NULL;
+}
+
+// What the upload page needs to show: every file, whether the device is
+// serving a stored copy, and how much room is left.
+static esp_err_t ui_files_handler(httpd_req_t *req) {
+    if (!req_authorised(req)) {
+        httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "forbidden");
+        return ESP_FAIL;
+    }
+
+    cJSON *root = cJSON_CreateObject();
+    cJSON *arr = root ? cJSON_AddArrayToObject(root, "files") : NULL;
+    if (!root || !arr) {
+        cJSON_Delete(root);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "oom");
+        return ESP_FAIL;
+    }
+
+    cJSON_AddBoolToObject(root, "mounted", ui_fs_mounted());
+    cJSON_AddNumberToObject(root, "max_size", UI_UPLOAD_MAX);
+
+    size_t total = 0, used = 0;
+    if (ui_fs_usage(&total, &used) == ESP_OK) {
+        cJSON_AddNumberToObject(root, "total", (double)total);
+        cJSON_AddNumberToObject(root, "used", (double)used);
+    }
+
+    for (size_t i = 0; i < ASSET_COUNT; i++) {
+        bool listed = false;
+        for (size_t j = 0; j < i && !listed; j++) {
+            listed = strcmp(s_assets[j].file, s_assets[i].file) == 0;
+        }
+        if (listed) continue;   // "/" and "/index.html" are one file
+
+        const size_t stored = ui_fs_size(s_assets[i].file);
+        cJSON *o = cJSON_CreateObject();
+        if (!o) continue;
+        cJSON_AddStringToObject(o, "name", s_assets[i].file);
+        cJSON_AddBoolToObject(o, "stored", stored > 0);
+        cJSON_AddNumberToObject(o, "size", (double)stored);
+        cJSON_AddNumberToObject(o, "embedded",
+                                (double)(s_assets[i].end - s_assets[i].start));
+        cJSON_AddItemToArray(arr, o);
+    }
+
+    char *json = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (!json) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "oom");
+        return ESP_FAIL;
+    }
+    httpd_resp_set_type(req, "application/json");
+    esp_err_t r = httpd_resp_sendstr(req, json);
+    free(json);
+    return r;
+}
+
+// Read and discard up to `limit` bytes of the request body. Only used before
+// refusing an upload: a client that is still sending can then read the error
+// response instead of seeing the connection drop mid-transfer. Best effort,
+// and the caller closes the connection afterwards.
+static void drain_body(httpd_req_t *req, size_t limit) {
+    char buf[512];
+    size_t left = req->content_len < limit ? req->content_len : limit;
+    while (left > 0) {
+        int r = httpd_req_recv(req, buf, left < sizeof(buf) ? left : sizeof(buf));
+        if (r <= 0) break;   // includes a timeout: answer now
+        left -= r;
+    }
+}
+
+// POST /ui/upload?name=<whitelisted> with the raw file as the body. The body is
+// streamed to the filesystem in 512-byte chunks and only renamed into place
+// once complete, so nothing here needs the whole file in RAM and a transfer
+// that dies halfway leaves the previous copy serving.
+static esp_err_t ui_upload_handler(httpd_req_t *req) {
+    if (req->method != HTTP_POST) {
+        httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "POST only");
+        return ESP_FAIL;
+    }
+    if (!req_authorised(req)) {
+        httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "forbidden");
+        return ESP_FAIL;
+    }
+
+    char query[160];
+    char name[UI_NAME_MAX];
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK ||
+        httpd_query_key_value(query, "name", name, sizeof(name)) != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "name required");
+        return ESP_FAIL;
+    }
+    if (!asset_by_file(name)) {
+        ESP_LOGW(TAG, "upload of '%s' refused: not a UI file", name);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "unknown file");
+        return ESP_FAIL;
+    }
+
+    // Checked before a byte is read. Truncating instead would leave a broken
+    // page with no hint of what happened.
+    if (req->content_len == 0) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "empty body");
+        return ESP_FAIL;
+    }
+    if (req->content_len > UI_UPLOAD_MAX) {
+        ESP_LOGW(TAG, "%s: %u bytes over the %u byte cap",
+                 name, (unsigned)req->content_len, (unsigned)UI_UPLOAD_MAX);
+        // No 413 in httpd_err_code_t. Nothing is stored, and the body is only
+        // read up to the cap so the client can see this answer; anything
+        // beyond that is left unread, so the connection is closed after it.
+        drain_body(req, UI_UPLOAD_MAX);
+        httpd_resp_set_status(req, "413 Content Too Large");
+        httpd_resp_set_type(req, "text/plain");
+        httpd_resp_send(req, "file too large", HTTPD_RESP_USE_STRLEN);
+        return ESP_FAIL;
+    }
+
+    if (!ui_fs_mounted()) {
+        // Refused like the over-size case, and the body is drained for the same
+        // reason: the client should see this answer, not a dropped socket.
+        drain_body(req, UI_UPLOAD_MAX);
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        httpd_resp_set_type(req, "text/plain");
+        httpd_resp_send(req, "no filesystem", HTTPD_RESP_USE_STRLEN);
+        return ESP_FAIL;
+    }
+
+    FILE *f = ui_fs_open_temp(name);
+    if (!f) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "cannot write");
+        return ESP_FAIL;
+    }
+
+    char buf[512];
+    size_t left = req->content_len;
+    int stalls = 0;
+    while (left > 0) {
+        int r = httpd_req_recv(req, buf, left < sizeof(buf) ? left : sizeof(buf));
+        if (r == HTTPD_SOCK_ERR_TIMEOUT) {
+            // A slow phone is not a failure, but a vanished one must not hold
+            // the socket open for ever.
+            if (++stalls > 6) break;
+            continue;
+        }
+        if (r <= 0) break;
+        stalls = 0;
+        if (fwrite(buf, 1, r, f) != (size_t)r) break;
+        left -= r;
+    }
+
+    if (left != 0) {
+        ui_fs_discard(name, f);
+        ESP_LOGW(TAG, "%s: upload interrupted, %u bytes missing", name, (unsigned)left);
+        httpd_resp_send_err(req, HTTPD_408_REQ_TIMEOUT, "upload interrupted");
+        return ESP_FAIL;
+    }
+    if (ui_fs_commit(name, f) != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "cannot store");
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "%s: %u bytes stored on the device", name, (unsigned)req->content_len);
+    httpd_resp_set_type(req, "text/plain");
+    return httpd_resp_sendstr(req, "stored");
+}
+
+// POST /ui/reset?name=<whitelisted> deletes one stored file; ?all=1 deletes
+// every one. Either way the embedded copy is served again. Reset-all exists so
+// a broken ui.html - the page that would otherwise do the resetting - is
+// recoverable from the settings page.
+static esp_err_t ui_reset_handler(httpd_req_t *req) {
+    if (req->method != HTTP_POST) {
+        httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "POST only");
+        return ESP_FAIL;
+    }
+    if (!req_authorised(req)) {
+        httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "forbidden");
+        return ESP_FAIL;
+    }
+
+    char query[160];
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "name or all required");
+        return ESP_FAIL;
+    }
+
+    char all[4];
+    if (httpd_query_key_value(query, "all", all, sizeof(all)) == ESP_OK) {
+        for (size_t i = 0; i < ASSET_COUNT; i++) {
+            if (ui_fs_remove(s_assets[i].file) != ESP_OK) {
+                httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "cannot remove");
+                return ESP_FAIL;
+            }
+        }
+        ESP_LOGI(TAG, "all uploaded UI files removed");
+        httpd_resp_set_type(req, "text/plain");
+        return httpd_resp_sendstr(req, "reset");
+    }
+
+    char name[UI_NAME_MAX];
+    if (httpd_query_key_value(query, "name", name, sizeof(name)) != ESP_OK ||
+        !asset_by_file(name)) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "unknown file");
+        return ESP_FAIL;
+    }
+    if (ui_fs_remove(name) != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "cannot remove");
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "%s: stored copy removed, embedded copy is back", name);
+    httpd_resp_set_type(req, "text/plain");
+    return httpd_resp_sendstr(req, "reset");
 }
 
 // Lets the web UI check a code before opening the WebSocket, so a wrong code
@@ -635,7 +915,7 @@ esp_err_t web_server_start(void) {
     // The default is 8 and we register more than that; at 15 the 9th
     // registration returned ESP_ERR_HTTPD_HANDLERS_FULL and, through
     // ESP_ERROR_CHECK, became a boot loop. Sized with headroom now: the asset
-    // table and the endpoint table together come to 21, so a new page or two
+    // table and the endpoint table together come to 26, so a new page or two
     // fits without touching this. Each slot is a few tens of bytes.
     cfg.max_uri_handlers = 32;
 
@@ -668,6 +948,9 @@ esp_err_t web_server_start(void) {
         { .uri = "/settings",   .method = HTTP_GET,  .handler = settings_get_handler },
         { .uri = "/settings",   .method = HTTP_POST, .handler = settings_post_handler },
         { .uri = "/restart",    .method = HTTP_POST, .handler = restart_handler },
+        { .uri = "/ui/files",   .method = HTTP_GET,  .handler = ui_files_handler },
+        { .uri = "/ui/upload",  .method = HTTP_POST, .handler = ui_upload_handler },
+        { .uri = "/ui/reset",   .method = HTTP_POST, .handler = ui_reset_handler },
     };
 
     // Log rather than ESP_ERROR_CHECK: a full handler table should degrade to

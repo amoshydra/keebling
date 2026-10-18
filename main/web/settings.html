@@ -169,6 +169,19 @@
   </section>
 
   <section>
+    <h2>Web UI files</h2>
+    <p class="note">The pages are built into the firmware, but files uploaded to
+      the device's filesystem are served instead. Open the UI files page to
+      upload one or reset it to the built-in copy. This button deletes every
+      uploaded file at once — the way back if an uploaded page is broken.</p>
+    <div class="row" style="margin:10px 0">
+      <button id="uiOpen">Open UI files page</button>
+      <button id="uiResetAll" class="danger">Reset UI to built-in</button>
+    </div>
+    <p class="note" id="uiNote"></p>
+  </section>
+
+  <section>
     <h2>Diagnostics</h2>
     <div class="row" style="margin-bottom:10px">
       <button id="logsLoad">Load logs</button>
