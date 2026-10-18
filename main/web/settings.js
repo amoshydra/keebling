@@ -54,7 +54,7 @@ function wireForm() {
         const out = document.getElementById(b.id + 'Val');
         if (out) out.textContent = labelFor(b, el.value);
       }
-      saveNote.textContent = 'unsaved changes';
+      scheduleSave();
     };
     el.addEventListener('input', handler);
     el.addEventListener('change', handler);
@@ -62,19 +62,38 @@ function wireForm() {
 }
 
 // ---------------------------------------------------------------- save
-document.getElementById('save').addEventListener('click', async () => {
+// Fields update the local model as you type; the device is told separately.
+// Originally that meant a Save button you could forget before restarting, so
+// saving is now automatic and debounced, and "Restart device" saves first.
+let saveTimer = null;
+
+async function doSave() {
+  clearTimeout(saveTimer);
+  saveTimer = null;
   saveNote.textContent = 'saving…';
   try {
     const r = await saveSettingsToDevice();
-    saveNote.textContent = r.ok ? 'saved' : `save failed (${r.status})`;
+    saveNote.textContent = r.ok ? 'saved to device' : `save failed (HTTP ${r.status})`;
+    return r.ok;
   } catch (_) {
     saveNote.textContent = 'save failed — device unreachable';
+    return false;
   }
-});
+}
+
+function scheduleSave() {
+  saveNote.textContent = 'saving…';
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(doSave, 700);
+}
+
+document.getElementById('save').addEventListener('click', doSave);
 
 document.getElementById('restart').addEventListener('click', async () => {
-  if (!confirm('Restart the device?\n\nAny unsaved settings will be lost. ' +
+  if (!confirm('Restart the device?\n\nSettings will be saved first. ' +
                'It will be unreachable for a few seconds.')) return;
+  const ok = await doSave();
+  if (!ok) { alert('Could not save settings — restarting anyway.'); }
   try { await apiPost('/restart'); } catch (_) {}
   setStatus('restarting…', 'warn');
   setTimeout(() => location.reload(), 6000);
@@ -274,9 +293,11 @@ document.getElementById('hidLoad').addEventListener('click', async () => {
     if (!r.ok) { sum.textContent = `Failed (HTTP ${r.status}).`; return; }
 
     const d = await r.json();
-    sum.innerHTML = `<b>${d.product}</b> · interface endpoint 0x81, `
-      + `${d.endpoint_size}-byte reports, polled every ${d.poll_interval_ms} ms · `
-      + `report descriptor ${d.report_descriptor_len} bytes`;
+    // These come from the device, so they are the effective values - not what
+    // the form currently says.
+    sum.innerHTML = `<b>${d.product}</b> by ${d.manufacturer} · serial <code>${d.serial}</code><br>`
+      + `interface “${d.interface}” · endpoint 0x81, ${d.endpoint_size}-byte reports, `
+      + `polled every ${d.poll_interval_ms} ms · report descriptor ${d.report_descriptor_len} bytes`;
     raw.textContent = d.report_descriptor_hex;
 
     const bytes = d.report_descriptor_hex.trim().split(/\s+/).map((h) => parseInt(h, 16));
