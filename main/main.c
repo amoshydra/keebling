@@ -21,32 +21,33 @@ static const char *TAG = "main";
 
 #define PIN_BOOT_BUTTON  GPIO_NUM_0
 
-// How long the pairing QR stays up at boot before the status screen takes over.
-#define QR_SHOW_MS          20000
-
 // Button gestures. Escalating holds, so the destructive action needs the
 // longest press and cannot be triggered by fumbling. A release between TAP and
 // PANIC does nothing at all, which is deliberate.
 //
-//   tap  (<600 ms)      cycle display mode
+//   tap  (<600 ms)      wake the screen, or cycle the display mode if awake
 //   hold (>=3 s)        release all held inputs (panic)
 //   hold (>=10 s)       forget the saved network and restart
 #define BOOT_TAP_MS           600
 #define BOOT_PANIC_MS        3000
 #define BOOT_FORGET_MS      10000
 
-// What the LCD is showing. Cycled with a tap. Kept in RAM only: a reboot
-// always brings the QR back, so cycling into "off" can never strand you.
+// What the LCD is showing. Cycled with a tap.
+//
+// Sleep is orthogonal to the mode: after the timeout the screen blanks and
+// the backlight goes off, and a press wakes it showing the same mode. A
+// separate "off" mode would now be redundant with sleeping.
 typedef enum {
     DISP_QR = 0,
     DISP_STATUS,
-    DISP_OFF,
     // Future: DISP_CUSTOM - a settings-supplied image or text.
     DISP_MODE_COUNT
 } display_mode_t;
 
 static display_mode_t s_mode = DISP_QR;
-static bool s_boot_qr_pending = true;   // the automatic QR -> status demotion
+static bool s_sleeping = false;
+static int64_t s_last_press_us = 0;
+static int s_screen_timeout_s = 10;   // 0 disables sleeping
 
 // Shown on the LCD so a reboot can be diagnosed without a serial console.
 static const char *reset_reason_str(esp_reset_reason_t r) {
@@ -135,30 +136,39 @@ static void apply_display_mode(void) {
         show_status_screen();
         break;
 
-    case DISP_OFF:
-        display_backlight(0);
-        break;
-
     default:
         break;
     }
 }
 
-// Re-draw after something changed, but never light up a deliberately dark
-// screen.
+// Blank the pixels as well as the backlight. The panel keeps its memory and
+// the case is transparent, so darkening the backlight alone still leaves the
+// text readable in ambient light.
+static void sleep_display(void) {
+    if (s_sleeping) return;
+    s_sleeping = true;
+    display_clear();
+    display_backlight(0);
+    ESP_LOGI(TAG, "screen asleep");
+}
+
+static void wake_display(void) {
+    if (!s_sleeping) return;
+    s_sleeping = false;
+    ESP_LOGI(TAG, "screen awake");
+    apply_display_mode();
+}
+
+// Re-draw after something changed, but never light up a sleeping screen.
 static void refresh_display(void) {
-    if (s_mode == DISP_OFF) return;
+    if (s_sleeping) return;
     apply_display_mode();
 }
 
 static void cycle_display_mode(void) {
     s_mode = (display_mode_t)((s_mode + 1) % DISP_MODE_COUNT);
     ESP_LOGI(TAG, "display mode -> %d", (int)s_mode);
-    if (s_mode == DISP_OFF) {
-        display_backlight(0);
-    } else {
-        apply_display_mode();
-    }
+    apply_display_mode();
 }
 
 // ---------------------------------------------------------------------------
@@ -173,7 +183,6 @@ static void tick_task(void *arg) {
     bool prev_pressed = false;
     bool panic_done = false;
     int64_t pressed_at = 0;
-    const int64_t start = esp_timer_get_time();
 
     wifi_mgr_state_t last_state = (wifi_mgr_state_t)-1;
     int last_clients = 0;
@@ -184,13 +193,18 @@ static void tick_task(void *arg) {
 
         const int64_t now = esp_timer_get_time();
 
-        // Boot QR demotes itself once, unless a tap already moved on.
-        if (s_boot_qr_pending && (now - start) > (int64_t)QR_SHOW_MS * 1000) {
-            s_boot_qr_pending = false;
-            if (s_mode == DISP_QR) {
-                s_mode = DISP_STATUS;
-                apply_display_mode();
-            }
+        // Re-read the timeout periodically so the setting applies without a
+        // restart (about every 2 s at this tick rate).
+        static int timeout_poll = 0;
+        if (++timeout_poll >= 100) {
+            timeout_poll = 0;
+            s_screen_timeout_s = settings_get_int("screen_timeout_s", 10);
+        }
+
+        // Screen timeout. Any button press resets it.
+        if (!s_sleeping && s_screen_timeout_s > 0 &&
+            (now - s_last_press_us) > (int64_t)s_screen_timeout_s * 1000000) {
+            sleep_display();
         }
 
         // WiFi state changes keep the screen current.
@@ -231,8 +245,7 @@ static void tick_task(void *arg) {
                          BOOT_PANIC_MS);
                 input_release_all();
                 panic_done = true;
-                if (s_mode != DISP_OFF) display_status(LCD_LINE_PANIC, "! released !");
-            }
+                if (!s_sleeping) display_status(LCD_LINE_PANIC, "! released !");            }
         }
 
         // Decide on release, so a press shorter than the panic threshold is a
@@ -240,10 +253,14 @@ static void tick_task(void *arg) {
         if (!pressed && prev_pressed) {
             const int64_t held = now - pressed_at;
             if (!panic_done && held < (int64_t)BOOT_TAP_MS * 1000) {
-                s_boot_qr_pending = false;
-                cycle_display_mode();
+                if (s_sleeping) {
+                    wake_display();          // waking does not change the mode
+                } else {
+                    cycle_display_mode();
+                }
+                s_last_press_us = now;
             }
-            if (!panic_done && s_mode != DISP_OFF) display_status(LCD_LINE_PANIC, "");
+            if (!panic_done && !s_sleeping) display_status(LCD_LINE_PANIC, "");
             pressed_at = 0;
         }
 

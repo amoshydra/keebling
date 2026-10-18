@@ -20,7 +20,7 @@ login screen, in recovery mode, in a BIOS, on a machine whose own keyboard is br
 | Board | LILYGO T-Dongle-S3 (ESP32-S3, 16 MB flash, no PSRAM) |
 | Display | ST7735 160×80 landscape, SPI |
 | Connector | USB Type-A male — needs a USB-A→USB-C adapter for a USB-C-only host |
-| Panic button | BOOT (GPIO0) — hold to release every held key/button |
+| Button | BOOT (GPIO0) — see *Button gestures* |
 
 ### T-Dongle-S3 hardware notes
 
@@ -74,6 +74,26 @@ The code is remembered in `localStorage`, so step 4 is a one-time thing per
 browser. You can also skip it entirely with
 `http://<address>/?token=YOURCODE`.
 
+### Button gestures
+
+The single BOOT button carries four things, separated by how long it is held
+so the destructive action needs the longest press and cannot be triggered by
+fumbling:
+
+| Gesture | Action |
+|---|---|
+| tap (<600 ms) | wake the screen, or cycle the display mode if already awake |
+| hold 3 s | release every held key and button (the panic) |
+| hold 10 s | forget the saved network and restart in AP mode |
+
+A release between 600 ms and 3 s deliberately does nothing.
+
+The display sleeps after the configured idle time (10 s by default, settable
+in settings, 0 disables). Sleeping blanks the pixels as well as the backlight —
+the panel keeps its memory and the case is transparent, so darkening the
+backlight alone would still leave the text readable in ambient light. Waking
+does not change the mode.
+
 ### Network states
 
 | State | SoftAP | STA |
@@ -87,10 +107,10 @@ Provisioned devices start **STA-only** — never switching modes afterwards.
 connection and can cost the DHCP lease, so turning the SoftAP off "once the
 link is healthy" is not safe. The SoftAP is only ever brought *up*.
 
-**If you get locked out:** hold **BOOT for 3 seconds** while powered. That
-wipes the saved network and restarts in AP mode. (Short press is the panic
-button — release all held keys.) It can't be a power-on gesture, because
-holding BOOT during power-on triggers the ROM's download mode instead.
+**If you get locked out:** hold **BOOT for 10 seconds** while powered. That
+wipes the saved network and restarts in AP mode. It can't be a power-on
+gesture, because holding BOOT during power-on triggers the ROM's download
+mode instead.
 
 ### Choosing a network
 
@@ -163,7 +183,7 @@ there are three independent release paths:
 1. **Heartbeat watchdog.** The browser pings every second. If the pings stop for
    5 s *while something is held down*, the firmware releases everything.
 2. **Disconnect release.** When the WiFi client disconnects, everything is released.
-3. **Physical panic button.** Hold BOOT (GPIO0) at any time.
+3. **Physical panic button.** Hold BOOT (GPIO0) for 3 seconds.
 
 Mouse movement never arms the watchdog — only keys, modifiers and mouse buttons do,
 so an idle-but-connected session is never interrupted.

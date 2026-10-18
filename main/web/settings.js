@@ -16,6 +16,7 @@ const BINDINGS = [
   { id: 'usbProduct',      key: 'usb_product',      kind: 'text' },
   { id: 'usbManufacturer', key: 'usb_manufacturer', kind: 'text' },
   { id: 'usbInterface',    key: 'usb_interface',    kind: 'text' },
+  { id: 'screenTimeout',   key: 'screen_timeout_s', kind: 'range', suffix: ' s', dp: 0 },
   { id: 'mouseGain',    key: 'mouse_gain',    kind: 'range', suffix: 'x', dp: 1 },
   { id: 'scrollScale',  key: 'scroll_scale',  kind: 'range', suffix: 'x', dp: 1 },
   { id: 'scrollInvert', key: 'scroll_invert', kind: 'bool' },
@@ -25,6 +26,7 @@ const BINDINGS = [
 ];
 
 function labelFor(b, value) {
+  if (b.key === 'screen_timeout_s' && Number(value) === 0) return 'never';
   return Number(value).toFixed(b.dp) + (b.suffix || '');
 }
 

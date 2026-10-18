@@ -53,6 +53,17 @@
   </section>
 
   <section>
+    <h2>Screen</h2>
+    <div class="field">
+      <label>Sleep after <input type="range" id="screenTimeout" min="0" max="120" step="5">
+        <span id="screenTimeoutVal"></span></label>
+      <p class="note">Seconds without a button press before the display blanks.
+        Set to 0 to leave it on. A tap of BOOT wakes it; a further tap cycles
+        between the pairing QR and the status screen.</p>
+    </div>
+  </section>
+
+  <section>
     <h2>Touchpad</h2>
     <div class="field">
       <label>Pointer gain <input type="range" id="mouseGain" min="0.2" max="4" step="0.1">

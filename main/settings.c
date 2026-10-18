@@ -75,3 +75,16 @@ bool settings_get_str(const char *key, char *out, size_t outlen) {
     cJSON_Delete(doc);
     return ok;
 }
+
+int settings_get_int(const char *key, int def) {
+    cJSON *doc = cJSON_Parse(s_json);
+    if (!doc) return def;
+
+    const cJSON *v = cJSON_GetObjectItem(doc, key);
+    int out = def;
+    if (cJSON_IsNumber(v)) out = v->valueint;
+
+    cJSON_Delete(doc);
+    return out;
+}
+

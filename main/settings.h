@@ -25,5 +25,8 @@ esp_err_t settings_set_json(const char *json);
 // Read one string field. Returns false when absent or empty.
 bool settings_get_str(const char *key, char *out, size_t outlen);
 
-// Longest USB product name the string descriptor machinery can carry.
+// Read one numeric field, for settings the firmware acts on.
+int settings_get_int(const char *key, int def);
+
+// Longest USB string descriptor the driver can carry (MAX_DESC_BUF_SIZE - 1).
 #define SETTINGS_HID_NAME_MAX 31
