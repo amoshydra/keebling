@@ -52,11 +52,58 @@ If `flash` fails to connect: hold **BOOT**, start the flash, release BOOT once
 
 ## Use
 
-1. Flash, unplug, plug back in **without** holding BOOT.
-2. Join WiFi **`esp-remote`** (password `esp32remote`).
-3. Open **http://192.168.4.1**.
-4. Click/tap the pad to capture the pointer. Your mouse now drives the host.
+1. Flash, then power-cycle the board (see *Reflashing*).
+2. Read the **12-character code** off the LCD.
+3. Join WiFi **`esp-remote`** — the **code is the WiFi password**.
+4. Open **http://192.168.4.1** and enter the same code when prompted.
+5. Click/tap the pad to capture the pointer. Your mouse now drives the host.
    **Esc** releases.
+
+The code is remembered in `localStorage`, so step 4 is a one-time thing per
+browser. You can also skip it entirely with
+`http://192.168.4.1/?token=YOURCODE`.
+
+## Security model
+
+The web UI can type arbitrary text into the host, so it is treated as a
+privileged console — equivalent to a root shell on the machine the dongle is
+plugged into. Four independent defences:
+
+**1. Per-device random code.** Generated from the hardware RNG on first boot,
+stored in NVS, and shown on the LCD. 12 characters of Crockford Base32 = 60
+bits. It is deliberately *not* derived from the MAC address: the MAC is
+broadcast in every beacon, so a MAC-derived secret would be public.
+
+The same code is the SoftAP password and the API token, so there is exactly one
+secret to manage. Nothing derived from it appears in the SSID.
+
+**2. Token on every privileged endpoint.** `/auth`, `/ws` and `/bootloader`
+all require `?token=`. Static assets (`/`, `/app.js`) are public — they contain
+no secrets, and the page has to load before you can supply the code. The token
+is scrubbed from the URL bar after load so it does not linger in history.
+
+**3. Origin validation.** Any page you visit can attempt
+`new WebSocket('ws://192.168.1.50/ws')` against a LAN address. Requests whose
+`Origin` is not one of our own hostnames are rejected, which blocks
+cross-site WebSocket hijacking.
+
+**4. Host header validation.** Defeats DNS rebinding, where an attacker points
+`evil.com` at our IP and then talks to `ws://evil.com/ws`. The `Host` header
+still says `evil.com`, so it fails.
+
+**Per-source throttling** (8 misses → 30s) is defence in depth only. It is keyed
+on the client address rather than globally, so nobody can lock you out of your
+own device by spamming bad tokens. The real protection is the 60 bits.
+
+### Not covered
+
+- **No transport encryption.** Plain HTTP/WS. On the SoftAP this is protected by
+  WPA2, and the token is the WiFi password anyway. Once you enable STA mode on a
+  shared network this becomes the weakest link — that is what Phase 3 HTTPS is for.
+- **Physical access wins.** Anyone who can read the LCD, or pull the flash, has
+  the code. That is the intended boundary.
+- **NVS is unencrypted**, so a stored WiFi password is readable by anyone who
+  takes the dongle apart.
 
 ## Safety model
 
@@ -83,8 +130,22 @@ Browser → ESP, binary WebSocket frames:
 | `0x04` | — | heartbeat |
 | `0x05` | — | release everything |
 
+Connect to `ws://<host>/ws?token=<code>`. The WebSocket handshake is rejected
+unless the `Host` and `Origin` headers match one of the device's own names and
+the token matches.
+
 `0x02` sends the **complete set of currently-held keys**, not a delta. USB HID reports
 are snapshots of current state, so this maps 1:1 onto the hardware with no queue.
+
+### Endpoints
+
+| Endpoint | Auth | Purpose |
+|---|---|---|
+| `GET /` | none | web UI |
+| `GET /app.js` | none | web UI script |
+| `GET /auth?token=` | token | validate a code (204 or 403) |
+| `GET /ws?token=` | token | control channel |
+| `POST /bootloader?token=` | token | reboot into USB download mode |
 
 ## Layout
 
@@ -102,15 +163,31 @@ sdkconfig.defaults
 
 ## Reflashing
 
-Normally: **hold BOOT → plug in → `idf.py flash`**. Reset over the ESP32-S3's
-USB-JTAG-Serial peripheral always lands the chip in download mode, so a plain
-power cycle is what actually boots the app afterwards.
+**The supported path is BOOT + replug:**
 
-To avoid the BOOT-button dance entirely, the running firmware exposes a
-**`POST /bootloader`** endpoint (and a *Bootloader* button in the web UI) which
-sets `RTC_CNTL_FORCE_DOWNLOAD_BOOT` and resets. The flag lives in an RTC
-register, so it survives a soft reset but not a power cycle — unplugging is
-always a safe escape.
+**hold BOOT → plug in → `idf.py flash` → then power-cycle.**
+
+The power cycle is not optional: resetting over the ESP32-S3's USB-Serial-JTAG
+peripheral always lands the chip in download mode, so a clean power-up is what
+actually boots the app again.
+
+### About the `/bootloader` button
+
+There is a `POST /bootloader` endpoint and a *Bootloader* button in the web UI.
+Do not rely on it. What it does is reachable, but not useful with esptool:
+
+- It sets `RTC_CNTL_FORCE_DOWNLOAD_BOOT` and triggers `RTC_CNTL_SW_SYS_RST`.
+  `esp_restart()` cannot be used here: it configures RTC WDT stage0 as
+  RESET_SYSTEM with a 1 s timeout and calls `wdt_hal_set_flashboot_en(true)`.
+  That bit exists to keep the watchdog running even when software disables it,
+  and nothing feeds it in download mode — so the chip enters download mode and
+  is bounced back into the app about a second later.
+- The mode it reaches is the ROM's **USB-OTG DFU** path (`303a:0009`, DFU
+  interface class `0xFE/0x01/0x01`) — **not** the USB-Serial-JTAG download mode
+  (`303a:1001`) that esptool speaks. Flashing from there needs `dfu-util`, i.e.
+  `idf.py dfu` + `idf.py dfu-flash`, plus a udev rule for permissions.
+
+Recovery from it is a plain power cycle.
 
 ## Reference
 
@@ -118,11 +195,16 @@ always a safe escape.
 |---|---|
 | Build | `idf.py build` |
 | Flash (download mode) | `idf.py -p /dev/ttyACM0 flash` |
-| Reboot to download mode | `curl -X POST http://192.168.4.1/bootloader` |
-| Recover from bad firmware | unplug → hold BOOT → replug → flash |
+| Enter download mode | unplug → hold BOOT → replug |
+| Boot the app | unplug → replug (no BOOT) |
+| Force a new device code | `esptool erase_region 0x9000 0x6000` |
 
 ## Notes / limitations
 
+- **The LCD is the trust boundary.** It shows the device code permanently, so
+  anyone who can read the screen can control the host. Line 6 shows the last
+  reset reason (`power-on`, `software`, `wdt`, `brownout`) as a debugging aid
+  since there is no usable serial console.
 - **macOS pointer acceleration** applies to any relative HID mouse. The gain slider
   compensates; for exact 1:1 you'd need a helper app posting `CGEvent`s.
 - **No serial console over USB** while TinyUSB owns the port. `ESP_LOGI` output goes

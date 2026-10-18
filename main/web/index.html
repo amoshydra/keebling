@@ -37,9 +37,36 @@
   .k.mod { background:#3a3a3a; }
   .k.active { background:#1976d2; }
   .k.arrow { flex:0 0 42px; }
+
+  /* --- access gate --- */
+  #gate { position:fixed; inset:0; background:#0d0d0d; display:flex;
+          align-items:center; justify-content:center; z-index:50; padding:20px; }
+  #gate.hidden { display:none; }
+  .gate-box { background:#1a1a1a; padding:24px; border-radius:12px; max-width:340px;
+              width:100%; text-align:center; }
+  .gate-box h1 { font-size:18px; margin-bottom:6px; }
+  .gate-box p { font-size:13px; color:#999; margin-bottom:16px; line-height:1.5; }
+  .gate-box input { width:100%; padding:12px; font-size:20px; text-align:center;
+                    letter-spacing:3px; font-family:ui-monospace,monospace;
+                    background:#0d0d0d; color:#eee; border:1px solid #333;
+                    border-radius:8px; margin-bottom:12px; text-transform:uppercase; }
+  .gate-box button { width:100%; }
+  .gate-box .err { color:#ff6b6b; font-size:13px; margin:10px 0 0; min-height:16px; }
 </style>
 </head>
 <body>
+
+<div id="gate">
+  <div class="gate-box">
+    <h1>ESP32 Remote</h1>
+    <p>Enter the 12-character code shown on the device's LCD.</p>
+    <input id="tokenInput" type="text" inputmode="latin" autocomplete="off"
+           autocapitalize="characters" spellcheck="false" maxlength="20" placeholder="XXXXXXXXXXXX">
+    <button id="tokenGo" class="primary">Connect</button>
+    <p class="err" id="gateErr"></p>
+  </div>
+</div>
+
 <div id="status">
   <span><span class="dot off" id="dot"></span><span id="statusText">disconnected</span></span>
   <span id="mode">tap pad to capture</span>
@@ -55,7 +82,8 @@
   <button id="bMid">M</button>
   <button id="bKbd">⌨ Keyboard</button>
   <button id="bRelease" class="danger">Release All</button>
-  <button id="bBoot" title="Reboot into USB firmware download mode (for reflashing)">⤓ Bootloader</button>
+  <button id="bForget" title="Forget the saved code and ask for it again">Forget code</button>
+  <button id="bBoot" title="Reboot into the ROM USB download mode (DFU)">⤓ Bootloader</button>
   <label>Gain <input type="range" id="gain" min="0.2" max="4" step="0.1" value="1">
     <span id="gainVal">1.0×</span></label>
 </div>

@@ -32,6 +32,64 @@ const MOD = {
   ControlRight:0x10,ShiftRight:0x20,  AltRight:0x40,  MetaRight:0x80,
 };
 
+// ---------------------------------------------------------------- access code
+// The device serves static assets publicly but gates every privileged
+// endpoint on this code, which is shown on the device's LCD.
+const TOKEN_KEY = 'esp32remote.token';
+const TOKEN_LEN = 12;
+let token = '';
+
+function normalizeToken(t) {
+  return String(t || '').replace(/[-\s]/g, '').toUpperCase();
+}
+
+// localStorage access can throw rather than merely fail: Safari in private
+// browsing rejects writes, and some browsers block storage entirely. Every
+// access goes through these so a storage problem cannot break the gate.
+function storeToken(t) {
+  try { localStorage.setItem(TOKEN_KEY, t); } catch (_) {}
+}
+
+function clearStoredToken() {
+  try { localStorage.removeItem(TOKEN_KEY); } catch (_) {}
+}
+
+function loadStoredToken() {
+  try {
+    const saved = normalizeToken(localStorage.getItem(TOKEN_KEY));
+    if (saved.length !== TOKEN_LEN) return false;
+    token = saved;
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+// ?token=... wins (it is an explicit hand-off, e.g. a QR code later on),
+// otherwise fall back to whatever we saved last time.
+function loadToken() {
+  const url = new URL(location.href);
+  const fromUrl = url.searchParams.get('token');
+  if (fromUrl) {
+    token = normalizeToken(fromUrl);
+    storeToken(token);
+    // Scrub it from the address bar so it does not linger in history.
+    url.searchParams.delete('token');
+    history.replaceState({}, '', url.pathname + (url.search || '') + url.hash);
+    return token.length === TOKEN_LEN;
+  }
+  return loadStoredToken();
+}
+
+async function verifyToken(t) {
+  try {
+    const r = await fetch(`/auth?token=${encodeURIComponent(t)}`, { cache: 'no-store' });
+    return r.ok;
+  } catch (_) {
+    return false;
+  }
+}
+
 // ---------------------------------------------------------------- state
 const held = new Set();     // event.code strings currently down
 let buttons = 0;            // mouse button bitmask
@@ -45,10 +103,13 @@ const pad = document.getElementById('pad');
 const dot = document.getElementById('dot');
 const statusText = document.getElementById('statusText');
 const modeEl = document.getElementById('mode');
+const gate = document.getElementById('gate');
+const gateErr = document.getElementById('gateErr');
+const tokenInput = document.getElementById('tokenInput');
 
 // ---------------------------------------------------------------- transport
 function connect() {
-  ws = new WebSocket(`ws://${location.host}/ws`);
+  ws = new WebSocket(`ws://${location.host}/ws?token=${encodeURIComponent(token)}`);
   ws.binaryType = 'arraybuffer';
   ws.onopen = () => {
     wsReady = true;
@@ -229,14 +290,41 @@ for (const row of ROWS) {
 document.getElementById('bKbd').addEventListener('click', () => kbd.classList.toggle('show'));
 document.getElementById('bRelease').addEventListener('click', releaseAll);
 
-// Reboot into USB download mode so the board can be reflashed without the
-// BOOT button. Recovering from an accidental press is just a power cycle.
+// Reboot into the chip's ROM download mode.
+//
+// The handler sends its HTTP response BEFORE resetting, so a normal reply is
+// expected even on success - do not treat "HTTP 200" as failure (an earlier
+// version of this code did, and reported a working reboot as a broken one).
+// The real signal is that the connection then drops and the device
+// re-enumerates as the ROM: 303a:0009 with a DFU interface.
 document.getElementById('bBoot').addEventListener('click', async () => {
-  if (!confirm('Reboot the ESP into USB download mode?\n\n' +
-               'It will stop working as a keyboard/mouse until you unplug ' +
-               'and plug it back in.')) return;
+  if (!confirm('Reboot the ESP into ROM download mode?\n\n' +
+               'It stops working as a keyboard/mouse until you unplug and ' +
+               'plug it back in.')) return;
+
   releaseAll();
-  try { await fetch('/bootloader', { method: 'POST' }); } catch (_) {}
+  setStatus('requesting download mode…', 'warn');
+
+  try {
+    const r = await fetch(`/bootloader?token=${encodeURIComponent(token)}`,
+                          { method: 'POST', cache: 'no-store' });
+    if (r.status === 403) {
+      setStatus('rejected', 'off');
+      alert('The device refused the request (403).\n\n' +
+            'Press "Forget code" and re-enter it.');
+      return;
+    }
+    // Any other status means the request was accepted and the reboot is in
+    // flight; the socket usually drops before the promise settles.
+    setStatus('rebooting to download mode', 'warn');
+    alert('Reboot requested.\n\n' +
+          'The device should now enumerate as a DFU device (303a:0009).\n' +
+          'Power-cycle it to return to normal.');
+  } catch (_) {
+    setStatus('rebooting to download mode', 'warn');
+    alert('Reboot requested - the connection dropped, which is expected.\n\n' +
+          'Power-cycle the device to return to normal.');
+  }
 });
 
 // ---------------------------------------------------------------- misc
@@ -253,4 +341,61 @@ setInterval(() => send(new Uint8Array([0x04])), 1000);
 window.addEventListener('pagehide', releaseAll);
 window.addEventListener('beforeunload', releaseAll);
 
-connect();
+// ---------------------------------------------------------------- access gate
+function showGate(msg) {
+  gate.classList.remove('hidden');
+  gateErr.textContent = msg || '';
+}
+
+function hideGate() {
+  gate.classList.add('hidden');
+}
+
+async function acceptToken(t) {
+  if (t.length !== TOKEN_LEN) {
+    gateErr.textContent = `The code is ${TOKEN_LEN} characters.`;
+    return;
+  }
+  gateErr.textContent = 'checking…';
+  if (!await verifyToken(t)) {
+    gateErr.textContent = 'Code rejected. Check the LCD and try again.';
+    tokenInput.select();
+    return;
+  }
+  token = t;
+  storeToken(token);
+  hideGate();
+  connect();
+}
+
+document.getElementById('tokenGo').addEventListener('click', () => {
+  acceptToken(normalizeToken(tokenInput.value));
+});
+tokenInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    acceptToken(normalizeToken(tokenInput.value));
+  }
+});
+
+document.getElementById('bForget').addEventListener('click', () => {
+  clearStoredToken();
+  token = '';
+  releaseAll();
+  if (ws) { try { ws.close(); } catch (_) {} ws = null; }
+  wsReady = false;
+  setStatus('disconnected', 'off');
+  tokenInput.value = '';
+  showGate('Code forgotten.');
+});
+
+// ---------------------------------------------------------------- boot
+(async function boot() {
+  if (!loadToken()) { showGate(); return; }
+  if (!await verifyToken(token)) {
+    showGate('Saved code was rejected. Check the LCD and try again.');
+    return;
+  }
+  hideGate();
+  connect();
+})();

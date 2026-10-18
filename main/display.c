@@ -9,6 +9,7 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
 
 #include <string.h>
 
@@ -40,6 +41,12 @@ static const char *TAG = "display";
 static esp_lcd_panel_handle_t s_panel = NULL;
 static bool s_ok = false;
 static uint8_t s_fb[FB_SIZE];   // RGB565, high byte first (matches panel byte order)
+
+// display_status() is called from the WiFi event task, the WebSocket task and
+// the tick task. The framebuffer is shared, so every mutation plus its flush
+// happens under this lock - otherwise two callers interleave their pixels and
+// the screen shows a mangled blend of both strings.
+static SemaphoreHandle_t s_fb_lock;
 
 // ---- 5x7 font, ASCII 32..127, column-major, bit0 = top row ----
 static const uint8_t FONT5X7[96][5] = {
@@ -172,6 +179,7 @@ static void backlight_init(void) {
 // ---------------------------------------------------------------------------
 
 void display_init(void) {
+    s_fb_lock = xSemaphoreCreateMutex();
     backlight_init();
 
     spi_bus_config_t bus = ST7735_PANEL_BUS_SPI_CONFIG(PIN_CLK, PIN_MOSI, FB_SIZE);
@@ -228,14 +236,24 @@ void display_backlight(uint8_t level) {
 }
 
 void display_fill(uint16_t color) {
-    if (!s_ok) return;
+    if (!s_ok || !s_fb_lock) return;
     uint8_t hi = color >> 8, lo = color & 0xFF;
+    xSemaphoreTake(s_fb_lock, portMAX_DELAY);
     for (size_t i = 0; i < sizeof(s_fb); i += 2) { s_fb[i] = hi; s_fb[i + 1] = lo; }
+    xSemaphoreGive(s_fb_lock);
+}
+
+// Caller must hold s_fb_lock.
+static void flush_locked(void) {
+    if (!s_ok || !s_panel) return;
+    esp_lcd_panel_draw_bitmap(s_panel, 0, 0, LCD_W, LCD_H, s_fb);
 }
 
 void display_flush(void) {
-    if (!s_ok || !s_panel) return;
-    esp_lcd_panel_draw_bitmap(s_panel, 0, 0, LCD_W, LCD_H, s_fb);
+    if (!s_ok || !s_fb_lock) return;
+    xSemaphoreTake(s_fb_lock, portMAX_DELAY);
+    flush_locked();
+    xSemaphoreGive(s_fb_lock);
 }
 
 static void draw_char(int x, int y, char c, uint16_t fg, uint16_t bg) {
@@ -255,15 +273,17 @@ static void draw_char(int x, int y, char c, uint16_t fg, uint16_t bg) {
 }
 
 void display_status(int line, const char *text) {
-    if (!s_ok) {
-        ESP_LOGI(TAG, "LCD[%d]: %s", line, text);
+    if (!s_ok || !s_fb_lock || !text) {
+        ESP_LOGI(TAG, "LCD[%d]: %s", line, text ? text : "");
         return;
     }
     if (line < 0) return;
     int y = line * 8;
     if (y + 8 > LCD_H) return;
 
-    // clear the whole line, then draw
+    // One lock for clear + draw + flush, so two tasks cannot interleave.
+    xSemaphoreTake(s_fb_lock, portMAX_DELAY);
+
     for (int px = 0; px < LCD_W; px++) {
         size_t off = (size_t)(y * LCD_W + px) * 2;
         s_fb[off] = 0x00; s_fb[off + 1] = 0x00;
@@ -274,5 +294,7 @@ void display_status(int line, const char *text) {
         draw_char(x, y, *text++, 0xFFFF, 0x0000);
         x += 6;
     }
-    display_flush();
+
+    flush_locked();
+    xSemaphoreGive(s_fb_lock);
 }

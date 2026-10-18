@@ -5,6 +5,7 @@ idf_component_register(
         "web_server.c"
         "display.c"
         "input_state.c"
+        "security.c"
         "bsp/esp_lcd_st7735.c"
     INCLUDE_DIRS "."
     EMBED_FILES
