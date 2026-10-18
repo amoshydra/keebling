@@ -123,6 +123,14 @@ the panel keeps its memory and the case is transparent, so darkening the
 backlight alone would still leave the text readable in ambient light. Waking
 does not change the mode.
 
+A tap cycles the pairing QR, the status screen and — when the `screen_text`
+setting is non-empty — a user text screen. That screen is 26 columns by 10
+lines of the 5x7 font: lines wrap at a space where one fits, `\n` starts a new
+line, and anything past the tenth line is dropped with the last line ending in
+`...`. Text is redrawn from the setting every time the screen is drawn, so a
+wake-up cannot show a stale copy. This screen does not carry the device code —
+another tap brings the QR back — and a device with no text set never shows it.
+
 ### Network states
 
 | State | SoftAP | STA |
@@ -259,6 +267,9 @@ main/
                   macros.js + macro.js (the macro DSL)
 partitions.csv    4 MB app partition
 sdkconfig.defaults
+test/web/         browser-driven UI tests, no npm dependencies
+docs/             design notes for work not yet done
+  screen-image.md  custom screen image: measured numbers and recommendation
 ```
 
 ## Reflashing
@@ -301,9 +312,10 @@ Recovery from it is a plain power cycle.
 
 ## Notes / limitations
 
-- **The LCD is the trust boundary.** It shows the device code permanently, so
-  anyone who can read the screen can control the host. The pairing QR shows it
-  even more legibly for the first 20 seconds. Line 6 shows the last reset
+- **The LCD is the trust boundary.** It shows the device code on the QR and
+  status screens (the custom text screen does not), so anyone who can read the
+  screen can control the host. The QR is the legible copy, and it stays up
+  until you tap BOOT. Line 6 shows the last reset
   reason (`power-on`, `software`, `wdt`, `brownout`) as a debugging aid since
   there is no usable serial console.
 - **macOS pointer acceleration** applies to any relative HID mouse. The gain slider

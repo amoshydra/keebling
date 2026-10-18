@@ -246,6 +246,12 @@ try {
   report(Number(lastSettings.type_speed) === 35, 'settings reached the device',
     `last settings-page payload: ${JSON.stringify(lastSettings)}`);
 
+  // The line break is the part a JSON round trip can eat: the field is stored
+  // as a plain string and the firmware breaks rows on it.
+  report(lastSettings.screen_text === 'Bench rig 3\nport 2',
+    'screen text reached the device with its line break',
+    `last payload carried ${JSON.stringify(lastSettings.screen_text)}`);
+
   // Likewise for a macro edit: the page's own list is not evidence that the
   // device was told.
   report(payloads.some((p) => Array.isArray(p.macros)

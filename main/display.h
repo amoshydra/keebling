@@ -30,6 +30,19 @@ void display_clear(void);
 // display_clear() to take the screen back. Returns false if it did not fit.
 bool display_qr(const char *text);
 
+// Show `text` full screen, white on black: the 5x7 font cell is 6x8 px, so the
+// panel holds 26 columns x 10 lines. Wraps at the last space that fits (a single
+// word longer than a line is broken), '\n' and '\r\n' force a break. Bytes the
+// font has no glyph for - a tab, a curly quote, any UTF-8 continuation byte -
+// render as '?', one per byte, rather than being dropped. Text past the tenth
+// line is dropped and the last drawn line ends with "..." - an unmarked cut
+// would look like the whole string. Like the QR, this owns the screen, so
+// display_status() calls are ignored until display_clear().
+//
+// Pass the whole stored string: the marker can only be honest when the renderer
+// actually sees the text that was dropped.
+void display_message(const char *text);
+
 // Shared line layout, so main.c and web_server.c agree on the screen.
 #define LCD_LINE_TITLE   0
 #define LCD_LINE_NET     1

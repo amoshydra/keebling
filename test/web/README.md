@@ -60,6 +60,8 @@ one. The test groups are named `control`, `settings`, `macros`,
 - the form binds to the device's stored values
 - edits save to the device automatically, debounced
 - a screen timeout of 0 reads as "never"
+- the custom screen text is capped at one screen, keeps its line break, and
+  reaches the device
 - the HID report descriptor decodes into a readable tree
 - the last save actually reached the device (checked server-side, not in the form)
 

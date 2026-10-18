@@ -72,6 +72,7 @@ const SETTINGS_DEFAULTS = {
   usb_product: 'ESP32 Remote',      // USB string 2 - the name the host shows
   usb_manufacturer: 'ESP32',        // USB string 1
   usb_interface: 'Keyboard Mouse Media',  // USB string 4 - cosmetic label
+  screen_text: '',                  // the third BOOT screen, drawn as 10x26
   screen_timeout_s: 10,             // blank the display after this idle time
   type_speed: 20,
   mouse_gain: 1.0,

@@ -40,14 +40,35 @@ static const char *TAG = "main";
 typedef enum {
     DISP_QR = 0,
     DISP_STATUS,
-    // Future: DISP_CUSTOM - a settings-supplied image or text.
+    DISP_CUSTOM,   // text from the screen_text setting
     DISP_MODE_COUNT
 } display_mode_t;
+
+// The setting behind DISP_CUSTOM. Nothing about it is cached: it is read back
+// from settings each time the screen is drawn, so a wake-up cannot show a stale
+// copy.
+#define SCREEN_TEXT_KEY "screen_text"
 
 static display_mode_t s_mode = DISP_QR;
 static bool s_sleeping = false;
 static int64_t s_last_press_us = 0;
 static int s_screen_timeout_s = 10;   // 0 disables sleeping
+
+// The whole stored string, because the renderer's "no room left" marker is only
+// honest if it sees the text that was dropped - and the settings blob caps the
+// string at under a kilobyte anyway.
+static char s_screen_text[SETTINGS_MAX];
+
+static bool read_screen_text(void) {
+    if (!settings_get_str(SCREEN_TEXT_KEY, s_screen_text, sizeof(s_screen_text))) return false;
+
+    // Whitespace alone draws an empty screen, which is what "not set" means
+    // here - so it counts as not set and the tap cycle skips it.
+    for (const char *p = s_screen_text; *p; p++) {
+        if ((unsigned char)*p > ' ') return true;
+    }
+    return false;
+}
 
 // Shown on the LCD so a reboot can be diagnosed without a serial console.
 static const char *reset_reason_str(esp_reset_reason_t r) {
@@ -136,6 +157,18 @@ static void apply_display_mode(void) {
         show_status_screen();
         break;
 
+    case DISP_CUSTOM:
+        // The web UI can clear the setting while this mode is up; fall back to
+        // the status screen rather than leave the user on a blank one.
+        if (!read_screen_text()) {
+            s_mode = DISP_STATUS;
+            apply_display_mode();
+            return;
+        }
+        display_backlight(255);
+        display_message(s_screen_text);
+        break;
+
     default:
         break;
     }
@@ -166,7 +199,12 @@ static void refresh_display(void) {
 }
 
 static void cycle_display_mode(void) {
-    s_mode = (display_mode_t)((s_mode + 1) % DISP_MODE_COUNT);
+    // Skip the custom screen while there is no text for it: a tap should never
+    // stop on a blank screen, and the mode exists to show what the user wrote.
+    do {
+        s_mode = (display_mode_t)((s_mode + 1) % DISP_MODE_COUNT);
+    } while (s_mode == DISP_CUSTOM && !read_screen_text());
+
     ESP_LOGI(TAG, "display mode -> %d", (int)s_mode);
     apply_display_mode();
 }
@@ -176,8 +214,8 @@ static void cycle_display_mode(void) {
 //
 // - releases held keys if the browser stops heartbeating (input_state.c)
 // - BOOT tap / 3 s / 10 s as described above
-// - demotes the boot QR to the status screen
-// - keeps the LCD in step with the WiFi state
+// - redraws the LCD when the WiFi state or the client count changes, so the
+//   status lines stay current without demoting the mode the user chose
 // ---------------------------------------------------------------------------
 static void tick_task(void *arg) {
     bool prev_pressed = false;
@@ -340,5 +378,5 @@ void app_main(void) {
 
     xTaskCreate(tick_task, "tick", 4096, NULL, 5, NULL);
 
-    ESP_LOGI(TAG, "Ready. Tap BOOT to cycle QR / status / off.");
+    ESP_LOGI(TAG, "Ready. Tap BOOT to cycle the display mode.");
 }

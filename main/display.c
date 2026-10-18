@@ -43,8 +43,9 @@ static esp_lcd_panel_handle_t s_panel = NULL;
 static bool s_ok = false;
 static uint8_t s_fb[FB_SIZE];   // RGB565, high byte first (matches panel byte order)
 
-// While the boot QR is on screen, status updates must not draw over it.
-static bool s_qr_active = false;
+// While a mode owns the whole screen - the boot QR, the user's custom text -
+// status updates must not draw over it.
+static bool s_full_screen = false;
 
 // display_status() is called from the WiFi event task, the WebSocket task and
 // the tick task. The framebuffer is shared, so every mutation plus its flush
@@ -276,12 +277,18 @@ static void draw_char(int x, int y, char c, uint16_t fg, uint16_t bg) {
     }
 }
 
+// Caller must hold s_fb_lock. Bounded variant: `len` characters are drawn from
+// `text`, which may not be NUL-terminated at that point (wrapped lines are
+// slices of a longer string).
+static void draw_text_n(int x, int y, const char *text, int len, uint16_t fg, uint16_t bg) {
+    for (int i = 0; i < len && x + 6 <= LCD_W; i++, x += 6) {
+        draw_char(x, y, text[i], fg, bg);
+    }
+}
+
 // Caller must hold s_fb_lock.
 static void draw_text(int x, int y, const char *text, uint16_t fg, uint16_t bg) {
-    while (*text && x + 6 <= LCD_W) {
-        draw_char(x, y, *text++, fg, bg);
-        x += 6;
-    }
+    draw_text_n(x, y, text, (int)strlen(text), fg, bg);
 }
 
 void display_status(int line, const char *text) {
@@ -290,7 +297,7 @@ void display_status(int line, const char *text) {
         return;
     }
     if (line < 0) return;
-    if (s_qr_active) return;          // the boot QR owns the screen
+    if (s_full_screen) return;        // a full-screen mode owns the display
     int y = line * 8;
     if (y + 8 > LCD_H) return;
 
@@ -335,8 +342,93 @@ void display_text_line(int x, int line, const char *text) {
 void display_clear(void) {
     if (!s_ok || !s_fb_lock) return;
     xSemaphoreTake(s_fb_lock, portMAX_DELAY);
-    s_qr_active = false;
+    s_full_screen = false;
     memset(s_fb, 0, sizeof(s_fb));
+    flush_locked();
+    xSemaphoreGive(s_fb_lock);
+}
+
+// ---------------------------------------------------------------------------
+// Custom text screen (settings key screen_text)
+//
+// The 5x7 font cell is 6x8 px, so one 160x80 screen holds 26 columns x 10 lines
+// and that is all the text gets. Wrapping is greedy - the words that fit stay
+// whole and only a single word longer than a line is cut - so a pasted
+// paragraph degrades into a readable screenful plus a marker rather than one
+// chopped-off line.
+// ---------------------------------------------------------------------------
+
+#define LCD_COLS  26
+#define LCD_LINES 10
+
+typedef struct {
+    const char *p;
+    uint8_t len;
+} text_line_t;
+
+// Wrap `text` into at most `max` lines, no allocation. Returns the number of
+// lines and sets *overflow when text was left over. '\n' (and '\r\n', which is
+// one break) forces a line break, so a trailing newline does not add an empty
+// line - only a genuine blank line does.
+static int wrap_text(const char *text, text_line_t *out, int max, bool *overflow) {
+    const char *p = text;
+    int n = 0;
+    *overflow = false;
+
+    while (*p) {
+        if (n == max) { *overflow = true; break; }
+
+        int len = 0;
+        while (len < LCD_COLS && p[len] && p[len] != '\n' && p[len] != '\r') len++;
+
+        // The line is full and the text continues, and the next character is
+        // not a space we could simply drop: retreat to the last space in the
+        // line so the words stay whole.
+        if (p[len] && p[len] != '\n' && p[len] != '\r' && p[len] != ' ') {
+            for (int i = len - 1; i > 0; i--) {
+                if (p[i] == ' ') { len = i; break; }
+            }
+        }
+
+        out[n].p = p;
+        out[n].len = (uint8_t)len;
+        n++;
+        p += len;
+
+        // Consume the break that ended the line, if there was one: a newline
+        // terminates a line rather than starting a new one. When the line was
+        // cut at LCD_COLS instead, *p is the next character to draw.
+        if (*p == ' ') {
+            p++;
+        } else if (*p == '\n' || *p == '\r') {
+            p += (*p == '\r' && p[1] == '\n') ? 2 : 1;
+        }
+    }
+    return n;
+}
+
+void display_message(const char *text) {
+    if (!s_ok || !s_fb_lock || !text) return;
+
+    text_line_t lines[LCD_LINES];
+    bool overflow = false;
+    int n = wrap_text(text, lines, LCD_LINES, &overflow);
+
+    // What did not fit is marked rather than silently dropped. The marker
+    // follows the last line, trimmed to make room for it.
+    if (overflow && n > 0 && lines[n - 1].len > LCD_COLS - 3) {
+        lines[n - 1].len = LCD_COLS - 3;
+    }
+
+    xSemaphoreTake(s_fb_lock, portMAX_DELAY);
+    s_full_screen = true;
+    memset(s_fb, 0, sizeof(s_fb));
+    for (int i = 0; i < n; i++) {
+        draw_text_n(0, i * 8, lines[i].p, lines[i].len, 0xFFFF, 0x0000);
+    }
+    if (overflow && n > 0) {
+        draw_text_n(lines[n - 1].len * 6, (n - 1) * 8, "...", 3, 0xFFFF, 0x0000);
+    }
     flush_locked();
     xSemaphoreGive(s_fb_lock);
 }
@@ -373,7 +465,7 @@ bool display_qr(const char *text) {
     const int oy = (LCD_H - side) / 2;
 
     xSemaphoreTake(s_fb_lock, portMAX_DELAY);
-    s_qr_active = true;
+    s_full_screen = true;
 
     // light quiet zone / background
     for (int y = 0; y < side; y++) {

@@ -55,11 +55,22 @@
   <section>
     <h2>Screen</h2>
     <div class="field">
+      <span>Custom text <small>(the third BOOT screen)</small></span>
+      <textarea id="screenText" rows="4" maxlength="260" spellcheck="false"
+                placeholder="Line one&#10;line two"></textarea>
+      <p class="note">Shown on the LCD as 10 lines of 26 characters, so one
+        screen holds 260. Enter starts a new line; longer lines wrap at a
+        space, and a word with no space in it is cut. Plain ASCII only — the
+        font has 96 glyphs, so anything else shows as “?” (one per byte: an em
+        dash is three). Anything past the tenth line is dropped and marked
+        with “...”. Leave it empty and the screen stays out of the BOOT cycle.</p>
+    </div>
+    <div class="field">
       <label>Sleep after <input type="range" id="screenTimeout" min="0" max="120" step="5">
         <span id="screenTimeoutVal"></span></label>
       <p class="note">Seconds without a button press before the display blanks.
         Set to 0 to leave it on. A tap of BOOT wakes it; a further tap cycles
-        between the pairing QR and the status screen.</p>
+        between the pairing QR, the status screen and the custom text.</p>
     </div>
   </section>
 

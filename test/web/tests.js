@@ -366,6 +366,25 @@ __webTests.push({
   },
 });
 
+__webTests.push({
+  page: 'settings',
+  name: 'custom screen text binds, is capped at one screen and keeps its newline',
+  fn: async () => {
+    const el = document.getElementById('screenText');
+    __assert(el, 'no screen text field on the settings page');
+    __assert(el.value === '', `field starts with "${el.value}"`);
+    __assert(el.maxLength === 260, `maxlength is ${el.maxLength}, not one screen`);
+
+    el.value = 'Bench rig 3\nport 2';
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    // Debounced at 700 ms like every other binding.
+    await __sleep(1400);
+    __assert(el.value === 'Bench rig 3\nport 2', 'the line break did not survive the form');
+    const note = document.getElementById('saveNote').textContent;
+    __assert(note.includes('saved'), `status line says "${note}"`);
+  },
+});
+
 // ---------------------------------------------------------------- macro DSL
 __webTests.push({
   page: 'settings',
