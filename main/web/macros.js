@@ -1,15 +1,16 @@
 // Macro page: the stored macros, the editor and the runner.
 //
-// Macros live in the device settings blob under "macros" — that is the only
-// storage the web UI has, and the firmware stores the blob verbatim without
-// reading this key, so none of this is a firmware change. The blob is capped:
-// main/settings.h sets SETTINGS_MAX 1024 and main/web_server.c drops a body of
-// 1024 bytes or more, so the page refuses to save while what it would send is
-// over that and says by how much. A macro is a line of text, so that budget
-// goes a long way: the worked example is about 20 bytes plus its name.
+// Macros live in this browser, under localStorage — not on the device. They
+// started in the device's settings blob, which capped them at 1023 bytes
+// shared with every other setting and would have been wiped by a partition
+// change; a browser has megabytes and survives that. The cost is that they are
+// per-browser: a second phone does not see them, and clearing site data takes
+// them with it. The page says so rather than letting it be discovered.
+//
+// A list left on the device by an older build is adopted on first load, in
+// loadMacros() below.
 
-// The device takes a settings body of at most SETTINGS_MAX - 1 bytes.
-const BLOB_MAX = 1023;
+const STORE_KEY = 'esp32remote.macros';
 
 const dot = document.getElementById('dot');
 const statusText = document.getElementById('statusText');
@@ -86,22 +87,81 @@ window.addEventListener('pagehide', () => send(new Uint8Array([0x05])));
 window.addEventListener('beforeunload', () => send(new Uint8Array([0x05])));
 
 // ---------------------------------------------------------------- model
-// The blob is written by the settings page too, so anything unexpected in it
-// is dropped here rather than trusted.
 let macros = [];
 let confirmDelete = null;      // index waiting for a second tap on Delete
 
-function loadMacros() {
-  const raw = appSettings.macros;
-  const list = Array.isArray(raw) ? raw : [];
-  macros = list
+// Anything unexpected in the stored list is dropped rather than trusted: an
+// older build, or a hand-edited localStorage, can have put it there.
+function sanitizeMacros(list) {
+  const raw = Array.isArray(list) ? list : [];
+  const kept = raw
     .filter((m) => m && typeof m === 'object')
     .map((m) => ({ name: String(m.name || ''), steps: String(m.steps || '') }))
     .filter((m) => m.name || m.steps);
+  return { kept, dropped: raw.length - kept.length };
+}
 
-  if (raw !== undefined && macros.length !== list.length) {
-    showSaveNote('Some stored entries were not readable as macros and have been left out. ' +
-             'Saving will drop them.', true);
+// undefined means "nothing stored", which is how the migration below tells an
+// empty list from an untouched browser.
+function readStore() {
+  try {
+    const s = localStorage.getItem(STORE_KEY);
+    return s === null ? undefined : JSON.parse(s);
+  } catch (_) {
+    // Unreadable is treated as absent. localStorage can throw rather than
+    // merely fail (Safari private mode), so this is not hypothetical.
+    return undefined;
+  }
+}
+
+// Returns an error string, or null on success. Quota is the only realistic
+// failure and it deserves reporting rather than a silent no-op.
+function writeStore(list) {
+  try {
+    localStorage.setItem(STORE_KEY, JSON.stringify(list));
+    return null;
+  } catch (e) {
+    return (e && e.name === 'QuotaExceededError')
+      ? 'this browser has no room left for this site'
+      : 'this browser refused to store them (private mode?)';
+  }
+}
+
+async function loadMacros() {
+  const stored = readStore();
+  if (stored !== undefined) {
+    const s = sanitizeMacros(stored);
+    macros = s.kept;
+    if (s.dropped) {
+      showSaveNote(`${s.dropped} stored entr${s.dropped === 1 ? 'y was' : 'ies were'} not ` +
+                   'readable as a macro and have been left out.', true);
+    }
+    return;
+  }
+
+  // Nothing in this browser. Macros used to live in the device's settings blob,
+  // so adopt anything there and move it off the device — otherwise a list that
+  // was there yesterday would simply look lost.
+  const legacy = sanitizeMacros(appSettings.macros).kept;
+  macros = legacy;
+  if (!legacy.length) return;
+
+  const err = writeStore(legacy);
+  if (err) {
+    // Leave the device copy in place: it is still the only durable one.
+    showSaveNote(`Not saved: ${err}.`, true);
+    return;
+  }
+
+  const n = `${legacy.length} macro${legacy.length === 1 ? '' : 's'}`;
+  delete appSettings.macros;
+  try {
+    await saveSettingsToDevice();
+    showSaveNote(`Moved ${n} from the device into this browser.`);
+  } catch (_) {
+    // The browser copy is what matters now; the device's is stale but harmless.
+    showSaveNote(`Moved ${n} into this browser. The device could not be reached to ` +
+                 'remove its old copy.', true);
   }
 }
 
@@ -132,45 +192,28 @@ function showSaveNote(text, warn) {
 }
 
 function updateMeter() {
-  const bytes = byteLength(Object.assign({}, appSettings, { macros: pendingMacros() }));
-  const over = bytes > BLOB_MAX;
-  meterEl.className = 'note' + (over ? ' warn' : '');
-  meterEl.textContent = over
-    ? `Settings blob ${bytes} / ${BLOB_MAX} bytes — ${bytes - BLOB_MAX} over. Shorten a ` +
-      'macro or a name; the device would reject this save.'
-    : `Settings blob ${bytes} / ${BLOB_MAX} bytes. Macros share the device's settings ` +
-      'budget with the settings page.';
+  const list = pendingMacros();
+  const bytes = byteLength(list);
+  meterEl.className = 'note';
+  meterEl.textContent =
+    `${list.length} macro${list.length === 1 ? '' : 's'} · ${bytes} bytes, stored in this ` +
+    'browser. They do not follow you to another device or browser, and clearing this ' +
+    "site's data removes them.";
 }
 
-// Store the whole blob, like the settings page does: the device only knows one.
-// Anything that fails leaves the list showing what the device holds rather than
-// what the failed save hoped to hold.
-async function store(next) {
-  const bytes = byteLength(Object.assign({}, appSettings, { macros: next }));
-  if (bytes > BLOB_MAX) {
-    showSaveNote(`Not saved: ${bytes} bytes is over the device's ${BLOB_MAX}-byte limit ` +
-                 `by ${bytes - BLOB_MAX}. Shorten a macro.`, true);
+// Writes to this browser only. It claims to have saved once the write has
+// succeeded and not before: a list that looks stored but is not is worse than
+// a refusal.
+function store(next) {
+  const err = writeStore(next);
+  if (err) {
+    showSaveNote(`Not saved: ${err}.`, true);
     updateMeter();
     return false;
   }
 
-  const previous = appSettings.macros;
-  appSettings.macros = next;
-  try {
-    const r = await saveSettingsToDevice();
-    if (!r.ok) {
-      appSettings.macros = previous;
-      showSaveNote(`Not saved: the device answered HTTP ${r.status}.`, true);
-      return false;
-    }
-  } catch (_) {
-    appSettings.macros = previous;
-    showSaveNote('Not saved: the device is unreachable.', true);
-    return false;
-  }
-
   macros = next.slice();
-  showSaveNote('saved to device');
+  showSaveNote('saved in this browser');
   render();
   return true;
 }
@@ -454,8 +497,8 @@ runStopEl.addEventListener('click', () => {
 // ---------------------------------------------------------------- start
 requireAuth(async () => {
   setStatus('loading settings…', 'warn');
-  await loadSettings();
-  loadMacros();
+  await loadSettings();      // also supplies any list left on the device
+  await loadMacros();        // may migrate that list, so it is awaited
   render();
   connect();
 });

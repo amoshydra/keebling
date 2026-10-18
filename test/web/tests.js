@@ -661,7 +661,10 @@ __webTests.push({
     __assert(cards[0].querySelector('.run').textContent.includes('Run'), 'no Run button');
 
     const meter = document.getElementById('blobMeter').textContent;
-    __assert(/\/ 1023 bytes/.test(meter), `the size meter says: ${meter}`);
+    __assert(/3 macros/.test(meter) && meter.includes('browser'),
+      `the size line says: ${meter}`);
+    __assert(!meter.includes('1023'),
+      `the size line still quotes the device's old cap: ${meter}`);
   },
 });
 
@@ -730,40 +733,83 @@ __webTests.push({
     __assert(preview.includes('x{y}'), `preview did not show the escaped text: ${preview}`);
 
     document.getElementById('editSave').click();
-    await __sleep(500);
+    await __sleep(200);
     __assert(!document.getElementById('editor').classList.contains('show'), 'the editor stayed open');
     const names = [...document.querySelectorAll('.macro .name')].map((e) => e.textContent);
     __assert(names.includes('Test Macro'), `list: ${names.join('|')}`);
-    __assert(document.getElementById('saveNote').textContent.includes('saved'),
+    __assert(document.getElementById('saveNote').textContent.includes('saved in this browser'),
       `note: ${document.getElementById('saveNote').textContent}`);
+
+    // The list on screen is not evidence that anything was stored.
+    const stored = JSON.parse(localStorage.getItem('esp32remote.macros') || 'null');
+    __assert(Array.isArray(stored) && stored.some((m) => m.name === 'Test Macro'),
+      `stored in the browser: ${JSON.stringify(stored)}`);
   },
 });
 
 __webTests.push({
   page: 'macros',
-  name: 'macro page refuses a set that is over the settings limit',
+  name: 'a set far past the old device limit still saves',
   fn: async () => {
     const before = document.querySelectorAll('.macro').length;
     document.getElementById('macroAdd').click();
+    document.getElementById('editName').value = 'Big One';
     const steps = document.getElementById('editSteps');
     steps.value = 'a'.repeat(1200);
     steps.dispatchEvent(new Event('input', { bubbles: true }));
     await __sleep(50);
 
+    // Nothing should be complaining about a budget any more: macros are not in
+    // the device's 1023-byte settings blob.
     const meter = document.getElementById('blobMeter').textContent;
-    __assert(meter.includes('over') && /\d+ \/ 1023 bytes/.test(meter), `meter: ${meter}`);
+    __assert(!meter.includes('over'), `the size line says: ${meter}`);
 
     document.getElementById('editSave').click();
     await __sleep(200);
-    const note = document.getElementById('saveNote').textContent;
-    __assert(note.includes('over'), `note: ${note}`);
-    __assert(document.querySelectorAll('.macro').length === before,
-      'a rejected macro reached the list');
+    __assert(document.querySelectorAll('.macro').length === before + 1,
+      'the large macro did not reach the list');
+    const stored = JSON.parse(localStorage.getItem('esp32remote.macros') || '[]');
+    __assert(stored.some((m) => m.name === 'Big One' && m.steps.length === 1200),
+      'the large macro was not stored');
+  },
+});
 
-    document.getElementById('editCancel').click();
-    await __sleep(20);
-    __assert(!document.getElementById('blobMeter').textContent.includes('over'),
-      'the meter stayed over after cancelling');
+__webTests.push({
+  page: 'macros',
+  name: 'a browser that refuses storage is told, not silently ignored',
+  fn: async () => {
+    // Private mode, or a full origin. The page must not claim to have saved.
+    const real = localStorage.setItem;
+    localStorage.setItem = () => {
+      const e = new Error('quota');
+      e.name = 'QuotaExceededError';
+      throw e;
+    };
+    let stubbed = false;
+    try { localStorage.setItem('probe', 'x'); } catch (_) { stubbed = true; }
+    __assert(stubbed, 'could not stub localStorage.setItem, so this test proves nothing');
+
+    try {
+      document.getElementById('macroAdd').click();
+      document.getElementById('editName').value = 'Doomed';
+      const steps = document.getElementById('editSteps');
+      steps.value = '{ENTER}';
+      steps.dispatchEvent(new Event('input', { bubbles: true }));
+      document.getElementById('editSave').click();
+      await __sleep(50);
+
+      const note = document.getElementById('saveNote').textContent;
+      __assert(note.startsWith('Not saved'), `note: ${note}`);
+      __assert(note.includes('no room'), `note: ${note}`);
+      __assert(document.getElementById('editor').classList.contains('show'),
+        'the editor closed on a save that failed');
+      const names = [...document.querySelectorAll('.macro .name')].map((e) => e.textContent);
+      __assert(!names.includes('Doomed'), 'a macro that was never stored reached the list');
+    } finally {
+      localStorage.setItem = real;
+      document.getElementById('editCancel').click();
+      await __sleep(20);
+    }
   },
 });
 
@@ -791,6 +837,29 @@ __webTests.push({
     __assert(!find('Test Macro'), 'the second tap did not delete the macro');
     __assert(document.getElementById('saveNote').textContent.includes('saved'),
       `note: ${document.getElementById('saveNote').textContent}`);
+  },
+});
+
+// ---------------------------------------------------------------- macro migration
+// Macros used to live in the device's settings blob. An untouched browser plus
+// a device still holding a list should adopt it — and the runner checks the
+// other half, that the list was then taken off the device.
+__webTests.push({
+  page: 'macros-migrate',
+  name: 'a list left on the device is adopted into the browser',
+  fn: async () => {
+    await __sleep(400);
+    __assert(!document.getElementById('gate'), 'the macro page asked for the code');
+
+    const names = [...document.querySelectorAll('.macro .name')].map((e) => e.textContent);
+    __assert(names.includes('Left Behind'), `list: ${names.join('|')}`);
+
+    const stored = JSON.parse(localStorage.getItem('esp32remote.macros') || 'null');
+    __assert(Array.isArray(stored) && stored.some((m) => m.name === 'Left Behind'),
+      `not written to the browser: ${JSON.stringify(stored)}`);
+
+    const note = document.getElementById('saveNote').textContent;
+    __assert(note.includes('Moved'), `note: ${note}`);
   },
 });
 

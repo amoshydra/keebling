@@ -116,15 +116,10 @@ async function waitForDevtools(port, timeoutMs = 15000) {
 const { server, port: stubPort, device } = await startStub(0);
 const base = `http://127.0.0.1:${stubPort}`;
 
-// What the macro page finds already stored when it loads. The third one is not
-// something the DSL can parse, which is what the page has to flag.
-device.settings = {
-  macros: [
-    { name: 'Open Chrome', steps: '{SEARCH}chrome{ENTER}' },
-    { name: 'Screenshot', steps: '{CMD+SHIFT+3}' },
-    { name: 'Broken', steps: '{NOPE}' },
-  ],
-};
+// The device starts with no settings. Macros used to be seeded here; they live
+// in the browser now, so the macro page is seeded through localStorage instead
+// (see the targets below) and the migration pass gives the device a legacy list
+// on purpose.
 
 const debugPort = 9333;
 const chrome = spawn(findChrome(), [
@@ -182,17 +177,50 @@ try {
 
   // `page` is the group of tests, which is not always the document being
   // navigated to: the wide pass runs the control page's URL again.
+  //
+  // Macros live in localStorage now, so the macro page is seeded before it
+  // loads - seeding after load would only prove the page can be re-rendered.
+  const MACROS_STORED = JSON.stringify([
+    { name: 'Open Chrome', steps: '{SEARCH}chrome{ENTER}' },
+    { name: 'Screenshot', steps: '{CMD+SHIFT+4}' },
+    { name: 'Broken', steps: '{NOPE}x' },
+  ]);
+
   const targets = [
     { page: 'control', url: `${base}/?token=${CODE}`, reloadFirst: true, metrics: PHONE },
     { page: 'settings', url: `${base}/settings.html?token=${CODE}`, metrics: DESKTOP },
-    { page: 'macros', url: `${base}/macros.html?token=${CODE}`, metrics: PHONE },
+    { page: 'macros', url: `${base}/macros.html?token=${CODE}`, metrics: PHONE,
+      seedStorage: { 'esp32remote.macros': MACROS_STORED } },
+    // Before the migration pass: that one clears localStorage, which takes the
+    // stored access code with it, and this pass relies on the code being there.
     { page: 'control-desktop', url: `${base}/`, metrics: DESKTOP },
+    // An untouched browser and a device still holding a list from the old
+    // build: the page should adopt it and take it off the device.
+    { page: 'macros-migrate', url: `${base}/macros.html?token=${CODE}`, metrics: PHONE,
+      clearStorage: true,
+      legacyMacros: [{ name: 'Left Behind', steps: '{ENTER}' }] },
   ];
 
   let settingsSaves = [];
+  let migrationMark = 0;        // device.saved length when the migration pass began
 
   for (const target of targets) {
     await page.send('Emulation.setDeviceMetricsOverride', target.metrics);
+
+    // localStorage is per-origin and survives navigation, so it is seeded by
+    // visiting any page on the origin first.
+    if (target.seedStorage || target.clearStorage) {
+      await page.goto(base + '/');
+      if (target.clearStorage) await page.evaluate('localStorage.clear();');
+      for (const [k, v] of Object.entries(target.seedStorage || {})) {
+        await page.evaluate(`localStorage.setItem(${JSON.stringify(k)}, ${JSON.stringify(v)});`);
+      }
+    }
+    if (target.legacyMacros) {
+      device.settings = { usb_product: 'Legacy Product', macros: target.legacyMacros };
+      migrationMark = device.saved.length;
+    }
+
     await page.goto(target.url);
     if (target.reloadFirst) {
       // The token is now in localStorage and scrubbed from the URL, so this
@@ -252,12 +280,18 @@ try {
     'screen text reached the device with its line break',
     `last payload carried ${JSON.stringify(lastSettings.screen_text)}`);
 
-  // Likewise for a macro edit: the page's own list is not evidence that the
-  // device was told.
-  report(payloads.some((p) => Array.isArray(p.macros)
-      && p.macros.some((m) => m && m.name === 'Test Macro')),
-    'macro edits reached the device',
-    'no saved payload carried a macro named "Test Macro"');
+  // Macros live in the browser now, so this check runs the other way round:
+  // the page must never have put them on the device...
+  const withMacros = payloads.find((p) => Array.isArray(p.macros) && p.macros.length);
+  report(!withMacros, 'macros were not written to the device',
+    `a saved payload carried macros: ${JSON.stringify(withMacros)}`);
+
+  // ...and the one-time migration must have taken the legacy list off it, while
+  // leaving the rest of the settings alone.
+  const afterMigration = device.saved.slice(migrationMark).map(parse);
+  report(afterMigration.some((p) => !('macros' in p) && p.usb_product === 'Legacy Product'),
+    'the migrated macro list was taken off the device',
+    `payloads after the migration pass: ${JSON.stringify(afterMigration)}`);
 
   console.log(`\n${passed} passed, ${failures} failed`);
 } finally {

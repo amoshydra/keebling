@@ -95,13 +95,17 @@ Type panel, at the `type_speed` rate. Tokens are matched case-insensitively; an
 unrecognised one is an error, not a skip — the page names it and refuses to run
 the macro rather than typing part of it.
 
-Macros are stored in the settings blob under the `macros` key. The firmware
-stores that blob verbatim and never reads the key, so this needed no firmware
-change. They share the blob's **1024-byte** budget with every other setting, and
-the device rejects a body of 1024 bytes or more (`SETTINGS_MAX`, and
-`read_body()` in `web_server.c` drops `content_len >= buflen`). The page shows
-the size of what it would send and refuses to save once it is over, naming the
-overflow — nothing is written and the editor keeps what was typed.
+Macros are stored **in the browser**, under `localStorage`, not on the device.
+They were in the settings blob once — capped at 1023 bytes shared with every
+other setting, and wiped by a partition change — and moving them out trades
+that for a browser's megabytes. What it costs is that they are per-browser: a
+second phone does not see them, and clearing this site's data takes them. The
+page says so rather than letting it be discovered.
+
+A list left on the device by an older build is adopted on first load and then
+removed from the device, so a list that was there yesterday does not look lost.
+If the browser refuses the write — private mode, or a full origin — the page
+says so instead of showing a list that was never stored.
 
 ### Button gestures
 
