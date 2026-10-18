@@ -1,0 +1,510 @@
+// Control page: WebSocket transport, touchpad gestures, virtual keyboard and
+// text typing.
+//
+// Gesture model (touch): the finger count decides what a drag does, and a
+// short gesture with little movement is a tap:
+//
+//   1 finger  drag -> move cursor      tap -> left click
+//   2 fingers drag -> scroll           tap -> right click
+//   3 fingers drag -> hold + drag      tap -> middle click
+//
+// A mouse (desktop, or a laptop trackpad, which both report pointerType
+// "mouse") cannot express multi-touch, so it uses pointer lock instead: click
+// the pad to capture, move freely, Escape to release.
+
+// ---------------------------------------------------------------- HID maps
+// Keyboard/Keypad usage page 0x07
+const KEY = {
+  KeyA:0x04,KeyB:0x05,KeyC:0x06,KeyD:0x07,KeyE:0x08,KeyF:0x09,KeyG:0x0A,KeyH:0x0B,
+  KeyI:0x0C,KeyJ:0x0D,KeyK:0x0E,KeyL:0x0F,KeyM:0x10,KeyN:0x11,KeyO:0x12,KeyP:0x13,
+  KeyQ:0x14,KeyR:0x15,KeyS:0x16,KeyT:0x17,KeyU:0x18,KeyV:0x19,KeyW:0x1A,KeyX:0x1B,
+  KeyY:0x1C,KeyZ:0x1D,
+  Digit1:0x1E,Digit2:0x1F,Digit3:0x20,Digit4:0x21,Digit5:0x22,Digit6:0x23,Digit7:0x24,
+  Digit8:0x25,Digit9:0x26,Digit0:0x27,
+  Enter:0x28,Escape:0x29,Backspace:0x2A,Tab:0x2B,Space:0x2C,Minus:0x2D,Equal:0x2E,
+  BracketLeft:0x2F,BracketRight:0x30,Backslash:0x31,Semicolon:0x33,Quote:0x34,
+  Backquote:0x35,Comma:0x36,Period:0x37,Slash:0x38,CapsLock:0x39,
+  F1:0x3A,F2:0x3B,F3:0x3C,F4:0x3D,F5:0x3E,F6:0x3F,F7:0x40,F8:0x41,F9:0x42,
+  F10:0x43,F11:0x44,F12:0x45,
+  Insert:0x49,Home:0x4A,PageUp:0x4B,Delete:0x4C,End:0x4D,PageDown:0x4E,
+  ArrowRight:0x4F,ArrowLeft:0x50,ArrowDown:0x51,ArrowUp:0x52,
+};
+
+const MOD = {
+  ControlLeft:0x01, ShiftLeft:0x02,   AltLeft:0x04,   MetaLeft:0x08,
+  ControlRight:0x10,ShiftRight:0x20,  AltRight:0x40,  MetaRight:0x80,
+};
+
+// ---------------------------------------------------------------- state
+const held = new Set();        // event.code strings currently down
+let buttons = 0;               // mouse button bitmask
+let ws = null;
+let wsReady = false;
+let reconnectTimer = null;
+let reconnectAttempts = 0;
+
+const pad = document.getElementById('pad');
+const dot = document.getElementById('dot');
+const statusText = document.getElementById('statusText');
+const flashEl = document.getElementById('flash');
+
+// ---------------------------------------------------------------- transport
+function connect() {
+  ws = new WebSocket(`ws://${location.host}/ws?token=${encodeURIComponent(token)}`);
+  ws.onopen = () => {
+    wsReady = true;
+    reconnectAttempts = 0;
+    setStatus('connected', 'on');
+    sendKeyboard();               // resync held state
+  };
+  ws.onclose = () => {
+    wsReady = false;
+    setStatus('disconnected', 'off');
+    scheduleReconnect();
+  };
+  ws.onerror = () => { wsReady = false; };
+}
+
+function scheduleReconnect() {
+  if (reconnectTimer) return;
+  reconnectAttempts++;
+  if (reconnectAttempts >= 5) {
+    // Retrying forever against an address that no longer answers is how a
+    // moved DHCP lease hides itself.
+    setStatus('disconnected - reload this page', 'off');
+  }
+  reconnectTimer = setTimeout(() => { reconnectTimer = null; connect(); }, 1500);
+}
+
+function setStatus(text, cls) {
+  statusText.textContent = text;
+  dot.className = 'dot ' + cls;
+}
+
+function send(bytes) {
+  if (wsReady && ws && ws.readyState === 1) ws.send(bytes);
+}
+
+// ---------------------------------------------------------------- senders
+function clamp8(v) { return Math.max(-127, Math.min(127, Math.round(v))); }
+
+function sendMouse(dx, dy, wheel) {
+  send(new Uint8Array([0x01,
+                       clamp8(dx) & 0xFF, clamp8(dy) & 0xFF,
+                       buttons & 0xFF, clamp8(wheel) & 0xFF]));
+}
+
+function buildKeyboardReport(extraCode, extraShift) {
+  let mod = 0;
+  const keys = [];
+  for (const code of held) {
+    if (MOD[code]) mod |= MOD[code];
+    else if (KEY[code]) keys.push(KEY[code]);
+  }
+  if (extraShift) mod |= MOD.ShiftLeft;
+  if (extraCode && KEY[extraCode]) keys.push(KEY[extraCode]);
+
+  const uniq = [...new Set(keys)].slice(0, 6);      // HID requires distinct codes
+  const buf = new Uint8Array(8);
+  buf[0] = 0x02;
+  buf[1] = mod;
+  for (let i = 0; i < uniq.length; i++) buf[2 + i] = uniq[i];
+  return buf;
+}
+
+function sendKeyboard() { send(buildKeyboardReport(null, false)); }
+
+// Press/release one key without disturbing anything else held.
+function sendKeyboardExtra(code, shift) { send(buildKeyboardReport(code, shift)); }
+
+function releaseAll() {
+  held.clear();
+  buttons = 0;
+  document.querySelectorAll('.k.active').forEach((el) => el.classList.remove('active'));
+  send(new Uint8Array([0x05]));
+}
+
+function flash(text) {
+  flashEl.textContent = text;
+  flashEl.classList.add('show');
+  setTimeout(() => flashEl.classList.remove('show'), 450);
+}
+
+// ---------------------------------------------------------------- touchpad
+const TAP_SLOP = 14;           // px of movement still counted as a tap
+
+const pointers = new Map();    // pointerId -> {x, y}
+let mode = null;               // 'move' | 'scroll' | 'drag' | null
+let maxFingers = 0;
+let moved = 0;
+let startedAt = 0;
+let dragHeld = false;          // 3-finger drag: button 1 is down
+let scrollAccum = 0;
+let lastCentre = null;
+
+function centre() {
+  let x = 0, y = 0;
+  for (const p of pointers.values()) { x += p.x; y += p.y; }
+  const n = pointers.size || 1;
+  return { x: x / n, y: y / n };
+}
+
+function updateMode() {
+  const n = pointers.size;
+  mode = n === 1 ? 'move' : n === 2 ? 'scroll' : n >= 3 ? 'drag' : null;
+}
+
+function endDrag() {
+  if (!dragHeld) return;
+  dragHeld = false;
+  buttons &= ~1;
+  sendMouse(0, 0, 0);
+}
+
+function click(bit, label) {
+  buttons |= bit;
+  sendMouse(0, 0, 0);
+  flash(label);
+  // A separate report for the release: HID reports are state snapshots, so a
+  // click is press-report then release-report.
+  setTimeout(() => { buttons &= ~bit; sendMouse(0, 0, 0); }, 25);
+}
+
+pad.addEventListener('pointerdown', (e) => {
+  if (e.pointerType === 'mouse') return;     // mouse uses pointer lock instead
+
+  // Only real pointers can be captured; synthetic ones (and some browsers
+  // mid-gesture) throw here, and losing the capture is not fatal.
+  try { pad.setPointerCapture(e.pointerId); } catch (_) {}
+
+  pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+  if (pointers.size === 1) {
+    startedAt = Date.now();
+    moved = 0;
+    maxFingers = 1;
+    scrollAccum = 0;
+  }
+  maxFingers = Math.max(maxFingers, pointers.size);
+  lastCentre = centre();
+  updateMode();
+
+  if (mode === 'drag' && !dragHeld) {
+    dragHeld = true;
+    buttons |= 1;
+    sendMouse(0, 0, 0);                      // button down, then drag
+    flash('drag');
+  }
+});
+
+pad.addEventListener('pointermove', (e) => {
+  if (e.pointerType === 'mouse') return;
+
+  const p = pointers.get(e.pointerId);
+  if (!p) return;
+  p.x = e.clientX;
+  p.y = e.clientY;
+  if (!lastCentre) { lastCentre = centre(); return; }
+
+  const c = centre();
+  const dx = c.x - lastCentre.x;
+  const dy = c.y - lastCentre.y;
+  lastCentre = c;
+
+  const dist = Math.hypot(dx, dy);
+  moved += dist;
+
+  const gain = Number(appSettings.mouse_gain) || 1;
+
+  if (mode === 'move' || mode === 'drag') {
+    // Do not start moving until the gesture is clearly a drag, so a tap does
+    // not nudge the cursor before the click lands.
+    if (moved < TAP_SLOP && !dragHeld) return;
+    sendMouse(dx * gain, dy * gain, 0);
+  } else if (mode === 'scroll') {
+    // Natural scrolling: the content follows the finger. Fingers moving up
+    // (dy < 0) scroll down the page, which is a negative wheel in HID terms -
+    // the same convention as the mouse wheel handler above.
+    const scale = Number(appSettings.scroll_scale) || 1;
+    const dir = appSettings.scroll_invert ? -1 : 1;
+    scrollAccum += dy * 0.15 * scale * dir;
+    const whole = Math.trunc(scrollAccum);
+    if (whole !== 0) {
+      scrollAccum -= whole;
+      sendMouse(0, 0, whole);
+    }
+  }
+});
+
+function finishGesture() {
+  const duration = Date.now() - startedAt;
+  const isTap = duration < (Number(appSettings.tap_max_ms) || 220) && moved < TAP_SLOP;
+
+  if (dragHeld) {
+    endDrag();
+  } else if (isTap && appSettings.tap_click !== false) {
+    if (maxFingers === 1) click(1, 'left click');
+    else if (maxFingers === 2) click(2, 'right click');
+    else if (maxFingers >= 3) click(4, 'middle click');
+  }
+
+  mode = null;
+  maxFingers = 0;
+  lastCentre = null;
+  scrollAccum = 0;
+}
+
+function onPointerEnd(e) {
+  if (e.pointerType === 'mouse') return;
+  pointers.delete(e.pointerId);
+
+  if (pointers.size === 0) {
+    finishGesture();
+    return;
+  }
+  // Still fingers down: the gesture continues, but it can no longer be a tap
+  // of the original finger count.
+  lastCentre = centre();
+  updateMode();
+  if (mode !== 'drag') endDrag();
+}
+
+pad.addEventListener('pointerup', onPointerEnd);
+pad.addEventListener('pointercancel', onPointerEnd);
+
+// ---------------------------------------------------------------- mouse capture
+// Pointer lock is the only way a desktop mouse can drive the remote cursor
+// without being bounded by the window edge.
+let captured = false;
+
+pad.addEventListener('pointerdown', (e) => {
+  if (e.pointerType !== 'mouse') return;
+  // Locked on *mouse* pointerdown only. Doing this from the click event caught
+  // taps as well, so every touch grabbed pointer lock and the pad appeared to
+  // freeze (mouse moves are filtered to pointerType === 'mouse').
+  if (!captured && pad.requestPointerLock) {
+    try { pad.requestPointerLock(); } catch (_) {}
+  }
+});
+
+document.addEventListener('pointerlockchange', () => {
+  captured = document.pointerLockElement === pad;
+  pad.classList.toggle('captured', captured);
+  if (!captured) { buttons = 0; sendMouse(0, 0, 0); }
+});
+
+pad.addEventListener('pointermove', (e) => {
+  if (!captured || e.pointerType !== 'mouse') return;
+  const gain = Number(appSettings.mouse_gain) || 1;
+  sendMouse(e.movementX * gain, e.movementY * gain, 0);
+});
+
+window.addEventListener('mousedown', (e) => {
+  if (!captured) return;
+  if (e.button === 0) buttons |= 1;
+  if (e.button === 2) buttons |= 2;
+  if (e.button === 1) buttons |= 4;
+  sendMouse(0, 0, 0);
+});
+
+window.addEventListener('mouseup', (e) => {
+  if (!captured) return;
+  if (e.button === 0) buttons &= ~1;
+  if (e.button === 2) buttons &= ~2;
+  if (e.button === 1) buttons &= ~4;
+  sendMouse(0, 0, 0);
+});
+
+window.addEventListener('wheel', (e) => {
+  if (!captured) return;
+  e.preventDefault();
+  sendMouse(0, 0, -e.deltaY / 8);
+}, { passive: false });
+
+window.addEventListener('contextmenu', (e) => { if (captured) e.preventDefault(); });
+
+// ---------------------------------------------------------------- on-screen buttons
+function bindButton(id, bit) {
+  const el = document.getElementById(id);
+  const down = (e) => { e.preventDefault(); buttons |= bit; sendMouse(0, 0, 0); };
+  const up = (e) => { e.preventDefault(); buttons &= ~bit; sendMouse(0, 0, 0); };
+  el.addEventListener('pointerdown', down);
+  el.addEventListener('pointerup', up);
+  el.addEventListener('pointerleave', up);
+  el.addEventListener('pointercancel', up);
+}
+bindButton('bLeft', 1);
+bindButton('bRight', 2);
+bindButton('bMid', 4);
+
+// ---------------------------------------------------------------- physical keyboard
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && captured) return;    // let the browser exit capture
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  e.preventDefault();
+  if (e.repeat || held.has(e.code)) return;      // HID reports are snapshots
+  held.add(e.code);
+  sendKeyboard();
+});
+
+window.addEventListener('keyup', (e) => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  e.preventDefault();
+  held.delete(e.code);
+  sendKeyboard();
+});
+
+// ---------------------------------------------------------------- virtual keyboard
+const KBD_ROWS = [
+  [['Escape','Esc','mod'],['F1'],['F2'],['F3'],['F4'],['F5'],['F6'],['F7'],['F8'],
+   ['F9'],['F10'],['F11'],['F12']],
+  [['Backquote','`'],['Digit1','1'],['Digit2','2'],['Digit3','3'],['Digit4','4'],
+   ['Digit5','5'],['Digit6','6'],['Digit7','7'],['Digit8','8'],['Digit9','9'],
+   ['Digit0','0'],['Minus','-'],['Equal','='],['Backspace','Bksp','w2']],
+  [['Tab','Tab','mod'],['KeyQ','Q'],['KeyW','W'],['KeyE','E'],['KeyR','R'],['KeyT','T'],
+   ['KeyY','Y'],['KeyU','U'],['KeyI','I'],['KeyO','O'],['KeyP','P'],
+   ['BracketLeft','['],['BracketRight',']'],['Backslash','\\']],
+  [['CapsLock','Caps','mod w2'],['KeyA','A'],['KeyS','S'],['KeyD','D'],['KeyF','F'],
+   ['KeyG','G'],['KeyH','H'],['KeyJ','J'],['KeyK','K'],['KeyL','L'],
+   ['Semicolon',';'],['Quote',"'"],['Enter','Enter','w2']],
+  [['ShiftLeft','Shift','mod w2'],['KeyZ','Z'],['KeyX','X'],['KeyC','C'],['KeyV','V'],
+   ['KeyB','B'],['KeyN','N'],['KeyM','M'],['Comma',','],['Period','.'],
+   ['Slash','/'],['ShiftRight','Shift','mod w2']],
+  [['ControlLeft','Ctrl','mod'],['MetaLeft','Cmd','mod'],['AltLeft','Alt','mod'],
+   ['Space','Space','space'],['AltRight','Alt','mod'],['MetaRight','Cmd','mod'],
+   ['ArrowLeft','←','arrow'],['ArrowUp','↑','arrow'],['ArrowDown','↓','arrow'],
+   ['ArrowRight','→','arrow']],
+];
+
+const kbd = document.getElementById('kbd');
+for (const row of KBD_ROWS) {
+  const rowEl = document.createElement('div');
+  rowEl.className = 'krow';
+  for (const [code, label, extra] of row) {
+    const k = document.createElement('div');
+    k.className = 'k ' + (extra || '');
+    k.dataset.code = code;
+    k.textContent = label;
+    const press = (e) => { e.preventDefault(); k.classList.add('active'); held.add(code); sendKeyboard(); };
+    const rel = (e) => { e.preventDefault(); k.classList.remove('active'); held.delete(code); sendKeyboard(); };
+    k.addEventListener('pointerdown', press);
+    k.addEventListener('pointerup', rel);
+    k.addEventListener('pointerleave', rel);
+    k.addEventListener('pointercancel', rel);
+    rowEl.appendChild(k);
+  }
+  kbd.appendChild(rowEl);
+}
+
+document.getElementById('bKbd').addEventListener('click', () => kbd.classList.toggle('show'));
+document.getElementById('bRelease').addEventListener('click', releaseAll);
+
+// ---------------------------------------------------------------- type text
+// USB HID has no "type this string" notion - it only carries physical key
+// positions, which the host maps through its own layout. US QWERTY assumed.
+const TYPE_MAP = (() => {
+  const m = {};
+  const add = (ch, code, shift) => { m[ch] = [code, !!shift]; };
+
+  add(' ', 'Space'); add('\n', 'Enter'); add('\t', 'Tab');
+  add('-', 'Minus'); add('=', 'Equal');
+  add('[', 'BracketLeft'); add(']', 'BracketRight'); add('\\', 'Backslash');
+  add(';', 'Semicolon'); add("'", 'Quote'); add('`', 'Backquote');
+  add(',', 'Comma'); add('.', 'Period'); add('/', 'Slash');
+
+  add('_', 'Minus', 1); add('+', 'Equal', 1);
+  add('{', 'BracketLeft', 1); add('}', 'BracketRight', 1); add('|', 'Backslash', 1);
+  add(':', 'Semicolon', 1); add('"', 'Quote', 1); add('~', 'Backquote', 1);
+  add('<', 'Comma', 1); add('>', 'Period', 1); add('?', 'Slash', 1);
+
+  add('!', 'Digit1', 1); add('@', 'Digit2', 1); add('#', 'Digit3', 1);
+  add('$', 'Digit4', 1); add('%', 'Digit5', 1); add('^', 'Digit6', 1);
+  add('&', 'Digit7', 1); add('*', 'Digit8', 1); add('(', 'Digit9', 1);
+  add(')', 'Digit0', 1);
+
+  for (let i = 0; i <= 9; i++) add(String(i), 'Digit' + i);
+  for (let i = 0; i < 26; i++) {
+    const up = String.fromCharCode(65 + i);
+    add(up.toLowerCase(), 'Key' + up, 0);
+    add(up, 'Key' + up, 1);
+  }
+  return m;
+})();
+
+const typePanel = document.getElementById('type');
+const typeTextEl = document.getElementById('typeText');
+const typeNote = document.getElementById('typeNote');
+
+let typing = false;
+let typeAbort = false;
+
+document.getElementById('bType').addEventListener('click', () => typePanel.classList.toggle('show'));
+
+document.getElementById('typeClear').addEventListener('click', () => {
+  typeTextEl.value = '';
+  typeNote.className = 'note';
+  typeNote.textContent = '';
+});
+
+document.getElementById('typeStop').addEventListener('click', () => {
+  if (typing) typeAbort = true;      // the loop notices at the next character
+});
+
+const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
+
+document.getElementById('typeGo').addEventListener('click', async () => {
+  if (typing) return;
+  const text = typeTextEl.value;
+  if (!text) return;
+
+  const cps = Number(appSettings.type_speed) || 20;
+  // Two reports per character (press, release), so the gap sets half the rate.
+  const gap = Math.max(5, Math.round(500 / cps));
+  const skipped = [...new Set([...text].filter((c) => !TYPE_MAP[c] && c !== '\r'))];
+
+  typing = true;
+  typeAbort = false;
+  const total = text.length;
+  let done = 0;
+
+  typeNote.className = 'note';
+  for (const ch of text) {
+    if (typeAbort) break;
+    if (ch === '\r') { done++; continue; }   // Windows line endings
+    const entry = TYPE_MAP[ch];
+    if (!entry) { done++; continue; }        // no US-QWERTY key for this one
+
+    sendKeyboardExtra(entry[0], entry[1]);   // press
+    await sleepMs(gap);
+    sendKeyboardExtra(null, false);          // release, held keys untouched
+    await sleepMs(gap);
+
+    done++;
+    if (done % 10 === 0 || done === total) {
+      typeNote.textContent = `typing ${done} / ${total}...`;
+    }
+  }
+
+  typing = false;
+  typeAbort = false;
+
+  if (skipped.length) {
+    typeNote.className = 'note warn';
+    typeNote.textContent = `Done ${done} / ${total}. No US-QWERTY key for: `
+      + skipped.join(' ') + ' (skipped)';
+  } else {
+    typeNote.className = 'note';
+    typeNote.textContent = `Done ${done} / ${total}.`;
+  }
+});
+
+// ---------------------------------------------------------------- lifecycle
+setInterval(() => send(new Uint8Array([0x04])), 1000);   // heartbeat
+window.addEventListener('pagehide', releaseAll);
+window.addEventListener('beforeunload', releaseAll);
+
+// ---------------------------------------------------------------- start
+requireAuth(async () => {
+  await loadSettings();
+  connect();
+});

@@ -6,6 +6,7 @@ idf_component_register(
         "display.c"
         "input_state.c"
         "security.c"
+        "settings.c"
         "wifi_manager.c"
         "log_buffer.c"
         "bsp/esp_lcd_st7735.c"
@@ -13,5 +14,9 @@ idf_component_register(
     INCLUDE_DIRS "."
     EMBED_FILES
         "web/index.html"
-        "web/app.js"
+        "web/style.css"
+        "web/common.js"
+        "web/pad.js"
+        "web/settings.html"
+        "web/settings.js"
 )

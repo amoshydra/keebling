@@ -4,137 +4,113 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
 <title>ESP32 Remote</title>
+<link rel="stylesheet" href="style.css">
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: system-ui, -apple-system, sans-serif; background: #111; color: #eee;
-         height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
-  #status { padding: 8px 12px; background: #1c1c1c; font-size: 13px;
-            display: flex; justify-content: space-between; align-items: center; }
-  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; }
-  .dot.on { background:#4caf50; } .dot.off { background:#f44336; }
-  .dot.warn { background:#ff9800; }
-  #pad { flex:1; background:#181818; touch-action:none; cursor:crosshair;
-         position:relative; display:flex; align-items:center; justify-content:center; }
-  #hint { color:#555; font-size:14px; text-align:center; padding:0 20px; pointer-events:none;
-          position:absolute; }
-  #pad.captured #hint { display:none; }
-  #pad.captured { background:#101018; }
-  #controls { padding:8px; background:#1c1c1c; display:flex; gap:6px; flex-wrap:wrap;
-              align-items:center; }
-  button { padding:9px 14px; border:none; border-radius:7px; background:#333; color:#eee;
-           font-size:14px; -webkit-tap-highlight-color:transparent; }
-  button:active { background:#555; }
-  button.primary { background:#1976d2; }
-  button.danger  { background:#b3261e; }
-  label { font-size:13px; display:flex; align-items:center; gap:6px; }
-  input[type=range] { width:110px; }
-  #kbd { display:none; padding:8px; background:#151515; overflow-y:auto; max-height:45dvh; }
-  #kbd.show { display:block; }
-  .row { display:flex; gap:4px; margin-bottom:4px; }
-  .k { flex:1; padding:9px 2px; text-align:center; background:#2c2c2c; border-radius:4px;
-       font-size:12px; user-select:none; -webkit-tap-highlight-color:transparent; }
-  .k.w2 { flex:2; } .k.space { flex:7; }
-  .k.mod { background:#3a3a3a; }
-  .k.active { background:#1976d2; }
-  .k.arrow { flex:0 0 42px; }
+  /* Touchpad-specific: the pad is the whole middle of the screen. */
+  #pad {
+    flex: 1 1 auto;
+    background: #181818;
+    touch-action: none;           /* we handle every gesture ourselves */
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+  #pad.captured { background: #101018; cursor: none; }
+  #hint {
+    color: #555;
+    font-size: 14px;
+    text-align: center;
+    padding: 0 24px;
+    line-height: 1.6;
+    pointer-events: none;
+  }
+  #pad.captured #hint { display: none; }
+  #pad .flash {
+    position: absolute;
+    padding: 6px 12px;
+    border-radius: 20px;
+    background: rgba(25, 118, 210, .85);
+    font-size: 13px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity .15s;
+  }
+  #pad .flash.show { opacity: 1; }
 
-  /* --- wifi setup --- */
-  #wifi { display:none; padding:12px; background:#151515; overflow-y:auto; max-height:55dvh; }
-  #wifi.show { display:block; }
-  #wifi form { display:flex; flex-direction:column; gap:8px; margin:10px 0; }
-  #wifi input { padding:11px; font-size:15px; background:#0d0d0d; color:#eee;
-                border:1px solid #333; border-radius:8px; width:100%; }
-  #wifi .note { font-size:12px; color:#888; line-height:1.5; margin-top:10px; }
+  #controls {
+    padding: 8px;
+    background: var(--panel);
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    align-items: center;
+    flex: 0 0 auto;
+  }
 
-  /* --- logs --- */
-  #logs { display:none; padding:10px; background:#0a0a0a; overflow:auto; max-height:55dvh; }
-  #logs.show { display:block; }
-  #logs pre { font-size:11px; line-height:1.45; color:#bbb; white-space:pre-wrap;
-              word-break:break-all; font-family:ui-monospace,SFMono-Regular,monospace; }
-  #wifi h2 { font-size:14px; color:#aaa; font-weight:600; margin-bottom:8px; }
-  #wifiList { margin:8px 0; max-height:30dvh; overflow-y:auto; }
-  .net { padding:9px 10px; border-radius:6px; background:#222; margin-bottom:4px;
-         font-size:13px; display:flex; justify-content:space-between; gap:8px;
-         cursor:pointer; }
-  .net:active { background:#333; }
-  .net .bar { color:#777; font-size:12px; }
-  .netrow { display:flex; gap:8px; }
-
-  /* --- access gate --- */
-  #gate { position:fixed; inset:0; background:#0d0d0d; display:flex;
-          align-items:center; justify-content:center; z-index:50; padding:20px; }
-  #gate.hidden { display:none; }
-  .gate-box { background:#1a1a1a; padding:24px; border-radius:12px; max-width:340px;
-              width:100%; text-align:center; }
-  .gate-box h1 { font-size:18px; margin-bottom:6px; }
-  .gate-box p { font-size:13px; color:#999; margin-bottom:16px; line-height:1.5; }
-  .gate-box input { width:100%; padding:12px; font-size:20px; text-align:center;
-                    letter-spacing:3px; font-family:ui-monospace,monospace;
-                    background:#0d0d0d; color:#eee; border:1px solid #333;
-                    border-radius:8px; margin-bottom:12px; text-transform:uppercase; }
-  .gate-box button { width:100%; }
-  .gate-box .err { color:#ff6b6b; font-size:13px; margin:10px 0 0; min-height:16px; }
+  /* virtual keyboard */
+  #kbd { display: none; padding: 8px; background: #151515; overflow-y: auto; max-height: 45dvh; }
+  #kbd.show { display: block; }
+  .krow { display: flex; gap: 4px; margin-bottom: 4px; }
+  .k {
+    flex: 1;
+    padding: 9px 2px;
+    text-align: center;
+    background: #2c2c2c;
+    border-radius: 4px;
+    font-size: 12px;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .k.w2 { flex: 2; }
+  .k.space { flex: 7; }
+  .k.mod { background: #3a3a3a; }
+  .k.active { background: var(--accent); }
+  .k.arrow { flex: 0 0 42px; }
 </style>
 </head>
 <body>
 
-<div id="gate">
-  <div class="gate-box">
-    <h1>ESP32 Remote</h1>
-    <p>Enter the 12-character code shown on the device's LCD — or scan its QR.</p>
-    <input id="tokenInput" type="text" inputmode="latin" autocomplete="off"
-           autocapitalize="characters" spellcheck="false" maxlength="20" placeholder="XXXXXXXXXXXX">
-    <button id="tokenGo" class="primary">Connect</button>
-    <p class="err" id="gateErr"></p>
-  </div>
-</div>
-
-<div id="status">
-  <span><span class="dot off" id="dot"></span><span id="statusText">disconnected</span></span>
-  <span id="mode">tap pad to capture</span>
+<div class="topbar">
+  <span><span class="dot off" id="dot"></span><span id="statusText">connecting…</span></span>
+  <a href="settings.html">⚙ Settings</a>
 </div>
 
 <div id="pad">
-  <div id="hint">Click / tap here to capture the pointer.<br>Then your mouse moves the remote cursor.<br>Esc releases.</div>
-</div>
-
-<div id="wifi">
-  <h2>Network</h2>
-  <div class="netrow">
-    <button id="wifiScan">Scan networks</button>
-    <button id="wifiForget" class="danger">Forget saved</button>
+  <div id="hint">
+    One finger moves · tap to click<br>
+    Two fingers scroll · two-finger tap right-clicks<br>
+    Three fingers drag · tap the pad to capture a mouse
   </div>
-  <div id="wifiList"></div>
-  <form id="wifiForm">
-    <input id="wifiSsid" placeholder="Network name (SSID)" autocomplete="off" spellcheck="false" autocapitalize="none">
-    <input id="wifiPass" type="password" placeholder="Password" autocomplete="off">
-    <button type="submit" class="primary">Save &amp; connect</button>
-  </form>
-  <p class="note">
-    The device restarts and tries to join this network. If it cannot, it brings
-    its own access point back so you can correct it. Holding the BOOT button for
-    3&nbsp;seconds also clears the saved network.
-  </p>
+  <div class="flash" id="flash"></div>
 </div>
 
-<div id="logs"><pre id="logText"></pre></div>
+<div class="panel" id="type">
+  <h2>Type text into the host</h2>
+  <textarea id="typeText" placeholder="Paste or type text here — it will be typed into the host as real keystrokes."
+            spellcheck="false" autocapitalize="none" autocomplete="off"></textarea>
+  <div class="row" style="margin:8px 0">
+    <button id="typeGo" class="primary">Type it</button>
+    <button id="typeStop" class="danger">Stop</button>
+    <button id="typeClear">Clear</button>
+  </div>
+  <p class="note" id="typeNote">Assumes a US QWERTY host layout. Keep this tab in
+    the foreground while typing &mdash; browsers throttle timers in background tabs.</p>
+</div>
+
+<div id="kbd"></div>
 
 <div id="controls">
   <button id="bLeft">L</button>
   <button id="bRight">R</button>
   <button id="bMid">M</button>
-  <button id="bKbd">⌨ Keyboard</button>
-  <button id="bWifi">📶 Network</button>
-  <button id="bLogs">🐞 Logs</button>
-  <button id="bRelease" class="danger">Release All</button>
-  <button id="bForget">Forget code</button>
-  <button id="bBoot" title="Reboot into the ROM USB download mode (DFU)">⤓ Bootloader</button>
-  <label>Gain <input type="range" id="gain" min="0.2" max="4" step="0.1" value="1">
-    <span id="gainVal">1.0×</span></label>
+  <button id="bKbd">⌨ Keys</button>
+  <button id="bType">📋 Type</button>
+  <button id="bRelease" class="danger">Release</button>
 </div>
 
-<div id="kbd"></div>
-
-<script src="app.js"></script>
+<script src="common.js"></script>
+<script src="pad.js"></script>
 </body>
 </html>
