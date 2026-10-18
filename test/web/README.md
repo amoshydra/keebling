@@ -32,8 +32,13 @@ If you change anything under `main/web/`, run this first.
 | `run.mjs` | launches Chromium, navigates, runs the tests, reports |
 
 The tests run **in the page**, against the real `pad.js` / `common.js` /
-`settings.js`, with only the socket and the HTTP endpoints faked. So a test
-failure means the shipped code is wrong, not a reimplementation of it.
+`settings.js` / `macros.js`, with only the socket and the HTTP endpoints faked.
+So a test failure means the shipped code is wrong, not a reimplementation of it.
+
+Pages are visited at the size they are used at: the control and macro pages at a
+phone viewport, the settings page and a second control-page pass at a desktop
+one. The test groups are named `control`, `settings`, `macros`,
+`control-desktop` and `control` (again, for the phone-layout assertions).
 
 ## What is covered
 
@@ -47,6 +52,9 @@ failure means the shipped code is wrong, not a reimplementation of it.
 - touch never requests pointer lock; a mouse does
 - a virtual key stays held for the duration of a long press
 - a media key emits a consumer report and a release
+- at phone width the controls are two rows with the pointer buttons along the
+  bottom edge, and only one panel opens at a time; at desktop width the row
+  does not wrap and panels stay independent
 
 **Settings page**
 - the form binds to the device's stored values
@@ -54,6 +62,22 @@ failure means the shipped code is wrong, not a reimplementation of it.
 - a screen timeout of 0 reads as "never"
 - the HID report descriptor decodes into a readable tree
 - the last save actually reached the device (checked server-side, not in the form)
+
+**Macro page**
+- the DSL: the worked example, named keys, media usages, modifier
+  combinations, `{{`/`}}`, delays, and the US QWERTY character map
+- an unrecognised token is an error naming the token, and the page refuses to
+  run it rather than skipping it
+- a run puts the reports the parser describes on the wire (checked byte for
+  byte), including report pairs and the consumer release
+- a stop lands between characters, releases keys and media, and interrupts a
+  long delay
+- characters with no key are reported as skipped
+- the page lists what the device holds, runs a macro with visible progress,
+  adds one (chips insert tokens), refuses a set over the 1023-byte settings
+  limit, and deletes on a second tap
+- the added macro actually reached the device (checked server-side)
+
 
 ## Keeping it honest
 
@@ -84,4 +108,6 @@ __webTests.push({
 Helpers available in scope: `__capture()` swaps the socket for a recorder and
 returns the report array, `__pointer(type, id, pointerType, x, y)` dispatches a
 synthetic pointer event, `__resetInput()` clears the gesture state, and
-`__sleep(ms)` waits.
+`__sleep(ms)` waits. For the macro page, `__macroCapture()` does the same swap
+there and `__playMacro(text)` returns `{ cap, parsed, result }` for one macro
+without a page or a socket at all.

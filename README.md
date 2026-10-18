@@ -74,6 +74,35 @@ The code is remembered in `localStorage`, so step 4 is a one-time thing per
 browser. You can also skip it entirely with
 `http://<address>/?token=YOURCODE`.
 
+### Macros
+
+⚡ **Macros** opens the stored sequences: each has a large Run button, and
+**Stop** interrupts one between characters and releases everything. A macro is
+text typed into the host, with braced tokens for the keys that are not
+characters — `{SEARCH}chrome{ENTER}` presses the Search media key, types
+`chrome` and presses Enter.
+
+| Token | Meaning |
+|---|---|
+| `{ENTER}` `{TAB}` `{ESC}` `{BKSP}` `{DEL}` `{INS}` `{UP}` `{DOWN}` `{LEFT}` `{RIGHT}` `{HOME}` `{END}` `{PGUP}` `{PGDN}` `{SPACE}` `{F1}`…`{F12}` | a key press and release |
+| `{CTRL+C}` `{CMD+SPACE}` `{CTRL+ALT+DEL}` | modifier combination — CTRL, SHIFT, ALT, CMD, then a key or a single character |
+| `{PLAYPAUSE}` `{PLAY}` `{PAUSE}` `{NEXTTRACK}` `{PREVTRACK}` `{STOP}` `{VOLUMEUP}` `{VOLUMEDOWN}` `{MUTE}` `{SEARCH}` `{CALC}` `{BROWSERHOME}` `{BROWSERBACK}` `{BROWSERFORWARD}` | a Consumer Control usage, sent as a press/release pair |
+| `{WAIT:500}` | pause for that many milliseconds (up to 60000) |
+| `{{` `}}` | a literal brace |
+
+Anything outside braces is typed through the same US QWERTY mapping as the
+Type panel, at the `type_speed` rate. Tokens are matched case-insensitively; an
+unrecognised one is an error, not a skip — the page names it and refuses to run
+the macro rather than typing part of it.
+
+Macros are stored in the settings blob under the `macros` key. The firmware
+stores that blob verbatim and never reads the key, so this needed no firmware
+change. They share the blob's **1024-byte** budget with every other setting, and
+the device rejects a body of 1024 bytes or more (`SETTINGS_MAX`, and
+`read_body()` in `web_server.c` drops `content_len >= buflen`). The page shows
+the size of what it would send and refuses to save once it is over, naming the
+overflow — nothing is written and the editor keeps what was typed.
+
 ### Button gestures
 
 The single BOOT button carries four things, separated by how long it is held
@@ -148,7 +177,7 @@ The same code is the SoftAP password and the API token, so there is exactly one
 secret to manage. Nothing derived from it appears in the SSID.
 
 **2. Token on every privileged endpoint.** `/auth`, `/ws` and `/bootloader`
-all require `?token=`. Static assets (`/`, `/app.js`) are public — they contain
+all require `?token=`. Static assets (`/`, `/*.js`) are public — they contain
 no secrets, and the page has to load before you can supply the code. The token
 is scrubbed from the URL bar after load so it does not linger in history.
 
@@ -211,8 +240,7 @@ are snapshots of current state, so this maps 1:1 onto the hardware with no queue
 
 | Endpoint | Auth | Purpose |
 |---|---|---|
-| `GET /` | none | web UI |
-| `GET /app.js` | none | web UI script |
+| `GET /`, `/settings.html`, `/macros.html`, `/style.css`, `/*.js` | none | the web UI (embedded assets) |
 | `GET /auth?token=` | token | validate a code (204 or 403) |
 | `GET /ws?token=` | token | control channel |
 | `POST /bootloader?token=` | token | reboot into USB download mode |
@@ -226,7 +254,9 @@ main/
   input_state.c/.h held-state tracking, mutex, release/watchdog logic
   web_server.c/.h SoftAP + HTTP + WebSocket, embedded assets
   display.c/.h    ST7735 driver, 80×160 framebuffer, 5×7 font (non-fatal)
-  web/            index.html + app.js (embedded into the binary)
+  web/            the UI, embedded into the binary: index.html + pad.js for the
+                  control page, settings.html + settings.js, and macros.html +
+                  macros.js + macro.js (the macro DSL)
 partitions.csv    4 MB app partition
 sdkconfig.defaults
 ```

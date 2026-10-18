@@ -116,6 +116,16 @@ async function waitForDevtools(port, timeoutMs = 15000) {
 const { server, port: stubPort, device } = await startStub(0);
 const base = `http://127.0.0.1:${stubPort}`;
 
+// What the macro page finds already stored when it loads. The third one is not
+// something the DSL can parse, which is what the page has to flag.
+device.settings = {
+  macros: [
+    { name: 'Open Chrome', steps: '{SEARCH}chrome{ENTER}' },
+    { name: 'Screenshot', steps: '{CMD+SHIFT+3}' },
+    { name: 'Broken', steps: '{NOPE}' },
+  ],
+};
+
 const debugPort = 9333;
 const chrome = spawn(findChrome(), [
   '--headless=new',
@@ -165,10 +175,24 @@ try {
 
   const testSource = readFileSync(path.join(HERE, 'tests.js'), 'utf8');
 
-  for (const target of [
-    { name: 'control', url: `${base}/?token=${CODE}`, reloadFirst: true },
-    { name: 'settings', url: `${base}/settings.html?token=${CODE}`, reloadFirst: false },
-  ]) {
+  // The control page is a phone page first, so it is measured at phone size;
+  // the wide pass over it is what keeps the desktop layout honest.
+  const PHONE = { width: 360, height: 780, deviceScaleFactor: 2, mobile: true };
+  const DESKTOP = { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false };
+
+  // `page` is the group of tests, which is not always the document being
+  // navigated to: the wide pass runs the control page's URL again.
+  const targets = [
+    { page: 'control', url: `${base}/?token=${CODE}`, reloadFirst: true, metrics: PHONE },
+    { page: 'settings', url: `${base}/settings.html?token=${CODE}`, metrics: DESKTOP },
+    { page: 'macros', url: `${base}/macros.html?token=${CODE}`, metrics: PHONE },
+    { page: 'control-desktop', url: `${base}/`, metrics: DESKTOP },
+  ];
+
+  let settingsSaves = [];
+
+  for (const target of targets) {
+    await page.send('Emulation.setDeviceMetricsOverride', target.metrics);
     await page.goto(target.url);
     if (target.reloadFirst) {
       // The token is now in localStorage and scrubbed from the URL, so this
@@ -179,15 +203,15 @@ try {
 
     await page.evaluate(`window.__CODE = ${JSON.stringify(CODE)};`);
     await page.evaluate(testSource);
-    await page.evaluate(`window.__page = ${JSON.stringify(target.name)};`);
+    await page.evaluate(`window.__page = ${JSON.stringify(target.page)};`);
 
-    const names = await page.evaluate(`window.__collectTests(${JSON.stringify(target.name)})`);
-    if (!names.length) throw new Error(`no tests registered for ${target.name}`);
+    const names = await page.evaluate(`window.__collectTests(${JSON.stringify(target.page)})`);
+    if (!names.length) throw new Error(`no tests registered for ${target.page}`);
 
-    console.log(`\n${target.name}`);
+    console.log(`\n${target.page}`);
     for (const name of names) {
       const r = await page.evaluate(
-        `window.__runTest(${JSON.stringify(target.name)}, ${JSON.stringify(name)})`);
+        `window.__runTest(${JSON.stringify(target.page)}, ${JSON.stringify(name)})`);
       if (r.ok) {
         passed++;
         if (VERBOSE) console.log(`  ok    ${name}`);
@@ -197,20 +221,37 @@ try {
         console.log(`        ${r.err}`);
       }
     }
+
+    // What the settings page itself saved, before later pages add their own.
+    if (target.page === 'settings') settingsSaves = device.saved.slice();
   }
 
   // The stubbed device records what it was sent, which is how we check the
   // save actually reached it rather than only updating the form.
-  const saved = device.saved.map((s) => { try { return JSON.parse(s); } catch (_) { return {}; } });
-  const lastSave = saved[saved.length - 1] || {};
-  if (Number(lastSave.type_speed) !== 35) {
-    failures++;
-    console.log(`\n  FAIL  settings reached the device`);
-    console.log(`        last saved payload: ${JSON.stringify(lastSave)}`);
-  } else {
-    passed++;
-    if (VERBOSE) console.log('  ok    settings reached the device');
-  }
+  const report = (ok, name, detail) => {
+    if (ok) {
+      passed++;
+      if (VERBOSE) console.log(`  ok    ${name}`);
+    } else {
+      failures++;
+      console.log(`\n  FAIL  ${name}`);
+      console.log(`        ${detail}`);
+    }
+  };
+
+  const parse = (s) => { try { return JSON.parse(s); } catch (_) { return {}; } };
+  const payloads = device.saved.map(parse);
+
+  const lastSettings = settingsSaves.map(parse).pop() || {};
+  report(Number(lastSettings.type_speed) === 35, 'settings reached the device',
+    `last settings-page payload: ${JSON.stringify(lastSettings)}`);
+
+  // Likewise for a macro edit: the page's own list is not evidence that the
+  // device was told.
+  report(payloads.some((p) => Array.isArray(p.macros)
+      && p.macros.some((m) => m && m.name === 'Test Macro')),
+    'macro edits reached the device',
+    'no saved payload carried a macro named "Test Macro"');
 
   console.log(`\n${passed} passed, ${failures} failed`);
 } finally {

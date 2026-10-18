@@ -27,6 +27,7 @@ body {
 /* ---------------------------------------------------------------- status bar */
 .topbar {
   padding: 8px 12px;
+  padding-top: calc(8px + env(safe-area-inset-top, 0px));
   background: var(--panel);
   font-size: 13px;
   display: flex;
@@ -37,6 +38,11 @@ body {
 }
 .topbar a { color: var(--ink); text-decoration: none; opacity: .8; }
 .topbar a:hover { opacity: 1; }
+/* On a phone the bar links are small text, so give them a hit area: the
+   negative margin keeps the bar the same height it has on a desktop. */
+@media (max-width: 620px), (pointer: coarse) {
+  .topbar a { padding: 6px 8px; margin: -6px -8px; }
+}
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
 .dot.on { background: #4caf50; }
 .dot.off { background: #f44336; }

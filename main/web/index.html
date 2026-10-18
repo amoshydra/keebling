@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no, viewport-fit=cover">
 <title>ESP32 Remote</title>
 <link rel="stylesheet" href="style.css">
 <style>
@@ -16,6 +16,7 @@
     align-items: center;
     justify-content: center;
     overflow: hidden;
+    min-height: 0;                /* let the pad give way before the panels do */
   }
   #pad.captured { background: #101018; cursor: none; }
   #hint {
@@ -39,14 +40,63 @@
   }
   #pad .flash.show { opacity: 1; }
 
+  /* One row on a desktop, two on the phone. Grid rather than flex-wrap so the
+     split is the same on every phone width instead of following the label
+     widths, and so a row can be given a minimum height worth hitting. */
   #controls {
     padding: 8px;
+    padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
     background: var(--panel);
-    display: flex;
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: max-content;
     gap: 6px;
-    flex-wrap: wrap;
     align-items: center;
     flex: 0 0 auto;
+  }
+  #controls a.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 9px 14px;
+    border-radius: 7px;
+    background: #333;
+    color: var(--ink);
+    text-decoration: none;
+    font-size: 14px;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #controls a.btn:active { background: #555; }
+
+  /* Phone: the panel toggles on top, the pointer buttons along the bottom edge
+     where a thumb reaches without a stretch. */
+  @media (max-width: 620px) {
+    #controls {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-template-areas:
+        "kbd   media type macros"
+        "left  right mid  release";
+      grid-template-rows: auto auto;
+      grid-auto-flow: row;
+      padding: 6px;
+      padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px));
+    }
+    #bLeft    { grid-area: left; }
+    #bRight   { grid-area: right; }
+    #bMid     { grid-area: mid; }
+    #bRelease { grid-area: release; }
+    #bKbd     { grid-area: kbd; }
+    #bMedia   { grid-area: media; }
+    #bType    { grid-area: type; }
+    #bMacros  { grid-area: macros; }
+    #controls button, #controls a.btn {
+      padding: 13px 4px;
+      font-size: 13px;
+      min-height: 46px;
+      min-width: 0;
+      white-space: nowrap;
+      overflow: hidden;
+    }
   }
 
   /* virtual keyboard */
@@ -102,6 +152,16 @@
   .m small { display: block; font-size: 9px; color: #999; margin-top: 5px; }
   .m.active { background: var(--accent); }
   .m.active small { color: #ddd; }
+
+  /* Phone: one panel at a time (pad.js closes the others), and each one short
+     enough that the pad, the panels and the controls all stay on screen. Two
+     panels plus the on-screen keyboard used to push the controls off the
+     bottom. */
+  @media (max-width: 620px) {
+    .panel { max-height: 46dvh; }
+    #kbd { max-height: 42dvh; }
+    #hint { font-size: 13px; padding: 0 16px; }
+  }
 </style>
 </head>
 <body>
@@ -151,6 +211,7 @@
   <button id="bKbd">⌨ Keys</button>
   <button id="bMedia">🎵 Media</button>
   <button id="bType">📋 Type</button>
+  <a id="bMacros" class="btn" href="macros.html">⚡ Macros</a>
   <button id="bRelease" class="danger">Release</button>
 </div>
 

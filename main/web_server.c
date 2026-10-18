@@ -42,6 +42,12 @@ extern const unsigned char settings_html_start[] asm("_binary_settings_html_star
 extern const unsigned char settings_html_end[]   asm("_binary_settings_html_end");
 extern const unsigned char settings_js_start[]   asm("_binary_settings_js_start");
 extern const unsigned char settings_js_end[]     asm("_binary_settings_js_end");
+extern const unsigned char macros_html_start[]   asm("_binary_macros_html_start");
+extern const unsigned char macros_html_end[]     asm("_binary_macros_html_end");
+extern const unsigned char macros_js_start[]     asm("_binary_macros_js_start");
+extern const unsigned char macros_js_end[]       asm("_binary_macros_js_end");
+extern const unsigned char macro_js_start[]      asm("_binary_macro_js_start");
+extern const unsigned char macro_js_end[]        asm("_binary_macro_js_end");
 
 typedef struct {
     const char *path;
@@ -60,6 +66,9 @@ static const static_asset_t s_assets[] = {
     { "/pad.js",        "application/javascript", pad_js_start,        pad_js_end },
     { "/settings.html", "text/html",              settings_html_start, settings_html_end },
     { "/settings.js",   "application/javascript", settings_js_start,   settings_js_end },
+    { "/macros.html",   "text/html",              macros_html_start,   macros_html_end },
+    { "/macros.js",     "application/javascript", macros_js_start,     macros_js_end },
+    { "/macro.js",      "application/javascript", macro_js_start,      macro_js_end },
 };
 #define ASSET_COUNT (sizeof(s_assets) / sizeof(s_assets[0]))
 
@@ -524,7 +533,7 @@ static esp_err_t bootloader_handler(httpd_req_t *req) {
 // WebSocket
 // ---------------------------------------------------------------------------
 
-// Protocol message types (must match main/web/app.js)
+// Protocol message types (must match main/web/pad.js and main/web/macro.js)
 #define MSG_MOUSE     0x01
 #define MSG_KEYBOARD  0x02
 #define MSG_CONSUMER  0x03

@@ -19,4 +19,7 @@ idf_component_register(
         "web/pad.js"
         "web/settings.html"
         "web/settings.js"
+        "web/macros.html"
+        "web/macros.js"
+        "web/macro.js"
 )

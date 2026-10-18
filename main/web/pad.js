@@ -337,6 +337,25 @@ bindButton('bLeft', 1);
 bindButton('bRight', 2);
 bindButton('bMid', 4);
 
+// ---------------------------------------------------------------- panels
+// The keyboard and the panels share the space under the pad. On a phone that
+// space is the whole screen: two of them open at once, plus the controls,
+// leaves no pad at all, so only one opens at a time there. A desktop has room
+// and keeps its several-panels-open-at-once behaviour.
+//
+// The query has to match the phone breakpoint in index.html's stylesheet.
+const PHONE_QUERY = '(max-width: 620px)';
+
+function togglePanel(el) {
+  const show = !el.classList.contains('show');
+  if (show && window.matchMedia(PHONE_QUERY).matches) {
+    for (const other of document.querySelectorAll('#kbd.show, .panel.show')) {
+      if (other !== el) other.classList.remove('show');
+    }
+  }
+  el.classList.toggle('show', show);
+}
+
 // ---------------------------------------------------------------- physical keyboard
 window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && captured) return;    // let the browser exit capture
@@ -416,7 +435,7 @@ for (const row of KBD_ROWS) {
 // cancel the pointer stream and drop a held key.
 kbd.addEventListener('contextmenu', (e) => e.preventDefault());
 
-document.getElementById('bKbd').addEventListener('click', () => kbd.classList.toggle('show'));
+document.getElementById('bKbd').addEventListener('click', () => togglePanel(kbd));
 document.getElementById('bRelease').addEventListener('click', releaseAll);
 
 // ---------------------------------------------------------------- media keys
@@ -469,7 +488,7 @@ for (const [glyph, usage, label] of MEDIA_KEYS) {
 
 const mediaPanel = document.getElementById('mediaPanel');
 mediaPanel.addEventListener('contextmenu', (e) => e.preventDefault());
-document.getElementById('bMedia').addEventListener('click', () => mediaPanel.classList.toggle('show'));
+document.getElementById('bMedia').addEventListener('click', () => togglePanel(mediaPanel));
 
 // ---------------------------------------------------------------- type text
 // USB HID has no "type this string" notion - it only carries physical key
@@ -510,7 +529,7 @@ const typeNote = document.getElementById('typeNote');
 let typing = false;
 let typeAbort = false;
 
-document.getElementById('bType').addEventListener('click', () => typePanel.classList.toggle('show'));
+document.getElementById('bType').addEventListener('click', () => togglePanel(typePanel));
 
 document.getElementById('typeClear').addEventListener('click', () => {
   typeTextEl.value = '';
