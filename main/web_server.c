@@ -10,10 +10,13 @@
 #include "esp_http_server.h"
 #include "soc/rtc_cntl_reg.h"
 #include "lwip/sockets.h"
+#include "cJSON.h"
 #include "input_state.h"
 #include "usb_hid.h"
 #include "display.h"
 #include "security.h"
+#include "wifi_manager.h"
+#include "log_buffer.h"
 
 #include <ctype.h>
 #include <string.h>
@@ -30,8 +33,6 @@ extern const unsigned char app_js_start[]     asm("_binary_app_js_start");
 extern const unsigned char app_js_end[]       asm("_binary_app_js_end");
 
 static httpd_handle_t s_server = NULL;
-static esp_netif_t *s_ap_netif = NULL;
-static int s_clients = 0;
 
 // ---------------------------------------------------------------------------
 // Request guards
@@ -60,16 +61,15 @@ static bool host_is_ours(const char *host) {
 
     if (strcmp(h, AP_MDNS_NAME ".local") == 0) return true;
 
-    // Whatever IP we currently hold on the AP interface (192.168.4.1 normally,
-    // but never hardcode it).
-    if (s_ap_netif) {
-        esp_netif_ip_info_t ip;
-        if (esp_netif_get_ip_info(s_ap_netif, &ip) == ESP_OK) {
-            char buf[16];
-            snprintf(buf, sizeof(buf), IPSTR, IP2STR(&ip.ip));
-            if (strcmp(h, buf) == 0) return true;
-        }
-    }
+    // The SoftAP gateway (192.168.4.1 normally, but never hardcode it)...
+    const char *ap_ip = wifi_mgr_ap_ip();
+    if (ap_ip && ap_ip[0] && strcmp(h, ap_ip) == 0) return true;
+
+    // ...and, once provisioned, the address we hold on the joined network.
+    // Without this every request over STA would be rejected as DNS rebinding.
+    const char *sta_ip = wifi_mgr_ip();
+    if (sta_ip && sta_ip[0] && strcmp(h, sta_ip) == 0) return true;
+
     return false;
 }
 
@@ -164,54 +164,139 @@ static bool req_authorised(httpd_req_t *req) {
 }
 
 // ---------------------------------------------------------------------------
-// WiFi SoftAP
+// Network setup
+//
+// Credentials are stored and then the device reboots, so the well-tested boot
+// path handles the state transition rather than a live reconfiguration.
 // ---------------------------------------------------------------------------
 
-static void wifi_event_handler(void *arg, esp_event_base_t base, int32_t id, void *data) {
-    if (id == WIFI_EVENT_AP_STACONNECTED) {
-        wifi_event_ap_staconnected_t *e = (wifi_event_ap_staconnected_t *)data;
-        s_clients++;
-        ESP_LOGI(TAG, "Client connected: " MACSTR " (now %d)", MAC2STR(e->mac), s_clients);
-        display_status(LCD_LINE_WIFI, s_clients > 1 ? "clients joined" : "client joined");
-    } else if (id == WIFI_EVENT_AP_STADISCONNECTED) {
-        wifi_event_ap_stadisconnected_t *e = (wifi_event_ap_stadisconnected_t *)data;
-        if (s_clients > 0) s_clients--;
-        ESP_LOGI(TAG, "Client left: " MACSTR " (now %d)", MAC2STR(e->mac), s_clients);
-        // Never leave a key held when the controller disappears.
-        input_release_all();
-        display_status(LCD_LINE_WIFI, s_clients ? "client joined" : "");
-        if (s_clients == 0) display_status(LCD_LINE_WEBUI, "");
+// Recent log output. Without this the device is a black box once TinyUSB owns
+// the USB port, which makes field bugs like "the socket will not reconnect"
+// impossible to diagnose.
+static esp_err_t logs_handler(httpd_req_t *req) {
+    if (!req_authorised(req)) {
+        httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "forbidden");
+        return ESP_FAIL;
     }
+    static char buf[4096];
+    log_buffer_read(buf, sizeof(buf));
+    httpd_resp_set_type(req, "text/plain");
+    return httpd_resp_sendstr(req, buf);
 }
 
-static esp_err_t wifi_init_softap(void) {
-    ESP_ERROR_CHECK(esp_netif_init());
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
-    s_ap_netif = esp_netif_create_default_wifi_ap();
+static esp_err_t scan_handler(httpd_req_t *req) {
+    if (!req_authorised(req)) {
+        httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "forbidden");
+        return ESP_FAIL;
+    }
 
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+    wifi_ap_record_t *recs = NULL;
+    uint16_t n = 0;
+    if (wifi_mgr_scan(&recs, &n) != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "scan failed");
+        return ESP_FAIL;
+    }
 
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(
-        WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL, NULL));
+    cJSON *root = cJSON_CreateObject();
+    cJSON *arr = root ? cJSON_AddArrayToObject(root, "networks") : NULL;
+    for (uint16_t i = 0; arr && i < n; i++) {
+        cJSON *o = cJSON_CreateObject();
+        if (!o) break;
+        cJSON_AddStringToObject(o, "ssid", (const char *)recs[i].ssid);
+        cJSON_AddNumberToObject(o, "rssi", recs[i].rssi);
+        cJSON_AddBoolToObject(o, "secure", recs[i].authmode != WIFI_AUTH_OPEN);
+        cJSON_AddItemToArray(arr, o);
+    }
+    free(recs);
 
-    wifi_config_t wc = { 0 };
-    snprintf((char *)wc.ap.ssid, sizeof(wc.ap.ssid), "%s", AP_SSID);
-    wc.ap.ssid_len = strlen(AP_SSID);
-    wc.ap.channel = 1;
-    wc.ap.max_connection = 4;
-    wc.ap.authmode = WIFI_AUTH_WPA2_PSK;
-    // Password is the device code, which security_init() has produced by now.
-    snprintf((char *)wc.ap.password, sizeof(wc.ap.password), "%s", security_code());
+    char *json = root ? cJSON_PrintUnformatted(root) : NULL;
+    cJSON_Delete(root);
+    if (!json) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "oom");
+        return ESP_FAIL;
+    }
+    httpd_resp_set_type(req, "application/json");
+    esp_err_t r = httpd_resp_sendstr(req, json);
+    free(json);
+    return r;
+}
 
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wc));
-    ESP_ERROR_CHECK(esp_wifi_start());
-    // Modem sleep off: keeps HID latency low at the cost of power.
-    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
+// Read the whole request body. Returns the length, or -1 on error/overflow.
+static int read_body(httpd_req_t *req, char *buf, size_t buflen) {
+    if (req->content_len == 0 || req->content_len >= buflen) return -1;
+    size_t got = 0;
+    while (got < req->content_len) {
+        int r = httpd_req_recv(req, buf + got, req->content_len - got);
+        if (r <= 0) {
+            if (r == HTTPD_SOCK_ERR_TIMEOUT) continue;
+            return -1;
+        }
+        got += r;
+    }
+    buf[got] = '\0';
+    return (int)got;
+}
 
-    ESP_LOGI(TAG, "SoftAP '%s' up (WPA2, per-device password)", AP_SSID);
-    return ESP_OK;
+static esp_err_t save_handler(httpd_req_t *req) {
+    if (req->method != HTTP_POST) {
+        httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "POST only");
+        return ESP_FAIL;
+    }
+    if (!req_authorised(req)) {
+        httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "forbidden");
+        return ESP_FAIL;
+    }
+
+    char body[256];
+    if (read_body(req, body, sizeof(body)) < 0) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad body");
+        return ESP_FAIL;
+    }
+
+    cJSON *root = cJSON_Parse(body);
+    const cJSON *jssid = root ? cJSON_GetObjectItem(root, "ssid") : NULL;
+    const cJSON *jpass = root ? cJSON_GetObjectItem(root, "pass") : NULL;
+    bool ok = cJSON_IsString(jssid) && jssid->valuestring[0] &&
+              (!jpass || cJSON_IsString(jpass));
+    char ssid[33] = {0}, pass[65] = {0};
+    if (ok) {
+        snprintf(ssid, sizeof(ssid), "%s", jssid->valuestring);
+        snprintf(pass, sizeof(pass), "%s", jpass ? jpass->valuestring : "");
+    }
+    cJSON_Delete(root);
+
+    if (!ok || wifi_mgr_set_creds(ssid, pass) != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid ssid/password");
+        return ESP_FAIL;
+    }
+
+    ESP_LOGW(TAG, "network credentials saved, restarting");
+    input_release_all();
+    httpd_resp_set_type(req, "text/plain");
+    httpd_resp_sendstr(req, "saved, restarting");
+    vTaskDelay(pdMS_TO_TICKS(400));   // let the response land
+    esp_restart();
+    return ESP_OK;   // not reached
+}
+
+static esp_err_t forget_handler(httpd_req_t *req) {
+    if (req->method != HTTP_POST) {
+        httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "POST only");
+        return ESP_FAIL;
+    }
+    if (!req_authorised(req)) {
+        httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "forbidden");
+        return ESP_FAIL;
+    }
+
+    wifi_mgr_forget();
+    ESP_LOGW(TAG, "network credentials forgotten, restarting");
+    input_release_all();
+    httpd_resp_set_type(req, "text/plain");
+    httpd_resp_sendstr(req, "forgotten, restarting");
+    vTaskDelay(pdMS_TO_TICKS(400));
+    esp_restart();
+    return ESP_OK;   // not reached
 }
 
 // ---------------------------------------------------------------------------
@@ -386,11 +471,22 @@ static esp_err_t ws_handler(httpd_req_t *req) {
 // ---------------------------------------------------------------------------
 
 esp_err_t web_server_start(void) {
-    ESP_ERROR_CHECK(wifi_init_softap());
+    // Not ESP_ERROR_CHECK: a WiFi failure should leave the SoftAP-less device
+    // able to report the problem, not abort into a boot loop.
+    esp_err_t err = wifi_mgr_start();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "wifi_mgr_start: %s", esp_err_to_name(err));
+        display_status(LCD_LINE_NET, "wifi FAILED");
+        // fall through: the HTTP server can still come up
+    }
 
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.max_open_sockets = 7;
     cfg.lru_purge_enable = true;
+    // The default is 8 and we register 9 (and counting), which made
+    // httpd_register_uri_handler() return ESP_ERR_HTTPD_HANDLERS_FULL and --
+    // through ESP_ERROR_CHECK -- turned into an abort and a boot loop.
+    cfg.max_uri_handlers = 16;
 
     if (httpd_start(&s_server, &cfg) != ESP_OK) {
         ESP_LOGE(TAG, "httpd_start failed");
@@ -403,12 +499,21 @@ esp_err_t web_server_start(void) {
         { .uri = "/auth",       .method = HTTP_GET,  .handler = auth_handler },
         { .uri = "/ws",         .method = HTTP_GET,  .handler = ws_handler, .is_websocket = true },
         { .uri = "/bootloader", .method = HTTP_POST, .handler = bootloader_handler },
+        { .uri = "/scan",       .method = HTTP_GET,  .handler = scan_handler },
+        { .uri = "/logs",       .method = HTTP_GET,  .handler = logs_handler },
+        { .uri = "/save",       .method = HTTP_POST, .handler = save_handler },
+        { .uri = "/forget",     .method = HTTP_POST, .handler = forget_handler },
     };
+    // Log rather than ESP_ERROR_CHECK: a full handler table should degrade to
+    // "that endpoint 404s", not reboot the device.
     for (size_t i = 0; i < sizeof(uris) / sizeof(uris[0]); i++) {
-        ESP_ERROR_CHECK(httpd_register_uri_handler(s_server, &uris[i]));
+        esp_err_t err = httpd_register_uri_handler(s_server, &uris[i]);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "register %s failed: %s", uris[i].uri, esp_err_to_name(err));
+        }
     }
-
-    ESP_LOGI(TAG, "HTTP server started on port %d", cfg.server_port);
+    ESP_LOGI(TAG, "HTTP server started on port %d (%zu handlers)",
+             cfg.server_port, sizeof(uris) / sizeof(uris[0]));
     return ESP_OK;
 }
 
@@ -420,5 +525,5 @@ void web_server_stop(void) {
 }
 
 int web_server_client_count(void) {
-    return s_clients;
+    return wifi_mgr_client_count();
 }

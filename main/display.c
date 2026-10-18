@@ -314,6 +314,24 @@ void display_text(int x, int y, const char *text) {
     xSemaphoreGive(s_fb_lock);
 }
 
+// Clear from x to the right edge of the line, then draw - so a shorter string
+// cannot leave the tail of a longer previous one behind.
+void display_text_line(int x, int line, const char *text) {
+    if (!s_ok || !s_fb_lock || !text || line < 0) return;
+    int y = line * 8;
+    if (y + 8 > LCD_H) return;
+    if (x < 0) x = 0;
+
+    xSemaphoreTake(s_fb_lock, portMAX_DELAY);
+    for (int px = x; px < LCD_W; px++) {
+        size_t off = (size_t)(y * LCD_W + px) * 2;
+        s_fb[off] = 0x00; s_fb[off + 1] = 0x00;
+    }
+    draw_text(x, y, text, 0xFFFF, 0x0000);
+    flush_locked();
+    xSemaphoreGive(s_fb_lock);
+}
+
 void display_clear(void) {
     if (!s_ok || !s_fb_lock) return;
     xSemaphoreTake(s_fb_lock, portMAX_DELAY);

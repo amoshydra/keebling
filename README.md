@@ -52,18 +52,52 @@ If `flash` fails to connect: hold **BOOT**, start the flash, release BOOT once
 
 ## Use
 
+The device prefers to **join your own network** (STA), so the phone or laptop
+you drive it from never has to leave its own WiFi. If nothing is configured, or
+the network can't be reached, it runs its own access point instead.
+
 1. Power-cycle the board.
 2. **Scan the QR on the LCD** with your phone — it carries the 12-character
    device code, and your phone will offer to copy it. The QR stays up for 20
    seconds, then the status screen takes over (power-cycle to see it again).
-3. Join WiFi **`esp-remote`** — the **code is the WiFi password**.
-4. Open **http://192.168.4.1** and paste the code when prompted.
+3. **Join the device.** Either:
+   - **its own AP** — network `esp-remote`, password is the code, then browse
+     to `http://192.168.4.1`; or
+   - **your own network** — open **📶 Network**, scan, pick your SSID, enter the
+     password, and save. The device restarts and joins it; the LCD then shows
+     `STA: <ssid>` and its address.
+4. Open the device's address and paste the code when prompted.
 5. Tap the pad to capture the pointer. Your mouse now drives the host.
    **Esc** releases.
 
 The code is remembered in `localStorage`, so step 4 is a one-time thing per
 browser. You can also skip it entirely with
-`http://192.168.4.1/?token=YOURCODE`.
+`http://<address>/?token=YOURCODE`.
+
+### Network states
+
+| State | SoftAP | STA |
+|---|---|---|
+| Nothing configured | on | — |
+| Provisioned and reachable | **off** | joined |
+| Unreachable for 20 s | **on** (recovery) | retrying |
+
+Provisioned devices start **STA-only** — never switching modes afterwards.
+`esp_wifi_set_mode()` restarts the whole WiFi stack, which drops every
+connection and can cost the DHCP lease, so turning the SoftAP off "once the
+link is healthy" is not safe. The SoftAP is only ever brought *up*.
+
+**If you get locked out:** hold **BOOT for 3 seconds** while powered. That
+wipes the saved network and restarts in AP mode. (Short press is the panic
+button — release all held keys.) It can't be a power-on gesture, because
+holding BOOT during power-on triggers the ROM's download mode instead.
+
+### Choosing a network
+
+Storing credentials puts the WiFi password in flash, unencrypted. Use a
+**dedicated SSID** whose password you don't mind storing — not the one that
+protects your laptop and NAS. NVS encryption is possible but needs an eFuse key
+burn, which is permanent, so it's a deliberate separate decision.
 
 ### Why the QR holds the code and not a URL
 

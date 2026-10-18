@@ -28,15 +28,37 @@
   button.danger  { background:#b3261e; }
   label { font-size:13px; display:flex; align-items:center; gap:6px; }
   input[type=range] { width:110px; }
-  #kbd { display:none; padding:8px; background:#151515; }
+  #kbd { display:none; padding:8px; background:#151515; overflow-y:auto; max-height:45dvh; }
   #kbd.show { display:block; }
   .row { display:flex; gap:4px; margin-bottom:4px; }
   .k { flex:1; padding:9px 2px; text-align:center; background:#2c2c2c; border-radius:4px;
        font-size:12px; user-select:none; -webkit-tap-highlight-color:transparent; }
-  .k.w2 { flex:2; } .k.w3 { flex:3; } .k.space { flex:7; }
+  .k.w2 { flex:2; } .k.space { flex:7; }
   .k.mod { background:#3a3a3a; }
   .k.active { background:#1976d2; }
   .k.arrow { flex:0 0 42px; }
+
+  /* --- wifi setup --- */
+  #wifi { display:none; padding:12px; background:#151515; overflow-y:auto; max-height:55dvh; }
+  #wifi.show { display:block; }
+  #wifi form { display:flex; flex-direction:column; gap:8px; margin:10px 0; }
+  #wifi input { padding:11px; font-size:15px; background:#0d0d0d; color:#eee;
+                border:1px solid #333; border-radius:8px; width:100%; }
+  #wifi .note { font-size:12px; color:#888; line-height:1.5; margin-top:10px; }
+
+  /* --- logs --- */
+  #logs { display:none; padding:10px; background:#0a0a0a; overflow:auto; max-height:55dvh; }
+  #logs.show { display:block; }
+  #logs pre { font-size:11px; line-height:1.45; color:#bbb; white-space:pre-wrap;
+              word-break:break-all; font-family:ui-monospace,SFMono-Regular,monospace; }
+  #wifi h2 { font-size:14px; color:#aaa; font-weight:600; margin-bottom:8px; }
+  #wifiList { margin:8px 0; max-height:30dvh; overflow-y:auto; }
+  .net { padding:9px 10px; border-radius:6px; background:#222; margin-bottom:4px;
+         font-size:13px; display:flex; justify-content:space-between; gap:8px;
+         cursor:pointer; }
+  .net:active { background:#333; }
+  .net .bar { color:#777; font-size:12px; }
+  .netrow { display:flex; gap:8px; }
 
   /* --- access gate --- */
   #gate { position:fixed; inset:0; background:#0d0d0d; display:flex;
@@ -59,7 +81,7 @@
 <div id="gate">
   <div class="gate-box">
     <h1>ESP32 Remote</h1>
-    <p>Enter the 12-character code shown on the device's LCD.</p>
+    <p>Enter the 12-character code shown on the device's LCD — or scan its QR.</p>
     <input id="tokenInput" type="text" inputmode="latin" autocomplete="off"
            autocapitalize="characters" spellcheck="false" maxlength="20" placeholder="XXXXXXXXXXXX">
     <button id="tokenGo" class="primary">Connect</button>
@@ -76,13 +98,36 @@
   <div id="hint">Click / tap here to capture the pointer.<br>Then your mouse moves the remote cursor.<br>Esc releases.</div>
 </div>
 
+<div id="wifi">
+  <h2>Network</h2>
+  <div class="netrow">
+    <button id="wifiScan">Scan networks</button>
+    <button id="wifiForget" class="danger">Forget saved</button>
+  </div>
+  <div id="wifiList"></div>
+  <form id="wifiForm">
+    <input id="wifiSsid" placeholder="Network name (SSID)" autocomplete="off" spellcheck="false" autocapitalize="none">
+    <input id="wifiPass" type="password" placeholder="Password" autocomplete="off">
+    <button type="submit" class="primary">Save &amp; connect</button>
+  </form>
+  <p class="note">
+    The device restarts and tries to join this network. If it cannot, it brings
+    its own access point back so you can correct it. Holding the BOOT button for
+    3&nbsp;seconds also clears the saved network.
+  </p>
+</div>
+
+<div id="logs"><pre id="logText"></pre></div>
+
 <div id="controls">
   <button id="bLeft">L</button>
   <button id="bRight">R</button>
   <button id="bMid">M</button>
   <button id="bKbd">⌨ Keyboard</button>
+  <button id="bWifi">📶 Network</button>
+  <button id="bLogs">🐞 Logs</button>
   <button id="bRelease" class="danger">Release All</button>
-  <button id="bForget" title="Forget the saved code and ask for it again">Forget code</button>
+  <button id="bForget">Forget code</button>
   <button id="bBoot" title="Reboot into the ROM USB download mode (DFU)">⤓ Bootloader</button>
   <label>Gain <input type="range" id="gain" min="0.2" max="4" step="0.1" value="1">
     <span id="gainVal">1.0×</span></label>

@@ -10,6 +10,12 @@ CONFIG_ESP_WIFI_SOFTAP_SUPPORT=y
 
 # ---- HTTP server ----
 CONFIG_HTTPD_WS_SUPPORT=y
+# Browsers send large WebSocket handshake headers (long User-Agent plus
+# Upgrade/Sec-WebSocket-*), and the 512-byte default makes the server answer
+# 431 Request Header Fields Too Large before any handler runs. /ws is the only
+# endpoint that trips it, which is why the page loads and /auth succeeds while
+# the socket never connects.
+CONFIG_HTTPD_MAX_REQ_HDR_LEN=2048
 
 # ---- Flash / partitions ----
 CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y

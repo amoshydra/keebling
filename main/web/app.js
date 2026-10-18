@@ -97,6 +97,7 @@ let gain = 1.0;
 let ws = null;
 let wsReady = false;
 let reconnectTimer = null;
+let reconnectAttempts = 0;
 let captured = false;
 
 const pad = document.getElementById('pad');
@@ -113,6 +114,7 @@ function connect() {
   ws.binaryType = 'arraybuffer';
   ws.onopen = () => {
     wsReady = true;
+    reconnectAttempts = 0;
     setStatus('connected', 'on');
     sendKeyboard();          // resync held state
   };
@@ -122,6 +124,12 @@ function connect() {
 
 function scheduleReconnect() {
   if (reconnectTimer) return;
+  reconnectAttempts++;
+  // Retrying forever against an address that no longer answers is how a moved
+  // DHCP lease hides itself, so say so out loud after a few tries.
+  if (reconnectAttempts >= 5) {
+    setStatus('disconnected - reload this page', 'off');
+  }
   reconnectTimer = setTimeout(() => { reconnectTimer = null; connect(); }, 1500);
 }
 
@@ -340,6 +348,107 @@ setInterval(() => send(new Uint8Array([0x04])), 1000);
 // Never leave a key stuck when the page goes away.
 window.addEventListener('pagehide', releaseAll);
 window.addEventListener('beforeunload', releaseAll);
+
+// ---------------------------------------------------------------- network setup
+const wifiPanel = document.getElementById('wifi');
+
+document.getElementById('bWifi').addEventListener('click', () => {
+  wifiPanel.classList.toggle('show');
+});
+
+function wifiPost(path, body) {
+  const opts = { method: 'POST', cache: 'no-store' };
+  if (body) {
+    opts.headers = { 'Content-Type': 'application/json' };
+    opts.body = JSON.stringify(body);
+  }
+  return fetch(`${path}?token=${encodeURIComponent(token)}`, opts);
+}
+
+document.getElementById('wifiScan').addEventListener('click', async () => {
+  const list = document.getElementById('wifiList');
+  list.textContent = 'scanning…';
+  try {
+    const r = await fetch(`/scan?token=${encodeURIComponent(token)}`, { cache: 'no-store' });
+    if (!r.ok) { list.textContent = `Scan failed (HTTP ${r.status}).`; return; }
+
+    const data = await r.json();
+    const nets = (data.networks || []).slice().sort((a, b) => b.rssi - a.rssi);
+    list.innerHTML = '';
+    if (!nets.length) { list.textContent = 'No networks found.'; return; }
+
+    for (const n of nets) {
+      const el = document.createElement('div');
+      el.className = 'net';
+      const name = document.createElement('span');
+      name.textContent = n.ssid || '(hidden)';
+      const bar = document.createElement('span');
+      bar.className = 'bar';
+      bar.textContent = `${n.rssi} dBm${n.secure ? ' 🔒' : ''}`;
+      el.append(name, bar);
+      // Tap a network to fill the form, then type the password.
+      el.addEventListener('click', () => {
+        document.getElementById('wifiSsid').value = n.ssid || '';
+        document.getElementById('wifiPass').focus();
+      });
+      list.appendChild(el);
+    }
+  } catch (_) {
+    list.textContent = 'Scan failed.';
+  }
+});
+
+document.getElementById('wifiForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const ssid = document.getElementById('wifiSsid').value.trim();
+  const pass = document.getElementById('wifiPass').value;
+  if (!ssid) return;
+
+  if (!confirm(`Save "${ssid}" and restart?\n\n` +
+               'The device will try to join it. If that fails its own access ' +
+               'point comes back, so you can correct it.')) return;
+
+  releaseAll();
+  try {
+    const r = await wifiPost('/save', { ssid, pass });
+    alert(r.ok ? 'Saved. The device is restarting.'
+               : `Save failed (HTTP ${r.status}).`);
+  } catch (_) {
+    // The device reboots as soon as it has answered, so a dropped connection
+    // here is the expected outcome.
+    alert('Saved — the device restarted.');
+  }
+});
+
+document.getElementById('wifiForget').addEventListener('click', async () => {
+  if (!confirm('Forget the saved network?\n\n' +
+               'The device restarts in access-point mode, so you will need to ' +
+               'join "esp-remote" to reach it again.')) return;
+  releaseAll();
+  try {
+    const r = await wifiPost('/forget');
+    alert(r.ok ? 'Cleared. The device is restarting.' : `Failed (HTTP ${r.status}).`);
+  } catch (_) {
+    alert('Cleared — the device restarted.');
+  }
+});
+
+// ---------------------------------------------------------------- logs
+const logsPanel = document.getElementById('logs');
+const logText = document.getElementById('logText');
+
+document.getElementById('bLogs').addEventListener('click', async () => {
+  logsPanel.classList.toggle('show');
+  if (!logsPanel.classList.contains('show')) return;
+  logText.textContent = 'loading…';
+  try {
+    const r = await fetch(`/logs?token=${encodeURIComponent(token)}`, { cache: 'no-store' });
+    logText.textContent = r.ok ? await r.text() : `Failed (HTTP ${r.status}).`;
+    logsPanel.scrollTop = logsPanel.scrollHeight;
+  } catch (_) {
+    logText.textContent = 'Failed to load logs.';
+  }
+});
 
 // ---------------------------------------------------------------- access gate
 function showGate(msg) {

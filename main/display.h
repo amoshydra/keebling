@@ -19,6 +19,9 @@ void display_status(int line, const char *text);
 // Draw text at an absolute pixel position (used beside the boot QR).
 void display_text(int x, int y, const char *text);
 
+// Clear from x to the end of `line`, then draw - safe for redrawing.
+void display_text_line(int x, int line, const char *text);
+
 // Wipe the screen and hand it back to display_status().
 void display_clear(void);
 

@@ -6,6 +6,8 @@ idf_component_register(
         "display.c"
         "input_state.c"
         "security.c"
+        "wifi_manager.c"
+        "log_buffer.c"
         "bsp/esp_lcd_st7735.c"
         "qr/qrcodegen.c"
     INCLUDE_DIRS "."
