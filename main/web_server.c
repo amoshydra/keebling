@@ -634,8 +634,10 @@ esp_err_t web_server_start(void) {
     cfg.lru_purge_enable = true;
     // The default is 8 and we register more than that; at 15 the 9th
     // registration returned ESP_ERR_HTTPD_HANDLERS_FULL and, through
-    // ESP_ERROR_CHECK, became a boot loop. Sized with headroom now.
-    cfg.max_uri_handlers = 24;
+    // ESP_ERROR_CHECK, became a boot loop. Sized with headroom now: the asset
+    // table and the endpoint table together come to 21, so a new page or two
+    // fits without touching this. Each slot is a few tens of bytes.
+    cfg.max_uri_handlers = 32;
 
     if (httpd_start(&s_server, &cfg) != ESP_OK) {
         ESP_LOGE(TAG, "httpd_start failed");
