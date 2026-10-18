@@ -193,7 +193,17 @@ const GD_USAGES = {
   0x80: 'System Control', 0x81: 'System Power Down',
   0x82: 'System Sleep', 0x83: 'System Wake Up',
 };
-const CONSUMER_USAGES = { 0x01: 'Consumer Control', 0x38: 'AC Pan' };
+// Named for the usages the device actually declares, so the viewer reads
+// clearly rather than showing bare hex.
+const CONSUMER_USAGES = {
+  0x01: 'Consumer Control',
+  0xB0: 'Play', 0xB1: 'Pause', 0xB5: 'Scan Next', 0xB6: 'Scan Previous',
+  0xB7: 'Stop', 0xCD: 'Play/Pause',
+  0xE2: 'Mute', 0xE9: 'Volume Up', 0xEA: 'Volume Down',
+  0x192: 'Calculator', 0x221: 'Search',
+  0x223: 'Home', 0x224: 'Back', 0x225: 'Forward',
+  0x238: 'AC Pan',            // horizontal scroll, in the mouse report
+};
 const LED_USAGES = { 1: 'Num Lock', 2: 'Caps Lock', 3: 'Scroll Lock', 4: 'Compose', 5: 'Kana' };
 
 function usageName(page, usage) {

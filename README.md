@@ -281,8 +281,13 @@ Recovery from it is a plain power cycle.
 - **No serial console over USB** while TinyUSB owns the port. `ESP_LOGI` output goes
   to UART0 on GPIO43/44 (the QWIIC connector) and needs an external USB-UART adapter.
   During development, route logging over WiFi instead.
-- **Media keys**: the consumer-control report descriptor is present but Linux did not
-  create an input device for it. Keyboard and mouse work. Under investigation.
+- **Media keys** work, but note where they land: Linux folds the Consumer
+  Control collection into the *keyboard* input device rather than creating a
+  third one, so `event<N>` for the keyboard carries `PLAYPAUSE`, `MUTE`,
+  `VOLUMEUP` and so on. Looking for a separate "Consumer Control" device is a
+  dead end. Transport and volume keys are handled by desktops by default;
+  anything else (`Calculator` for instance) arrives as a keycode but needs an
+  action bound to it in your desktop environment.
 - **BLE HID is not implemented** (USB only). The S3 supports both, but WiFi + BLE
   share one 2.4 GHz radio, so expect added jitter if you add it.
 - The dongle draws up to ~800 mA with WiFi + backlight.
