@@ -290,10 +290,12 @@ main/
   web_server.c/.h SoftAP + HTTP + WebSocket, embedded assets, upload endpoints
   ui_fs.c/.h      LittleFS mount and file plumbing for the uploaded UI
   display.c/.h    ST7735 driver, 80×160 framebuffer, 5×7 font (non-fatal)
-  web/            the UI, embedded into the binary: index.html + pad.js for the
-                  control page, settings.html + settings.js, macros.html +
-                  macros.js + macro.js (the macro DSL), and ui.html + ui.js
-                  (uploading the rest over WiFi)
+  web/            the UI. Every file is embedded in the binary and can also be
+                  uploaded to the LittleFS partition, which is served in
+                  preference: index.html + pad.js for the control page,
+                  settings.html + settings.js, macros.html + macros.js +
+                  macro.js (the macro DSL), and ui.html + ui.js (uploading the
+                  rest over WiFi)
 partitions.csv    4 MB app partition, then a 320 KB LittleFS partition for
                   uploaded UI files — appended so nvs and the app do not move
 sdkconfig.defaults
