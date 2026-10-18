@@ -87,4 +87,3 @@ int settings_get_int(const char *key, int def) {
     cJSON_Delete(doc);
     return out;
 }
-

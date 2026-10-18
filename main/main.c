@@ -223,6 +223,9 @@ static void tick_task(void *arg) {
         if (pressed && !prev_pressed) {
             pressed_at = now;
             panic_done = false;
+            // Count the press itself as activity: a 3 s or 10 s hold is still
+            // someone using the device, and must not blank mid-hold.
+            s_last_press_us = now;
         }
 
         if (pressed && pressed_at) {
@@ -245,7 +248,8 @@ static void tick_task(void *arg) {
                          BOOT_PANIC_MS);
                 input_release_all();
                 panic_done = true;
-                if (!s_sleeping) display_status(LCD_LINE_PANIC, "! released !");            }
+                if (!s_sleeping) display_status(LCD_LINE_PANIC, "! released !");
+            }
         }
 
         // Decide on release, so a press shorter than the panic threshold is a
