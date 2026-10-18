@@ -50,17 +50,32 @@
   }
 
   /* virtual keyboard */
-  #kbd { display: none; padding: 8px; background: #151515; overflow-y: auto; max-height: 45dvh; }
+  #kbd {
+    display: none;
+    padding: 8px;
+    background: #151515;
+    /* The panel scrolls on small screens, but a press starting on a key must
+       not be claimed by the scroller: that fires pointercancel and the key
+       releases mid-hold. */
+    overflow-y: auto;
+    max-height: 45dvh;
+    touch-action: none;
+  }
   #kbd.show { display: block; }
   .krow { display: flex; gap: 4px; margin-bottom: 4px; }
   .k {
     flex: 1;
-    padding: 9px 2px;
+    padding: 11px 2px;
     text-align: center;
     background: #2c2c2c;
     border-radius: 4px;
     font-size: 12px;
+    /* user-select alone is not enough on touch: without these a long press
+       opens the callout / context menu and cancels the pointer stream. */
     user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+    touch-action: none;
     -webkit-tap-highlight-color: transparent;
   }
   .k.w2 { flex: 2; }
@@ -68,6 +83,25 @@
   .k.mod { background: #3a3a3a; }
   .k.active { background: var(--accent); }
   .k.arrow { flex: 0 0 42px; }
+
+  /* media keys */
+  #media { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+  .m {
+    padding: 14px 2px;
+    text-align: center;
+    background: #2c2c2c;
+    border-radius: 6px;
+    font-size: 19px;
+    line-height: 1;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+    touch-action: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .m small { display: block; font-size: 9px; color: #999; margin-top: 5px; }
+  .m.active { background: var(--accent); }
+  .m.active small { color: #ddd; }
 </style>
 </head>
 <body>
@@ -101,11 +135,21 @@
 
 <div id="kbd"></div>
 
+<div class="panel" id="mediaPanel">
+  <h2>Media &amp; browser keys</h2>
+  <div id="media"></div>
+  <p class="note" id="mediaNote">These are Consumer Control usages. Whether
+    they do anything depends on the host — macOS and Windows handle the
+    transport and volume keys; some Linux desktops need the keybound to an
+    action first.</p>
+</div>
+
 <div id="controls">
   <button id="bLeft">L</button>
   <button id="bRight">R</button>
   <button id="bMid">M</button>
   <button id="bKbd">⌨ Keys</button>
+  <button id="bMedia">🎵 Media</button>
   <button id="bType">📋 Type</button>
   <button id="bRelease" class="danger">Release</button>
 </div>

@@ -19,6 +19,7 @@ static SemaphoreHandle_t s_lock;
 static uint8_t s_mod = 0;
 static uint8_t s_keys[6] = {0};
 static uint8_t s_mouse_buttons = 0;
+static uint16_t s_consumer = 0;
 
 // True when a key, modifier or mouse button is currently held down.
 static bool    s_held = false;
@@ -32,7 +33,7 @@ static inline void unlock(void) { xSemaphoreGive(s_lock); }
 
 // s_held is derived from the actual held state, never set ad hoc.
 static void recompute_held(void) {
-    bool any = (s_mod != 0) || (s_mouse_buttons != 0);
+    bool any = (s_mod != 0) || (s_mouse_buttons != 0) || (s_consumer != 0);
     for (int i = 0; i < 6; i++) if (s_keys[i]) any = true;
     s_held = any;
 }
@@ -62,6 +63,13 @@ void input_mouse(uint8_t buttons, int8_t dx, int8_t dy, int8_t wheel) {
 }
 
 void input_consumer(uint16_t usage) {
+    lock();
+    // A held media key counts as activity so the watchdog can release it -
+    // otherwise a stuck volume key would repeat forever.
+    s_consumer = usage;
+    recompute_held();
+    unlock();
+
     usb_hid_consumer_report(usage);
 }
 
@@ -71,6 +79,7 @@ void input_release_all(void) {
     s_mod = 0;
     for (int i = 0; i < 6; i++) s_keys[i] = 0;
     s_mouse_buttons = 0;
+    s_consumer = 0;
     s_held = false;
     s_watchdog_armed = false;
     unlock();

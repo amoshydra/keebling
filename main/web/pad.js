@@ -385,8 +385,24 @@ for (const row of KBD_ROWS) {
     k.className = 'k ' + (extra || '');
     k.dataset.code = code;
     k.textContent = label;
-    const press = (e) => { e.preventDefault(); k.classList.add('active'); held.add(code); sendKeyboard(); };
-    const rel = (e) => { e.preventDefault(); k.classList.remove('active'); held.delete(code); sendKeyboard(); };
+
+    const press = (e) => {
+      e.preventDefault();
+      // Take the pointer explicitly: without this a stray finger movement can
+      // hand the gesture to the scroller, which cancels the pointer and
+      // releases the key mid-hold.
+      try { k.setPointerCapture(e.pointerId); } catch (_) {}
+      k.classList.add('active');
+      held.add(code);
+      sendKeyboard();
+    };
+    const rel = (e) => {
+      e.preventDefault();
+      k.classList.remove('active');
+      held.delete(code);
+      sendKeyboard();
+    };
+
     k.addEventListener('pointerdown', press);
     k.addEventListener('pointerup', rel);
     k.addEventListener('pointerleave', rel);
@@ -396,8 +412,64 @@ for (const row of KBD_ROWS) {
   kbd.appendChild(rowEl);
 }
 
+// Long-press on a touch screen is a right-click; the menu it opens would
+// cancel the pointer stream and drop a held key.
+kbd.addEventListener('contextmenu', (e) => e.preventDefault());
+
 document.getElementById('bKbd').addEventListener('click', () => kbd.classList.toggle('show'));
 document.getElementById('bRelease').addEventListener('click', releaseAll);
+
+// ---------------------------------------------------------------- media keys
+// Consumer Control (usage page 0x0C). Sent as a press/release pair like any
+// other key: holding a media key down is unusual, so each one is momentary.
+const MEDIA_KEYS = [
+  ['⏮', 0x00B6, 'prev'],
+  ['⏯', 0x00CD, 'play'],
+  ['⏭', 0x00B5, 'next'],
+  ['⏹', 0x00B7, 'stop'],
+  ['🔉', 0x00EA, 'vol −'],
+  ['🔇', 0x00E2, 'mute'],
+  ['🔊', 0x00E9, 'vol +'],
+  ['🌐', 0x0223, 'home'],
+  ['◀', 0x0224, 'back'],
+  ['▶', 0x0225, 'fwd'],
+  ['🔍', 0x0221, 'search'],
+  ['🧮', 0x0192, 'calc'],
+];
+
+function sendConsumer(usage) {
+  send(new Uint8Array([0x03, usage & 0xFF, (usage >> 8) & 0xFF]));
+}
+
+const mediaEl = document.getElementById('media');
+for (const [glyph, usage, label] of MEDIA_KEYS) {
+  const el = document.createElement('div');
+  el.className = 'm';
+  el.innerHTML = `${glyph}<small>${label}</small>`;
+
+  const press = (e) => {
+    e.preventDefault();
+    try { el.setPointerCapture(e.pointerId); } catch (_) {}
+    el.classList.add('active');
+    sendConsumer(usage);
+    flash(label);
+  };
+  const rel = (e) => {
+    e.preventDefault();
+    el.classList.remove('active');
+    sendConsumer(0);
+  };
+
+  el.addEventListener('pointerdown', press);
+  el.addEventListener('pointerup', rel);
+  el.addEventListener('pointerleave', rel);
+  el.addEventListener('pointercancel', rel);
+  mediaEl.appendChild(el);
+}
+
+const mediaPanel = document.getElementById('mediaPanel');
+mediaPanel.addEventListener('contextmenu', (e) => e.preventDefault());
+document.getElementById('bMedia').addEventListener('click', () => mediaPanel.classList.toggle('show'));
 
 // ---------------------------------------------------------------- type text
 // USB HID has no "type this string" notion - it only carries physical key
