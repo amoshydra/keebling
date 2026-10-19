@@ -28,6 +28,19 @@
     pointer-events: none;
   }
   #pad.captured #hint { display: none; }
+  /* While captured the hint is gone, and the only way out is a key the user has
+     to be told about - the browser's own bubble is easy to miss. */
+  #escHint {
+    display: none;
+    position: absolute;
+    bottom: 10px;
+    left: 0; right: 0;
+    text-align: center;
+    color: #666;
+    font-size: 12px;
+    pointer-events: none;
+  }
+  #pad.captured #escHint { display: block; }
   #pad .flash {
     position: absolute;
     padding: 6px 12px;
@@ -175,8 +188,9 @@
   <div id="hint">
     One finger moves · tap to click<br>
     Two fingers scroll · two-finger tap right-clicks<br>
-    Three fingers drag · tap the pad to capture a mouse
+    Three fingers drag · click the pad to capture a mouse
   </div>
+  <div id="escHint">Mouse captured — Esc releases it</div>
   <div class="flash" id="flash"></div>
 </div>
 

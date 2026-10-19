@@ -94,6 +94,23 @@ function sendMouse(dx, dy, wheel) {
                        buttons & 0xFF, clamp8(wheel) & 0xFF]));
 }
 
+// A report carries signed 8-bit deltas, so anything larger has to go as several
+// reports. Clamping instead silently drops distance and the remote cursor lags
+// the physical one - which is exactly what a fast flick looks like.
+function sendMove(dx, dy) {
+  let x = Math.round(dx);
+  let y = Math.round(dy);
+  // Bounded to a short burst: 8 reports is already 1000px of movement in one
+  // event, and an unbounded loop here would be a stall rather than a fix.
+  for (let n = 0; (x || y) && n < 8; n++) {
+    const sx = Math.max(-127, Math.min(127, x));
+    const sy = Math.max(-127, Math.min(127, y));
+    sendMouse(sx, sy, 0);
+    x -= sx;
+    y -= sy;
+  }
+}
+
 function buildKeyboardReport(extraCode, extraShift) {
   let mod = 0;
   const keys = [];
@@ -124,10 +141,15 @@ function releaseAll() {
   send(new Uint8Array([0x05]));
 }
 
+let flashTimer = null;
+
 function flash(text) {
   flashEl.textContent = text;
   flashEl.classList.add('show');
-  setTimeout(() => flashEl.classList.remove('show'), 450);
+  // Cancel the previous timer. Without this a stale one clears a newer message
+  // early, and the message that gets cut short is the one that mattered.
+  clearTimeout(flashTimer);
+  flashTimer = setTimeout(() => flashEl.classList.remove('show'), 450);
 }
 
 // ---------------------------------------------------------------- touchpad
@@ -220,7 +242,7 @@ pad.addEventListener('pointermove', (e) => {
     // Do not start moving until the gesture is clearly a drag, so a tap does
     // not nudge the cursor before the click lands.
     if (moved < TAP_SLOP && !dragHeld) return;
-    sendMouse(dx * gain, dy * gain, 0);
+    sendMove(dx * gain, dy * gain);
   } else if (mode === 'scroll') {
     // Natural scrolling: the content follows the finger. Fingers moving up
     // (dy < 0) scroll down the page, which is a negative wheel in HID terms -
@@ -277,14 +299,47 @@ pad.addEventListener('pointercancel', onPointerEnd);
 // without being bounded by the window edge.
 let captured = false;
 
+// A refusal is not an exception: requestPointerLock returns a promise that
+// rejects, and browsers refuse for about a second after a lock is released. So
+// the click that follows an Escape usually fails, and swallowing that left a
+// click which did nothing - which reads as "capture is broken".
+function captureRefused() {
+  flash('click again to capture');
+}
+
+function requestCapture() {
+  if (!pad.requestPointerLock) return;
+
+  // Ask for raw movement where it is supported: the OS acceleration curve is
+  // tuned for a desktop pointer and makes a remote cursor feel wrong. Browsers
+  // that do not know the option reject the promise rather than ignoring it, so
+  // fall back to a plain request - still inside the same gesture, which is what
+  // the lock requires.
+  const attempt = (opts) => {
+    try { return opts ? pad.requestPointerLock(opts) : pad.requestPointerLock(); }
+    catch (_) { return null; }
+  };
+
+  const p = attempt({ unadjustedMovement: true });
+  if (!p || typeof p.then !== 'function') return;      // old API: synchronous
+
+  p.then(undefined, () => {
+    const plain = attempt(null);
+    if (plain && typeof plain.then === 'function') plain.then(undefined, captureRefused);
+    else captureRefused();
+  });
+}
+
 pad.addEventListener('pointerdown', (e) => {
-  if (e.pointerType !== 'mouse') return;
+  if (e.pointerType !== 'mouse' || captured) return;
   // Locked on *mouse* pointerdown only. Doing this from the click event caught
   // taps as well, so every touch grabbed pointer lock and the pad appeared to
   // freeze (mouse moves are filtered to pointerType === 'mouse').
-  if (!captured && pad.requestPointerLock) {
-    try { pad.requestPointerLock(); } catch (_) {}
-  }
+  //
+  // The capturing click is deliberately not forwarded to the host: it would
+  // land on whatever the host cursor happens to be over, which is a good way to
+  // press a button you did not mean to.
+  requestCapture();
 });
 
 document.addEventListener('pointerlockchange', () => {
@@ -293,10 +348,13 @@ document.addEventListener('pointerlockchange', () => {
   if (!captured) { buttons = 0; sendMouse(0, 0, 0); }
 });
 
+// Fired when a request is refused. Without this the refusal is invisible.
+document.addEventListener('pointerlockerror', captureRefused);
+
 pad.addEventListener('pointermove', (e) => {
   if (!captured || e.pointerType !== 'mouse') return;
   const gain = Number(appSettings.mouse_gain) || 1;
-  sendMouse(e.movementX * gain, e.movementY * gain, 0);
+  sendMove(e.movementX * gain, e.movementY * gain);
 });
 
 window.addEventListener('mousedown', (e) => {
@@ -315,10 +373,24 @@ window.addEventListener('mouseup', (e) => {
   sendMouse(0, 0, 0);
 });
 
+// Wheel accumulation, mirroring the touch scroll path above. deltaMode is the
+// part that matters: Firefox reports lines, where a full notch is a deltaY of
+// about 3, and treating that as pixels and dividing by 8 rounds it to zero -
+// the wheel would do nothing at all while captured.
+let wheelAccum = 0;
+
 window.addEventListener('wheel', (e) => {
   if (!captured) return;
   e.preventDefault();
-  sendMouse(0, 0, -e.deltaY / 8);
+
+  const perUnit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 64 : 1;
+  wheelAccum += -e.deltaY * perUnit / 8;
+
+  const whole = Math.trunc(wheelAccum);
+  if (whole !== 0) {
+    wheelAccum -= whole;
+    sendMouse(0, 0, whole);
+  }
 }, { passive: false });
 
 window.addEventListener('contextmenu', (e) => { if (captured) e.preventDefault(); });

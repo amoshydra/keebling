@@ -272,6 +272,90 @@ __webTests.push({
 
 __webTests.push({
   page: 'control',
+  name: 'a refused capture is reported and retried, not swallowed',
+  fn: async () => {
+    // The shape that matters: browsers refuse a lock for about a second after
+    // one is released, and that refusal is a *promise rejection*, not an
+    // exception - so try/catch never saw it and the click did nothing.
+    let calls = 0;
+    const orig = pad.requestPointerLock;
+    pad.requestPointerLock = () => {
+      calls++;
+      return Promise.reject(new DOMException('refused', 'NotAllowedError'));
+    };
+    try {
+      __pointer('pointerdown', 11, 'mouse', 60, 60);
+      await __sleep(80);
+
+      __assert(calls === 2,
+        `requestPointerLock was called ${calls} times, expected a plain retry after the first refusal`);
+      const flash = document.getElementById('flash');
+      __assert(flash.classList.contains('show'), 'a refused capture showed nothing');
+      __assert(flash.textContent.includes('click again'), `the pad said: ${flash.textContent}`);
+    } finally {
+      pad.requestPointerLock = orig;
+    }
+  },
+});
+
+__webTests.push({
+  page: 'control',
+  name: 'wheel works in line mode, where a notch is a deltaY of 3',
+  fn: async () => {
+    __resetInput();
+    captured = true;
+    const cap = __capture();
+    try {
+      // One notch, not several. Firefox reports deltaMode 1 with deltaY ~3, and
+      // treating that as pixels makes a notch worth a fraction of a step - so
+      // the wheel crawls rather than dying. Accumulation alone would still emit
+      // something eventually, which is why this asserts a single notch is worth
+      // a whole step on its own.
+      window.dispatchEvent(new WheelEvent('wheel',
+        { deltaY: 3, deltaMode: 1, cancelable: true }));
+      await __sleep(20);
+
+      const wheels = cap.filter((r) => r[0] === 1 && r[4] !== 0)
+        .map((r) => (r[4] > 127 ? r[4] - 256 : r[4]));
+      __assert(wheels.length === 1, `one notch produced ${wheels.length} reports, expected 1`);
+      __assert(wheels[0] < 0, `scrolling down produced ${wheels[0]} - expected negative`);
+      __assert(wheels[0] <= -4,
+        `one line-mode notch moved the wheel by ${wheels[0]}, expected a whole step`);
+    } finally {
+      captured = false;
+    }
+  },
+});
+
+__webTests.push({
+  page: 'control',
+  name: 'a movement larger than the report is split, not clamped',
+  fn: async () => {
+    captured = true;
+    const cap = __capture();
+    try {
+      pad.dispatchEvent(new PointerEvent('pointermove', {
+        pointerId: 12, pointerType: 'mouse', movementX: 400, movementY: 0, bubbles: true,
+      }));
+      await __sleep(20);
+
+      const moves = cap.filter((r) => r[0] === 1);
+      const signed = (b) => (b > 127 ? b - 256 : b);
+      const total = moves.reduce((n, r) => n + signed(r[1]), 0);
+      __assert(moves.length >= 4, `400px went out in ${moves.length} reports`);
+      __assert(total === 400,
+        `the reports add up to ${total}, not 400 - distance was silently dropped`);
+      __assert(moves.every((r) => Math.abs(signed(r[1])) <= 127),
+        'a report carried a delta outside the signed 8-bit field');
+    } finally {
+      captured = false;
+    }
+  },
+});
+
+
+__webTests.push({
+  page: 'control',
   name: 'virtual key stays held until released',
   fn: async () => {
     __resetInput();
