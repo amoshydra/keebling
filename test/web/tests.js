@@ -366,7 +366,7 @@ __webTests.push({
 
 __webTests.push({
   page: 'control',
-  name: 'captured movement is batched per frame, not sent per event',
+  name: 'captured movement is coalesced, not sent per event',
   fn: async () => {
     // The gain is a device setting the settings-page tests also write, so pin it
     // rather than inheriting whatever the last run left behind.
@@ -376,23 +376,29 @@ __webTests.push({
     const cap = __capture();
     try {
       // A gaming mouse emits over a thousand of these a second. One WebSocket
-      // message each builds a backlog the device cannot drain, and the movement
-      // then replays late - which reads as the cursor continuing in the old
-      // direction for a moment after you change.
+      // message each is more than the device can drain.
       for (let i = 0; i < 20; i++) {
         pad.dispatchEvent(new PointerEvent('pointermove', {
           pointerId: 13, pointerType: 'mouse', movementX: 3, movementY: -1, bubbles: true,
         }));
       }
-      __assert(!cap.length, `${cap.length} reports were sent before a frame elapsed`);
 
-      await __sleep(60);      // one frame at 60Hz, plus slack
+      // The first is already due, so it goes out at once; the rest coalesce.
+      __assert(cap.length === 1,
+        `${cap.length} reports went out during the burst, expected the first to be immediate`);
+
+      await __sleep(80);
       const moves = cap.filter((r) => r[0] === 1);
-      __assert(moves.length === 1, `20 events produced ${moves.length} reports, expected 1`);
-
       const signed = (b) => (b > 127 ? b - 256 : b);
-      __assert(signed(moves[0][1]) === 60, `dx came out ${signed(moves[0][1])}, expected 60`);
-      __assert(signed(moves[0][2]) === -20, `dy came out ${signed(moves[0][2])}, expected -20`);
+      __assert(moves.length <= 4,
+        `20 events produced ${moves.length} reports, expected them to be coalesced`);
+
+      // Coalescing must not lose distance: every pixel of movement has to
+      // arrive, just in fewer messages.
+      const dx = moves.reduce((n, r) => n + signed(r[1]), 0);
+      const dy = moves.reduce((n, r) => n + signed(r[2]), 0);
+      __assert(dx === 60, `dx totalled ${dx}, expected 60 - distance was dropped`);
+      __assert(dy === -20, `dy totalled ${dy}, expected -20 - distance was dropped`);
     } finally {
       captured = false;
       appSettings.mouse_gain = savedGain;

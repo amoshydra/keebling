@@ -346,29 +346,35 @@ document.addEventListener('pointerlockchange', () => {
 // Fired when a request is refused. Without this the refusal is invisible.
 document.addEventListener('pointerlockerror', captureRefused);
 
-// Movement is accumulated and flushed once per frame rather than sent per
-// event. A gaming mouse emits over a thousand pointermove events a second, and
-// a WebSocket message each: the device cannot drain that, a backlog builds, and
-// what you see is the movement replayed late - the cursor keeps going in the
-// old direction for a moment after you change. One report per frame is also all
-// the display can show.
-let pendingX = 0, pendingY = 0, flushScheduled = false;
+// Movement is coalesced to a maximum rate rather than sent per event: a gaming
+// mouse emits over a thousand events a second, and the device cannot drain a
+// WebSocket message each.
+//
+// Deliberately NOT requestAnimationFrame. That stops entirely in a hidden page,
+// and the page is hidden exactly when you are watching the host's screen instead
+// of the phone's - so the movement accumulates and then arrives in a lump, which
+// reads as lag followed by the cursor continuing in the old direction.
+// setTimeout keeps running when hidden, and performance.now() lets a flush that
+// is already due go out immediately rather than waiting for the next tick.
+const MOVE_INTERVAL_MS = 8;      // ~120/s, above any display's refresh rate
+let pendingX = 0, pendingY = 0, lastMoveAt = 0, moveTimer = null;
 
 function flushMove() {
-  flushScheduled = false;
+  if (moveTimer !== null) { clearTimeout(moveTimer); moveTimer = null; }
   if (!pendingX && !pendingY) return;
   const x = pendingX, y = pendingY;
   pendingX = 0;
   pendingY = 0;
+  lastMoveAt = performance.now();
   sendMove(x, y);
 }
 
 function queueMove(dx, dy) {
   pendingX += dx;
   pendingY += dy;
-  if (flushScheduled) return;
-  flushScheduled = true;
-  requestAnimationFrame(flushMove);
+  const wait = MOVE_INTERVAL_MS - (performance.now() - lastMoveAt);
+  if (wait <= 0) { flushMove(); return; }
+  if (moveTimer === null) moveTimer = setTimeout(flushMove, wait);
 }
 
 pad.addEventListener('pointermove', (e) => {
