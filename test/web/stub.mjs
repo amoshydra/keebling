@@ -56,7 +56,12 @@ export function startStub(port = 0) {
     const authed = (url.searchParams.get('token') || '').toUpperCase() === CODE;
 
     const json = (o, status = 200) => {
-      res.writeHead(status, { 'Content-Type': 'application/json' });
+      // Mirrors the firmware: its JSON endpoints are never cached, so a stale
+      // answer cannot read as "nothing happened".
+      res.writeHead(status, {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-store',
+      });
       res.end(JSON.stringify(o));
     };
     const needAuth = () => { if (!authed) { res.writeHead(403); res.end('forbidden'); return false; } return true; };
@@ -210,7 +215,12 @@ export function startStub(port = 0) {
     // to the copy in the binary rather than shadow a working page.
     const stored = device.uiFiles.get(file);
     const body = stored && stored.length ? stored : fs.readFileSync(full);
-    res.writeHead(200, { 'Content-Type': TYPES[path.extname(full)] || 'application/octet-stream' });
+    // Mirrors the firmware: these are never cached, so an upload cannot look
+    // like it did nothing.
+    res.writeHead(200, {
+      'Content-Type': TYPES[path.extname(full)] || 'application/octet-stream',
+      'Cache-Control': 'no-store',
+    });
     res.end(body);
   });
 

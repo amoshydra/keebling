@@ -283,6 +283,9 @@ static esp_err_t hid_handler(httpd_req_t *req) {
         return ESP_FAIL;
     }
     httpd_resp_set_type(req, "application/json");
+    // Never cached: a stale answer here reads as "nothing happened", which is
+    // the same trap the assets avoid.
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
     esp_err_t r = httpd_resp_sendstr(req, json);
     free(json);
     return r;
@@ -320,6 +323,9 @@ static esp_err_t scan_handler(httpd_req_t *req) {
         return ESP_FAIL;
     }
     httpd_resp_set_type(req, "application/json");
+    // Never cached: a stale answer here reads as "nothing happened", which is
+    // the same trap the assets avoid.
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
     esp_err_t r = httpd_resp_sendstr(req, json);
     free(json);
     return r;
@@ -417,6 +423,9 @@ static esp_err_t settings_get_handler(httpd_req_t *req) {
         return ESP_FAIL;
     }
     httpd_resp_set_type(req, "application/json");
+    // Never cached, for the same reason as the assets: a stale read here reads
+    // as "my change did not save".
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
     return httpd_resp_sendstr(req, settings_json());
 }
 
@@ -494,6 +503,12 @@ static esp_err_t static_handler(httpd_req_t *req) {
         if (strcmp(req->uri, s_assets[i].path) != 0) continue;
 
         httpd_resp_set_type(req, s_assets[i].type);
+
+        // Never let a browser cache these. The whole point of the filesystem is
+        // that a file can be replaced without a flash, and a cached copy would
+        // make an upload look like it did nothing - the most confusing way this
+        // feature could fail. They are small and the device is on the same LAN.
+        httpd_resp_set_hdr(req, "Cache-Control", "no-store");
 
         // An uploaded file wins over the built-in one. An empty file counts as
         // absent (ui_fs_open), so a zero-length upload cannot shadow a working
@@ -583,6 +598,9 @@ static esp_err_t ui_files_handler(httpd_req_t *req) {
         return ESP_FAIL;
     }
     httpd_resp_set_type(req, "application/json");
+    // Never cached: a stale answer here reads as "nothing happened", which is
+    // the same trap the assets avoid.
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
     esp_err_t r = httpd_resp_sendstr(req, json);
     free(json);
     return r;
