@@ -18,8 +18,12 @@ const BINDINGS = [
   { id: 'usbInterface',    key: 'usb_interface',    kind: 'text' },
   { id: 'screenText',      key: 'screen_text',      kind: 'text' },
   { id: 'screenTimeout',   key: 'screen_timeout_s', kind: 'range', suffix: ' s', dp: 0 },
-  { id: 'mouseGain',    key: 'mouse_gain',    kind: 'range', suffix: 'x', dp: 1 },
-  { id: 'scrollScale',  key: 'scroll_scale',  kind: 'range', suffix: 'x', dp: 1 },
+  // logrange: the useful span is about two and a half decades. A 3200 DPI
+  // gaming mouse needs roughly 0.02 and a low-resolution one roughly 1, so a
+  // linear slider would put everything useful in the first few percent of the
+  // track. The slider carries log10(value) * 100 instead.
+  { id: 'mouseGain',    key: 'mouse_gain',    kind: 'logrange', suffix: 'x', dp: 2 },
+  { id: 'scrollScale',  key: 'scroll_scale',  kind: 'logrange', suffix: 'x', dp: 2 },
   { id: 'scrollInvert', key: 'scroll_invert', kind: 'bool' },
   { id: 'tapClick',     key: 'tap_click',     kind: 'bool' },
   { id: 'tapMaxMs',     key: 'tap_max_ms',    kind: 'range', suffix: ' ms', dp: 0 },
@@ -31,15 +35,23 @@ function labelFor(b, value) {
   return Number(value).toFixed(b.dp) + (b.suffix || '');
 }
 
+// A logrange control stores log10(value) * 100, so one step is a 2.3% change
+// anywhere on the track rather than a different amount at each end.
+const isSlider = (b) => b.kind === 'range' || b.kind === 'logrange';
+const sliderToValue = (b, raw) =>
+  b.kind === 'logrange' ? Math.pow(10, Number(raw) / 100) : Number(raw);
+const valueToSlider = (b, v) =>
+  b.kind === 'logrange' ? Math.round(Math.log10(Math.max(1e-4, Number(v))) * 100) : v;
+
 function readIntoForm() {
   for (const b of BINDINGS) {
     const el = document.getElementById(b.id);
     const val = appSettings[b.key];
     if (b.kind === 'bool') el.checked = val !== false;
-    else el.value = val;
-    if (b.kind === 'range') {
+    else el.value = valueToSlider(b, val);
+    if (isSlider(b)) {
       const out = document.getElementById(b.id + 'Val');
-      if (out) out.textContent = labelFor(b, el.value);
+      if (out) out.textContent = labelFor(b, sliderToValue(b, el.value));
     }
   }
 }
@@ -50,12 +62,12 @@ function wireForm() {
     const handler = () => {
       let v;
       if (b.kind === 'bool') v = el.checked;
-      else if (b.kind === 'range') v = Number(el.value);
+      else if (isSlider(b)) v = sliderToValue(b, el.value);
       else v = el.value;
       setLocal(b.key, v);
-      if (b.kind === 'range') {
+      if (isSlider(b)) {
         const out = document.getElementById(b.id + 'Val');
-        if (out) out.textContent = labelFor(b, el.value);
+        if (out) out.textContent = labelFor(b, sliderToValue(b, el.value));
       }
       scheduleSave();
     };

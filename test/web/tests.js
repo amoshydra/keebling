@@ -272,7 +272,7 @@ __webTests.push({
 
 __webTests.push({
   page: 'control',
-  name: 'a refused capture is reported and retried, not swallowed',
+  name: 'a refused capture is reported, not swallowed',
   fn: async () => {
     // The shape that matters: browsers refuse a lock for about a second after
     // one is released, and that refusal is a *promise rejection*, not an
@@ -287,8 +287,7 @@ __webTests.push({
       __pointer('pointerdown', 11, 'mouse', 60, 60);
       await __sleep(80);
 
-      __assert(calls === 2,
-        `requestPointerLock was called ${calls} times, expected a plain retry after the first refusal`);
+      __assert(calls === 1, `requestPointerLock was called ${calls} times, expected 1`);
       const flash = document.getElementById('flash');
       __assert(flash.classList.contains('show'), 'a refused capture showed nothing');
       __assert(flash.textContent.includes('click again'), `the pad said: ${flash.textContent}`);
@@ -576,6 +575,36 @@ __webTests.push({
 
 
 // ---------------------------------------------------------------- HID descriptor
+__webTests.push({
+  page: 'settings',
+  name: 'pointer gain reaches a high-DPI mouse',
+  fn: async () => {
+    const el = document.getElementById('mouseGain');
+
+    // The slider carries log10(value) * 100, so the useful range for a gaming
+    // mouse is a normal part of the track rather than the first few percent.
+    const setGain = async (v) => {
+      el.value = String(Math.round(Math.log10(v) * 100));
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      await __sleep(30);
+    };
+
+    await setGain(0.02);
+    __assert(Math.abs(Number(appSettings.mouse_gain) - 0.02) < 0.002,
+      `a slider position for 0.02 stored ${appSettings.mouse_gain}`);
+    __assert(document.getElementById('mouseGainVal').textContent === '0.02x',
+      `label reads ${document.getElementById('mouseGainVal').textContent}`);
+
+    // And it survives the round trip through the device, which is where a
+    // linear range would have silently clamped it.
+    await setGain(0.05);
+    await __sleep(1300);
+    __assert(Math.abs(Number(appSettings.mouse_gain) - 0.05) < 0.005,
+      `after saving, the gain is ${appSettings.mouse_gain}`);
+  },
+});
+
+
 __webTests.push({
   page: 'settings',
   name: 'HID descriptor decodes into a readable tree',

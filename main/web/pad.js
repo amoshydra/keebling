@@ -314,24 +314,15 @@ function captureRefused() {
 function requestCapture() {
   if (!pad.requestPointerLock) return;
 
-  // Ask for raw movement where it is supported: the OS acceleration curve is
-  // tuned for a desktop pointer and makes a remote cursor feel wrong. Browsers
-  // that do not know the option reject the promise rather than ignoring it, so
-  // fall back to a plain request - still inside the same gesture, which is what
-  // the lock requires.
-  const attempt = (opts) => {
-    try { return opts ? pad.requestPointerLock(opts) : pad.requestPointerLock(); }
-    catch (_) { return null; }
-  };
-
-  const p = attempt({ unadjustedMovement: true });
-  if (!p || typeof p.then !== 'function') return;      // old API: synchronous
-
-  p.then(undefined, () => {
-    const plain = attempt(null);
-    if (plain && typeof plain.then === 'function') plain.then(undefined, captureRefused);
-    else captureRefused();
-  });
+  // Deliberately NOT asking for unadjustedMovement. That option requests raw
+  // device counts, which is the opposite of what a high-DPI mouse needs: a
+  // 3200 DPI gaming mouse produces tens to hundreds of counts per event, and
+  // with the OS pointer-speed curve bypassed the remote cursor crosses the
+  // screen dozens of times a second. Scaling that is the gain control's job,
+  // and it now reaches low enough to.
+  let p;
+  try { p = pad.requestPointerLock(); } catch (_) { captureRefused(); return; }
+  if (p && typeof p.then === 'function') p.then(undefined, captureRefused);
 }
 
 pad.addEventListener('pointerdown', (e) => {
@@ -359,6 +350,37 @@ pad.addEventListener('pointermove', (e) => {
   if (!captured || e.pointerType !== 'mouse') return;
   const gain = Number(appSettings.mouse_gain) || 1;
   sendMove(e.movementX * gain, e.movementY * gain);
+});
+
+// ------------------------------------------------------------------ temporary
+// Readout for the "cursor pins to a corner" report. It shows what the browser
+// is actually computing per event and in total, which is the fork that decides
+// whether the fault is here or in the report path below. Delete once resolved.
+const dbgEl = document.createElement('div');
+dbgEl.style.cssText =
+  'position:absolute;left:0;right:0;top:4px;text-align:center;line-height:1.5;' +
+  'font:11px ui-monospace,SFMono-Regular,monospace;color:#7fd;pointer-events:none';
+dbgEl.style.display = 'none';
+pad.appendChild(dbgEl);
+
+let dbg = { n: 0, rawX: 0, rawY: 0, sentX: 0, sentY: 0 };
+
+pad.addEventListener('pointermove', (e) => {
+  if (!captured || e.pointerType !== 'mouse') return;
+  const gain = Number(appSettings.mouse_gain) || 1;
+  dbg.n++;
+  dbg.rawX += e.movementX; dbg.rawY += e.movementY;
+  dbg.sentX += Math.round(e.movementX * gain); dbg.sentY += Math.round(e.movementY * gain);
+  dbgEl.textContent =
+    `events ${dbg.n}\n` +
+    `last raw ${e.movementX},${e.movementY}  gain ${gain}  ` +
+    `sent ${Math.round(e.movementX * gain)},${Math.round(e.movementY * gain)}\n` +
+    `totals raw ${dbg.rawX},${dbg.rawY}  sent ${dbg.sentX},${dbg.sentY}`;
+});
+
+document.addEventListener('pointerlockchange', () => {
+  dbgEl.style.display = captured ? 'block' : 'none';
+  if (captured) { dbg = { n: 0, rawX: 0, rawY: 0, sentX: 0, sentY: 0 }; }
 });
 
 window.addEventListener('mousedown', (e) => {
