@@ -366,6 +366,43 @@ __webTests.push({
 
 __webTests.push({
   page: 'control',
+  name: 'captured movement is batched per frame, not sent per event',
+  fn: async () => {
+    // The gain is a device setting the settings-page tests also write, so pin it
+    // rather than inheriting whatever the last run left behind.
+    const savedGain = appSettings.mouse_gain;
+    appSettings.mouse_gain = 1;
+    captured = true;
+    const cap = __capture();
+    try {
+      // A gaming mouse emits over a thousand of these a second. One WebSocket
+      // message each builds a backlog the device cannot drain, and the movement
+      // then replays late - which reads as the cursor continuing in the old
+      // direction for a moment after you change.
+      for (let i = 0; i < 20; i++) {
+        pad.dispatchEvent(new PointerEvent('pointermove', {
+          pointerId: 13, pointerType: 'mouse', movementX: 3, movementY: -1, bubbles: true,
+        }));
+      }
+      __assert(!cap.length, `${cap.length} reports were sent before a frame elapsed`);
+
+      await __sleep(60);      // one frame at 60Hz, plus slack
+      const moves = cap.filter((r) => r[0] === 1);
+      __assert(moves.length === 1, `20 events produced ${moves.length} reports, expected 1`);
+
+      const signed = (b) => (b > 127 ? b - 256 : b);
+      __assert(signed(moves[0][1]) === 60, `dx came out ${signed(moves[0][1])}, expected 60`);
+      __assert(signed(moves[0][2]) === -20, `dy came out ${signed(moves[0][2])}, expected -20`);
+    } finally {
+      captured = false;
+      appSettings.mouse_gain = savedGain;
+    }
+  },
+});
+
+
+__webTests.push({
+  page: 'control',
   name: 'virtual key stays held until released',
   fn: async () => {
     __resetInput();

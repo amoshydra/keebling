@@ -346,10 +346,35 @@ document.addEventListener('pointerlockchange', () => {
 // Fired when a request is refused. Without this the refusal is invisible.
 document.addEventListener('pointerlockerror', captureRefused);
 
+// Movement is accumulated and flushed once per frame rather than sent per
+// event. A gaming mouse emits over a thousand pointermove events a second, and
+// a WebSocket message each: the device cannot drain that, a backlog builds, and
+// what you see is the movement replayed late - the cursor keeps going in the
+// old direction for a moment after you change. One report per frame is also all
+// the display can show.
+let pendingX = 0, pendingY = 0, flushScheduled = false;
+
+function flushMove() {
+  flushScheduled = false;
+  if (!pendingX && !pendingY) return;
+  const x = pendingX, y = pendingY;
+  pendingX = 0;
+  pendingY = 0;
+  sendMove(x, y);
+}
+
+function queueMove(dx, dy) {
+  pendingX += dx;
+  pendingY += dy;
+  if (flushScheduled) return;
+  flushScheduled = true;
+  requestAnimationFrame(flushMove);
+}
+
 pad.addEventListener('pointermove', (e) => {
   if (!captured || e.pointerType !== 'mouse') return;
   const gain = Number(appSettings.mouse_gain) || 1;
-  sendMove(e.movementX * gain, e.movementY * gain);
+  queueMove(e.movementX * gain, e.movementY * gain);
 });
 
 // ------------------------------------------------------------------ temporary
@@ -385,6 +410,7 @@ document.addEventListener('pointerlockchange', () => {
 
 window.addEventListener('mousedown', (e) => {
   if (!captured) return;
+  flushMove();       // so a click is not overtaken by movement queued before it
   if (e.button === 0) buttons |= 1;
   if (e.button === 2) buttons |= 2;
   if (e.button === 1) buttons |= 4;
@@ -393,6 +419,7 @@ window.addEventListener('mousedown', (e) => {
 
 window.addEventListener('mouseup', (e) => {
   if (!captured) return;
+  flushMove();
   if (e.button === 0) buttons &= ~1;
   if (e.button === 2) buttons &= ~2;
   if (e.button === 1) buttons &= ~4;
