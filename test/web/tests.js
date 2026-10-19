@@ -300,27 +300,38 @@ __webTests.push({
 
 __webTests.push({
   page: 'control',
-  name: 'wheel works in line mode, where a notch is a deltaY of 3',
+  name: 'one wheel notch is one step, in pixels or lines',
   fn: async () => {
     __resetInput();
     captured = true;
     const cap = __capture();
     try {
-      // One notch, not several. Firefox reports deltaMode 1 with deltaY ~3, and
-      // treating that as pixels makes a notch worth a fraction of a step - so
-      // the wheel crawls rather than dying. Accumulation alone would still emit
-      // something eventually, which is why this asserts a single notch is worth
-      // a whole step on its own.
+      // A pixel-mode notch (Chrome) is a deltaY of about 100. Dividing that by
+      // 8 made one detent worth twelve clicks - about 36 lines of scroll.
       window.dispatchEvent(new WheelEvent('wheel',
-        { deltaY: 3, deltaMode: 1, cancelable: true }));
+        { deltaY: 100, deltaMode: 0, cancelable: true }));
       await __sleep(20);
 
-      const wheels = cap.filter((r) => r[0] === 1 && r[4] !== 0)
+      let wheels = cap.filter((r) => r[0] === 1 && r[4] !== 0)
         .map((r) => (r[4] > 127 ? r[4] - 256 : r[4]));
-      __assert(wheels.length === 1, `one notch produced ${wheels.length} reports, expected 1`);
-      __assert(wheels[0] < 0, `scrolling down produced ${wheels[0]} - expected negative`);
-      __assert(wheels[0] <= -4,
-        `one line-mode notch moved the wheel by ${wheels[0]}, expected a whole step`);
+      __assert(wheels.length === 1 && wheels[0] === -1,
+        `one pixel notch produced ${JSON.stringify(wheels)}, expected exactly [-1]`);
+
+      // Line mode (Firefox) reports a deltaY of about 3, so a single notch is
+      // just under a whole step. Treating that as pixels makes it worth a
+      // fraction of one, and the remainder has to be carried rather than
+      // dropped or the wheel crawls instead of scrolling.
+      cap.length = 0;
+      for (let i = 0; i < 2; i++) {
+        window.dispatchEvent(new WheelEvent('wheel',
+          { deltaY: 3, deltaMode: 1, cancelable: true }));
+      }
+      await __sleep(20);
+
+      wheels = cap.filter((r) => r[0] === 1 && r[4] !== 0)
+        .map((r) => (r[4] > 127 ? r[4] - 256 : r[4]));
+      __assert(wheels.length >= 1 && wheels.every((v) => v < 0),
+        `two line-mode notches produced ${JSON.stringify(wheels)}, expected negative scroll`);
     } finally {
       captured = false;
     }

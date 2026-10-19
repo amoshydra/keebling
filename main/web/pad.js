@@ -249,7 +249,11 @@ pad.addEventListener('pointermove', (e) => {
     // the same convention as the mouse wheel handler above.
     const scale = Number(appSettings.scroll_scale) || 1;
     const dir = appSettings.scroll_invert ? -1 : 1;
-    scrollAccum += dy * 0.15 * scale * dir;
+    // 0.02, not 0.15: a full-height swipe on a phone is about 500px, and at
+    // 0.15 that was 75 wheel notches - roughly 225 lines for one gesture. At
+    // 0.02 the same swipe is 10 notches, and the Scroll speed slider scales it
+    // from there.
+    scrollAccum += dy * 0.02 * scale * dir;
     const whole = Math.trunc(scrollAccum);
     if (whole !== 0) {
       scrollAccum -= whole;
@@ -383,8 +387,12 @@ window.addEventListener('wheel', (e) => {
   if (!captured) return;
   e.preventDefault();
 
-  const perUnit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 64 : 1;
-  wheelAccum += -e.deltaY * perUnit / 8;
+  // 100, not 8. A pixel-mode notch is a deltaY of about 100, so dividing by 8
+  // made one detent worth twelve wheel clicks - roughly 36 lines of scroll. The
+  // line-mode scale is chosen so a Firefox notch (deltaY ~3) is also worth
+  // about one, and the remainder is carried rather than dropped.
+  const perUnit = e.deltaMode === 1 ? 32 : e.deltaMode === 2 ? 320 : 1;
+  wheelAccum += -e.deltaY * perUnit / 100;
 
   const whole = Math.trunc(wheelAccum);
   if (whole !== 0) {
