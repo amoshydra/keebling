@@ -7,6 +7,7 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
+import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -39,6 +40,20 @@ const UI_FILES = [
 // Mirrors UI_UPLOAD_MAX in main/web_server.c.
 const UI_MAX = 64 * 1024;
 
+// Mirrors the screen image format in main/screen_image.h: an 8-byte header
+// (format, reserved, payload length, CRC-32) and a 6,400-byte packed 4-bit
+// greyscale payload.
+const SCREEN_IMAGE = { format: 0x01, header: 8, payload: 6400, file: 6408 };
+
+// The same rule the firmware applies before it will draw. A page test that
+// uploads a body the device would refuse fails here exactly as it would there.
+function screenImageOk(b) {
+  if (b.length !== SCREEN_IMAGE.file) return false;
+  if (b[0] !== SCREEN_IMAGE.format || b[1] !== 0) return false;
+  if (b.readUInt16LE(2) !== SCREEN_IMAGE.payload) return false;
+  return zlib.crc32(b.subarray(SCREEN_IMAGE.header)) === b.readUInt32LE(4);
+}
+
 export function startStub(port = 0) {
   // What the "device" holds. Tests can read and change this.
   const device = {
@@ -48,6 +63,7 @@ export function startStub(port = 0) {
     forgets: 0,
     uiFiles: new Map(), // name -> Buffer, the uploaded UI files
     uiResets: 0,        // /ui/reset calls, including reset-all
+    screenImage: null,  // Buffer, the stored screen.img (null = nothing)
   };
 
   const server = http.createServer((req, res) => {
@@ -194,6 +210,52 @@ export function startStub(port = 0) {
         res.writeHead(200); res.end('reset');
         return;
       }
+
+      case '/screen/image': {
+        if (!needAuth()) return;
+
+        if (req.method === 'GET') {
+          if (!device.screenImage) { res.writeHead(404); res.end('no image'); return; }
+          // The firmware sends the whole file, header included, so the page can
+          // check the format and the CRC for itself.
+          res.writeHead(200, {
+            'Content-Type': 'application/octet-stream',
+            'Cache-Control': 'no-store',
+          });
+          res.end(device.screenImage);
+          return;
+        }
+        if (req.method !== 'POST') { res.writeHead(405); res.end(); return; }
+
+        const len = Number(req.headers['content-length'] || 0);
+        if (len !== SCREEN_IMAGE.file) {
+          // Read the body before refusing, the same as the firmware: a client
+          // that is mid-upload then sees the 400 instead of a dead socket.
+          req.on('data', () => {});
+          req.on('end', () => { res.writeHead(400); res.end('expected 6408 bytes'); });
+          return;
+        }
+
+        const chunks = [];
+        req.on('data', (c) => chunks.push(c));
+        req.on('end', () => {
+          const body = Buffer.concat(chunks);
+          if (body.length !== SCREEN_IMAGE.file || !screenImageOk(body)) {
+            // Nothing is stored, so a tap can never land on a garbage screen.
+            res.writeHead(400); res.end('invalid image'); return;
+          }
+          device.screenImage = body;
+          res.writeHead(200); res.end('stored');
+        });
+        return;
+      }
+
+      case '/screen/reset':
+        if (req.method !== 'POST') { res.writeHead(405); res.end(); return; }
+        if (!needAuth()) return;
+        device.screenImage = null;
+        res.writeHead(200); res.end('reset');
+        return;
 
       case '/ws':
         // The UI must cope with a socket that will not connect; the tests

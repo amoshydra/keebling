@@ -2,8 +2,9 @@
 //
 // Every call is safe when the filesystem is absent: reads report "nothing
 // stored" and writes fail, so the embedded assets in the firmware stay in
-// charge. Names are never turned into paths here - the caller passes names
-// from the asset table, which is the only whitelist there is.
+// charge. Names never come from a request: every caller passes a compile-time
+// constant - the asset table for the web files, SCREEN_IMAGE_NAME for the
+// screen image - so there is nothing here to turn into a path injection.
 
 #pragma once
 

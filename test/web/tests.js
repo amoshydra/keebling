@@ -524,6 +524,310 @@ __webTests.push({
   },
 });
 
+// ---------------------------------------------------------------- screen image
+// The conversion is pure logic and it is where a silent error would produce a
+// plausible-looking wrong image, so it is asserted directly: canvas -> nibbles,
+// byte for byte, and the dither's own pattern rather than a threshold's.
+const __greyImage = (fill) => {
+  const d = new Uint8ClampedArray(160 * 80 * 4);
+  for (let y = 0; y < 80; y++) {
+    for (let x = 0; x < 160; x++) {
+      const v = typeof fill === 'function' ? fill(x, y) : fill;
+      const i = (y * 160 + x) * 4;
+      d[i] = d[i + 1] = d[i + 2] = v;
+      d[i + 3] = 255;
+    }
+  }
+  return new ImageData(d, 160, 80);
+};
+const __sameBytes = (a, b) =>
+  a.length === b.length && a.every((v, i) => v === b[i]);
+
+__webTests.push({
+  page: 'settings',
+  name: 'screen image: canvas packs to 6,400 payload bytes with a header CRC',
+  fn: async () => {
+    // The standard CRC-32 vector, so an implementation that is wrong in the
+    // same way as the firmware's cannot agree with itself and pass.
+    const vector = crc32(new TextEncoder().encode('123456789'));
+    __assert(vector === 0xCBF43926,
+      `crc32('123456789') = 0x${vector.toString(16)}, expected 0xcbf43926`);
+
+    const img = __greyImage(0);
+    img.data[0] = img.data[1] = img.data[2] = 255;            // (0,0) white
+    img.data[640] = img.data[641] = img.data[642] = 255;      // (0,1) white
+    const bytes = packScreenImage(img);
+
+    __assert(bytes.length === 6408, `the file is ${bytes.length} bytes, expected 6408`);
+    __assert(bytes.length - 8 === 6400, `the payload is ${bytes.length - 8} bytes`);
+    __assert(bytes[0] === 0x01, `format byte is 0x${bytes[0].toString(16)}`);
+    __assert(bytes[1] === 0, `reserved byte is ${bytes[1]}`);
+    __assert((bytes[2] | (bytes[3] << 8)) === 6400, 'the length field is not 6400');
+    const want = crc32(bytes.subarray(8));
+    const got = (bytes[4] | (bytes[5] << 8) | (bytes[6] << 16) | (bytes[7] << 24)) >>> 0;
+    __assert(got === want,
+      `header CRC 0x${got.toString(16)} != payload CRC 0x${want.toString(16)}`);
+    __assert(screenImageValid(bytes), 'the packed file does not validate');
+
+    // Packing: high nibble is the left pixel, 80 bytes per row.
+    __assert(bytes[8] === 0xF0, `row 0 byte 0 is 0x${bytes[8].toString(16)}, expected 0xf0`);
+    __assert(bytes[8 + 80] === 0xF0,
+      `row 1 byte 0 is 0x${bytes[8 + 80].toString(16)}, expected 0xf0`);
+    __assert(bytes[8 + 79] === 0x00,
+      `row 0 byte 79 is 0x${bytes[8 + 79].toString(16)}, expected 0`);
+    __assert(bytes[8 + 6399] === 0x00,
+      `the last byte is 0x${bytes[8 + 6399].toString(16)}, expected 0`);
+
+    // ...and the bottom-right pair lands on exactly the last byte.
+    const last = (79 * 160 + 158) * 4;
+    img.data[last] = img.data[last + 1] = img.data[last + 2] = 255;   // (158,79)
+    const tail = packScreenImage(img);
+    __assert(tail[8 + 6399] === 0xF0,
+      `the bottom-right pair packed to 0x${tail[8 + 6399].toString(16)}, expected 0xf0`);
+
+    // Black and white are the ends of the ramp, and every payload byte moves
+    // with the input rather than being left as it was.
+    const black = packScreenImage(__greyImage(0));
+    const white = packScreenImage(__greyImage(255));
+    for (let i = 8; i < 6408; i++) {
+      __assert(black[i] === 0x00, `black byte ${i} is 0x${black[i].toString(16)}`);
+      __assert(white[i] === 0xFF, `white byte ${i} is 0x${white[i].toString(16)}`);
+    }
+  },
+});
+
+__webTests.push({
+  page: 'settings',
+  name: 'screen image: a flat grey is dithered, not thresholded',
+  fn: async () => {
+    const payload = packScreenImage(__greyImage(128)).subarray(8);
+
+    // 128/255 * 15 = 7.53, so a plain threshold gives level 8 everywhere. The
+    // ordered dither must give both 7 and 8, arranged as the Bayer matrix
+    // says: for this value every cell below 8 rounds down, which is a
+    // checkerboard rather than a flat block.
+    let sevens = 0, eights = 0;
+    for (let y = 0; y < 4; y++) {
+      for (let x = 0; x < 4; x++) {
+        const b = payload[y * 80 + (x >> 1)];
+        const nib = (x & 1) ? (b & 0x0F) : (b >> 4);
+        const expected = ((x + y) % 2 === 0) ? 7 : 8;
+        __assert(nib === expected,
+          `(${x},${y}) is level ${nib}, expected ${expected}`);
+        if (nib === 7) sevens++; else eights++;
+      }
+    }
+    __assert(sevens === 8 && eights === 8,
+      `a 4x4 tile has ${sevens} dark and ${eights} light cells, expected 8 each`);
+
+    // A different input moves the boundary: at 140 (8.24 levels) only the four
+    // highest Bayer cells round up.
+    const higher = packScreenImage(__greyImage(140)).subarray(8);
+    let nines = 0;
+    for (let y = 0; y < 4; y++) {
+      for (let x = 0; x < 4; x++) {
+        const b = higher[y * 80 + (x >> 1)];
+        if (((x & 1) ? (b & 0x0F) : (b >> 4)) === 9) nines++;
+      }
+    }
+    __assert(nines === 4, `${nines} cells rounded up at 140, expected 4`);
+
+    // Exactly on a level nothing moves: black, white and 3*17 stay put.
+    for (const [v, level] of [[0, 0], [255, 15], [51, 3]]) {
+      for (const b of packScreenImage(__greyImage(v)).subarray(8)) {
+        __assert((b >> 4) === level && (b & 0x0F) === level,
+          `grey ${v} packed to 0x${b.toString(16)}, expected level ${level} both halves`);
+      }
+    }
+
+    // The dither tracks a ramp: the mean level over the image is the mean of
+    // the input (15 * 0.5 = 7.5), which a threshold that ignored the input
+    // would not manage.
+    const ramp = packScreenImage(__greyImage((x) => Math.round(x * 255 / 159))).subarray(8);
+    let sum = 0, n = 0;
+    for (const b of ramp) { sum += (b >> 4) + (b & 0x0F); n += 2; }
+    const mean = sum / n;
+    __assert(Math.abs(mean - 7.5) < 0.15,
+      `the ramp's mean level is ${mean.toFixed(3)}, expected ~7.5`);
+  },
+});
+
+__webTests.push({
+  page: 'settings',
+  name: 'screen image: the preview shows the dithered copy',
+  fn: async () => {
+    const canvas = document.getElementById('screenImagePreview');
+    __assert(canvas && canvas.width === 160 && canvas.height === 80,
+      'the preview canvas is not 160x80');
+
+    const img = __greyImage(0);
+    img.data[0] = img.data[1] = img.data[2] = 255;            // (0,0) white
+    renderScreenImage(canvas, packScreenImage(img));
+    const px = canvas.getContext('2d').getImageData(0, 0, 160, 80).data;
+    // Level 15 comes back as 255 and level 0 as 0: the preview uses the same
+    // 17*i ramp the firmware's RGB565 table is built from.
+    __assert(px[0] === 255 && px[1] === 255 && px[2] === 255,
+      `(0,0) previews as ${px[0]},${px[1]},${px[2]}, expected white`);
+    __assert(px[8] === 0 && px[9] === 0 && px[10] === 0,
+      `(2,0) previews as ${px[8]},${px[9]},${px[10]}, expected black`);
+
+    // A dithered grey must come back as the two levels, not one flat block.
+    renderScreenImage(canvas, packScreenImage(__greyImage(128)));
+    const mid = canvas.getContext('2d').getImageData(0, 0, 160, 80).data;
+    const seen = new Set();
+    for (let i = 0; i < 4 * 4 * 4; i += 4) seen.add(mid[i]);
+    __assert(seen.size === 2 && seen.has(7 * 17) && seen.has(8 * 17),
+      `a flat grey previewed as levels ${[...seen].join(', ')}`);
+  },
+});
+
+__webTests.push({
+  page: 'settings',
+  name: 'screen image: no valid image means the mode is out of the cycle',
+  fn: async () => {
+    await __sleep(300);   // the page checks the device on load
+
+    // This is the question the firmware's tap cycle asks before it stops on
+    // the mode, and the stub answers it the same way: nothing stored, so
+    // there is no screen to land on.
+    const r = await fetch(`/screen/image?token=${window.__CODE}`);
+    __assert(r.status === 404, `a device with no image answered HTTP ${r.status}`);
+    const note = document.getElementById('screenImageNote').textContent;
+    __assert(note.includes('BOOT cycle'), `the page says: ${note}`);
+    __assert(document.getElementById('screenImageClear').hidden,
+      'the page offers to remove an image that is not there');
+    __assert(document.getElementById('screenImageSend').disabled,
+      'Send is enabled before a file has been picked');
+
+    // The two things the panel cannot tell anyone for itself.
+    const hint = document.getElementById('screenImageHint').textContent;
+    __assert(/greyscale/.test(hint), `the note does not mention greyscale: ${hint}`);
+    __assert(/colour/.test(hint), `the note does not mention colour: ${hint}`);
+    __assert(/gamma/.test(hint), `the note does not mention gamma: ${hint}`);
+
+    // Bodies the firmware would refuse, none of which may become an image:
+    // a corrupted payload, a format byte from a version this build does not
+    // know, a truncated body and a wrong size.
+    const good = packScreenImage(__greyImage(200));
+    const corrupt = Uint8Array.from(good);
+    corrupt[8 + 10] ^= 0xFF;
+    const stale = Uint8Array.from(good);
+    stale[0] = 0x02;
+    const cases = [
+      ['corrupted', corrupt],
+      ['stale format', stale],
+      ['truncated', good.slice(0, 100)],
+      ['wrong size', new Uint8Array(10)],
+    ];
+    for (const [name, body] of cases) {
+      const bad = await fetch(`/screen/image?token=${window.__CODE}`,
+        { method: 'POST', body });
+      __assert(bad.status === 400, `a ${name} image answered HTTP ${bad.status}`);
+      const after = await fetch(`/screen/image?token=${window.__CODE}`);
+      __assert(after.status === 404,
+        `after a refused ${name} upload the device answered HTTP ${after.status}`);
+    }
+
+    const noToken = await fetch('/screen/image', { method: 'POST', body: good });
+    __assert(noToken.status === 403,
+      `an upload without a code answered HTTP ${noToken.status}`);
+  },
+});
+
+__webTests.push({
+  page: 'settings',
+  name: 'screen image: sending stores exactly what the preview shows',
+  fn: async () => {
+    // A picture with structure, so the whole path is exercised: the page
+    // scales it, dithers it and posts the packed result.
+    const src = document.createElement('canvas');
+    src.width = 320; src.height = 160;
+    const sctx = src.getContext('2d');
+    sctx.fillStyle = '#000';
+    sctx.fillRect(0, 0, 320, 160);
+    sctx.fillStyle = '#fff';
+    sctx.fillRect(0, 0, 160, 80);
+    const blob = await new Promise((r) => src.toBlob(r, 'image/png'));
+    __assert(blob, 'could not build a PNG to pick');
+
+    const picker = document.getElementById('screenImageFile');
+    const dt = new DataTransfer();
+    dt.items.add(new File([blob], 'test.png', { type: 'image/png' }));
+    picker.files = dt.files;
+    picker.dispatchEvent(new Event('change', { bubbles: true }));
+
+    for (let i = 0; i < 100 && !screenImageBytes; i++) await __sleep(50);
+    __assert(screenImageBytes, 'the picked file never became a packed image');
+    __assert(!document.getElementById('screenImageSend').disabled,
+      'Send stayed disabled after a file was picked');
+
+    // The preview is the promise the page makes, so it must be the bytes that
+    // get sent. Repacking the preview canvas is an independent route to them.
+    const preview = document.getElementById('screenImagePreview');
+    const shown = preview.getContext('2d').getImageData(0, 0, 160, 80);
+    __assert(__sameBytes(packScreenImage(shown), screenImageBytes),
+      'the preview and the bytes to send disagree');
+
+    document.getElementById('screenImageSend').click();
+    for (let i = 0; i < 100 &&
+         !document.getElementById('screenImageNote').textContent.includes('Stored'); i++) {
+      await __sleep(50);
+    }
+    const note = document.getElementById('screenImageNote').textContent;
+    __assert(note.includes('Stored on the device'), `the page says: ${note}`);
+    __assert(!document.getElementById('screenImageClear').hidden,
+      'there is still no way to remove the image that was just stored');
+
+    // Server side: the device holds byte for byte what the page sent, and it
+    // passes the same rule the firmware applies before drawing.
+    const r = await fetch(`/screen/image?token=${window.__CODE}`);
+    __assert(r.status === 200, `the device answered HTTP ${r.status}`);
+    const stored = new Uint8Array(await r.arrayBuffer());
+    __assert(stored.length === 6408, `the device holds ${stored.length} bytes`);
+    __assert(__sameBytes(stored, screenImageBytes),
+      'the device holds different bytes from the ones the page sent');
+    __assert(screenImageValid(stored), 'the device holds an image that does not validate');
+
+    // A stored image must survive a refused upload: the mode is still offered
+    // and the old picture is what it draws.
+    const broken = Uint8Array.from(stored);
+    broken[8 + 3] ^= 0xFF;
+    const refused = await fetch(`/screen/image?token=${window.__CODE}`,
+      { method: 'POST', body: broken });
+    __assert(refused.status === 400, `a corrupted upload answered HTTP ${refused.status}`);
+    const after = new Uint8Array(
+      await (await fetch(`/screen/image?token=${window.__CODE}`)).arrayBuffer());
+    __assert(__sameBytes(after, stored), 'a refused upload replaced the stored image');
+  },
+});
+
+__webTests.push({
+  page: 'settings',
+  name: 'screen image: removing it takes the screen back out of the cycle',
+  fn: async () => {
+    const before = await fetch(`/screen/image?token=${window.__CODE}`);
+    __assert(before.status === 200, 'the send test did not leave an image stored');
+
+    window.confirm = () => true;   // the removal asks first
+    document.getElementById('screenImageClear').click();
+    for (let i = 0; i < 100 &&
+         !document.getElementById('screenImageNote').textContent.includes('Removed'); i++) {
+      await __sleep(50);
+    }
+    const note = document.getElementById('screenImageNote').textContent;
+    __assert(note.includes('Removed'), `the page says: ${note}`);
+    __assert(note.includes('BOOT cycle'), `the page says: ${note}`);
+
+    const after = await fetch(`/screen/image?token=${window.__CODE}`);
+    __assert(after.status === 404,
+      `after removing it the device answered HTTP ${after.status}`);
+    __assert(document.getElementById('screenImageClear').hidden,
+      'the page still offers to remove an image that is gone');
+    __assert(document.getElementById('screenImageSend').disabled,
+      'Send is enabled with nothing picked after a removal');
+  },
+});
+
 // ---------------------------------------------------------------- macro DSL
 // Driven directly rather than through the page, so a failure names the token
 // rather than a DOM element.
@@ -1082,7 +1386,8 @@ __webTests.push({
   page: 'ui',
   name: 'a name that is not a UI file is refused',
   fn: async () => {
-    const cases = ['../style.css', 'evil.txt', 'index.html/../style.css', 'style.css.tmp'];
+    const cases = ['../style.css', 'evil.txt', 'index.html/../style.css',
+                   'style.css.tmp', 'screen.img'];
     for (const name of cases) {
       const q = `name=${encodeURIComponent(name)}&token=${window.__CODE}`;
       const up = await fetch(`/ui/upload?${q}`, { method: 'POST', body: 'x' });

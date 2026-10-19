@@ -189,6 +189,252 @@ document.getElementById('uiResetAll').addEventListener('click', async () => {
   }
 });
 
+// ---------------------------------------------------------------- screen image
+// The device has no PNG or JPEG decoder, and this feature must not need one, so
+// the page does the whole conversion and posts the packed result: scale to
+// 160x80, luminance, 4-bit ordered dither, two pixels per byte, then a small
+// header with a CRC. The preview shows the same bytes that get sent - a
+// washed-out panel is the risk this feature carries, and seeing the dithered
+// result beforehand is the only way to catch it without hardware.
+const SCREEN_IMAGE_W = 160;
+const SCREEN_IMAGE_H = 80;
+const SCREEN_IMAGE_PAYLOAD = SCREEN_IMAGE_W * SCREEN_IMAGE_H / 2;   // 6,400
+const SCREEN_IMAGE_HEADER = 8;
+const SCREEN_IMAGE_FILE = SCREEN_IMAGE_HEADER + SCREEN_IMAGE_PAYLOAD;
+const SCREEN_IMAGE_FORMAT = 0x01;
+
+// Bayer 4x4, 0..15. A flat area between two levels turns into a fine pattern of
+// both instead of a hard step, which is what makes a 4-bit ramp look smooth.
+const BAYER4 = [
+  [ 0,  8,  2, 10],
+  [12,  4, 14,  6],
+  [ 3, 11,  1,  9],
+  [15,  7, 13,  5],
+];
+
+// IEEE CRC-32, bitwise so it is visibly the same loop the firmware runs. Kept
+// here rather than fetched because the point is that the two agree byte for
+// byte on a 6,400-byte payload.
+function crc32(bytes) {
+  let crc = 0xFFFFFFFF;
+  for (let i = 0; i < bytes.length; i++) {
+    crc ^= bytes[i];
+    for (let b = 0; b < 8; b++) crc = (crc >>> 1) ^ (0xEDB88320 & -(crc & 1));
+  }
+  return (crc ^ 0xFFFFFFFF) >>> 0;
+}
+
+// Rec.601 luma, then an ordered dither down to 16 levels. The Bayer cell adds
+// less than one level of offset, so the average over a 4x4 tile still tracks
+// the input; exactly on a level (black, white, 3*17) nothing moves at all.
+function quantiseGrey4(r, g, b, x, y) {
+  const luma = (299 * r + 587 * g + 114 * b) / 1000 / 255;
+  const cell = (BAYER4[y & 3][x & 3] + 0.5) / 16;
+  return Math.floor(luma * 15 + cell);
+}
+
+// ImageData at exactly 160x80 -> the file the device stores: header, then 80
+// rows of 80 bytes, high nibble is the left pixel.
+function packScreenImage(imageData) {
+  if (imageData.width !== SCREEN_IMAGE_W || imageData.height !== SCREEN_IMAGE_H) {
+    throw new Error(`expected ${SCREEN_IMAGE_W}x${SCREEN_IMAGE_H}, ` +
+                    `got ${imageData.width}x${imageData.height}`);
+  }
+
+  const px = imageData.data;
+  const out = new Uint8Array(SCREEN_IMAGE_FILE);
+  out[0] = SCREEN_IMAGE_FORMAT;
+  out[1] = 0;
+  out[2] = SCREEN_IMAGE_PAYLOAD & 0xFF;
+  out[3] = (SCREEN_IMAGE_PAYLOAD >> 8) & 0xFF;
+
+  for (let y = 0; y < SCREEN_IMAGE_H; y++) {
+    for (let x = 0; x < SCREEN_IMAGE_W; x += 2) {
+      const i = (y * SCREEN_IMAGE_W + x) * 4;
+      const hi = quantiseGrey4(px[i], px[i + 1], px[i + 2], x, y);
+      const lo = quantiseGrey4(px[i + 4], px[i + 5], px[i + 6], x + 1, y);
+      out[SCREEN_IMAGE_HEADER + (y * SCREEN_IMAGE_W + x) / 2] = (hi << 4) | lo;
+    }
+  }
+
+  const crc = crc32(out.subarray(SCREEN_IMAGE_HEADER));
+  out[4] = crc & 0xFF;
+  out[5] = (crc >> 8) & 0xFF;
+  out[6] = (crc >> 16) & 0xFF;
+  out[7] = (crc >>> 24) & 0xFF;
+  return out;
+}
+
+// The same checks the firmware makes before it will draw: exact size, format
+// byte, length field and a CRC that matches. Applied to what comes back from
+// the device too, so a truncated file is noticed rather than shown.
+function screenImageValid(bytes) {
+  if (!bytes || bytes.length !== SCREEN_IMAGE_FILE) return false;
+  if (bytes[0] !== SCREEN_IMAGE_FORMAT || bytes[1] !== 0) return false;
+  if ((bytes[2] | (bytes[3] << 8)) !== SCREEN_IMAGE_PAYLOAD) return false;
+  const want = (bytes[4] | (bytes[5] << 8) | (bytes[6] << 16) |
+                (bytes[7] << 24)) >>> 0;
+  return crc32(bytes.subarray(SCREEN_IMAGE_HEADER)) === want;
+}
+
+// Expand packed nibbles back to pixels. Level i is i*17, which is the ramp the
+// firmware's RGB565 table is built from, so this is what the panel will show
+// (modulo the panel's own colour response, which is the part only hardware can
+// settle).
+function renderScreenImage(canvas, bytes) {
+  const ctx = canvas.getContext('2d');
+  const img = ctx.createImageData(SCREEN_IMAGE_W, SCREEN_IMAGE_H);
+  for (let y = 0; y < SCREEN_IMAGE_H; y++) {
+    for (let x = 0; x < SCREEN_IMAGE_W; x += 2) {
+      const b = bytes[SCREEN_IMAGE_HEADER + (y * SCREEN_IMAGE_W + x) / 2];
+      const hi = b >> 4, lo = b & 0x0F;
+      for (let dx = 0; dx < 2; dx++) {
+        const v = (dx ? lo : hi) * 17;
+        const i = (y * SCREEN_IMAGE_W + x + dx) * 4;
+        img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
+        img.data[i + 3] = 255;
+      }
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+// Scale whatever was picked to the panel, filling it and cropping the excess:
+// the panel is 4:2 and a portrait photo would otherwise be squashed.
+async function imageFileToCanvas(file) {
+  const bitmap = await createImageBitmap(file);
+  const canvas = document.createElement('canvas');
+  canvas.width = SCREEN_IMAGE_W;
+  canvas.height = SCREEN_IMAGE_H;
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, SCREEN_IMAGE_W, SCREEN_IMAGE_H);
+
+  const scale = Math.max(SCREEN_IMAGE_W / bitmap.width, SCREEN_IMAGE_H / bitmap.height);
+  const w = bitmap.width * scale, h = bitmap.height * scale;
+  ctx.drawImage(bitmap, (SCREEN_IMAGE_W - w) / 2, (SCREEN_IMAGE_H - h) / 2, w, h);
+  bitmap.close();
+  return canvas;
+}
+
+const screenImagePreview = document.getElementById('screenImagePreview');
+const screenImageNote = document.getElementById('screenImageNote');
+let screenImageBytes = null;    // the packed file waiting to be sent, or last sent
+
+function setScreenImageNote(text, warn) {
+  screenImageNote.className = 'note' + (warn ? ' warn' : '');
+  screenImageNote.textContent = text;
+}
+
+// What the device holds, fetched rather than assumed: this is the only view of
+// the screen that survives a reload, and it is what the tap cycle will find.
+async function loadDeviceScreenImage() {
+  try {
+    const r = await apiFetch('/screen/image');
+    if (r.status === 404) {
+      document.getElementById('screenImageClear').hidden = true;
+      setScreenImageNote('No image on the device, so this screen stays out of ' +
+        'the BOOT cycle.');
+      return;
+    }
+    if (!r.ok) {
+      setScreenImageNote(`Could not read the stored image (HTTP ${r.status}).`, true);
+      return;
+    }
+    const bytes = new Uint8Array(await r.arrayBuffer());
+    if (!screenImageValid(bytes)) {
+      // The device only serves a file it validated, so this should not happen;
+      // saying so beats drawing something that may be wrong.
+      setScreenImageNote('The device returned an image that does not check out.', true);
+      return;
+    }
+    renderScreenImage(screenImagePreview, bytes);
+    document.getElementById('screenImageClear').hidden = false;
+    setScreenImageNote('An image is stored on the device; it shows as the ' +
+      'fourth BOOT screen.');
+  } catch (_) {
+    setScreenImageNote('Could not reach the device to check for an image.', true);
+  }
+}
+
+document.getElementById('screenImagePick').addEventListener('click', () => {
+  document.getElementById('screenImageFile').click();
+});
+
+document.getElementById('screenImageFile').addEventListener('change', async (e) => {
+  const file = e.target.files && e.target.files[0];
+  e.target.value = '';          // so the same file can be chosen twice in a row
+  if (!file) return;
+
+  const send = document.getElementById('screenImageSend');
+  try {
+    const canvas = await imageFileToCanvas(file);
+    const data = canvas.getContext('2d')
+      .getImageData(0, 0, SCREEN_IMAGE_W, SCREEN_IMAGE_H);
+    screenImageBytes = packScreenImage(data);
+  } catch (_) {
+    screenImageBytes = null;
+    send.disabled = true;
+    setScreenImageNote('That file could not be read as an image.', true);
+    return;
+  }
+
+  renderScreenImage(screenImagePreview, screenImageBytes);
+  send.disabled = false;
+  setScreenImageNote(`Ready to send ${SCREEN_IMAGE_FILE} bytes — the dithered ` +
+    '160×80 copy above is exactly what the device will draw.');
+});
+
+document.getElementById('screenImageSend').addEventListener('click', async () => {
+  if (!screenImageBytes) return;
+  const send = document.getElementById('screenImageSend');
+  send.disabled = true;
+  setScreenImageNote('sending…');
+  try {
+    const r = await apiFetch('/screen/image', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: screenImageBytes,
+    });
+    if (!r.ok) {
+      let why = '';
+      try { why = (await r.text()).trim(); } catch (_) { /* body may be gone */ }
+      setScreenImageNote(`The device refused the image (HTTP ${r.status})` +
+        (why ? `: ${why}` : '') + '. Nothing changed.', true);
+      return;
+    }
+    document.getElementById('screenImageClear').hidden = false;
+    setScreenImageNote('Stored on the device; it is now the fourth BOOT screen.');
+  } catch (_) {
+    setScreenImageNote('The upload was cut off — the previous image is still ' +
+      'stored. Try again.', true);
+  } finally {
+    send.disabled = false;
+  }
+});
+
+document.getElementById('screenImageClear').addEventListener('click', async () => {
+  if (!confirm('Remove the stored image and take this screen out of the BOOT cycle?')) return;
+  setScreenImageNote('removing…');
+  try {
+    const r = await apiPost('/screen/reset');
+    if (!r.ok) {
+      setScreenImageNote(`Removing it failed (HTTP ${r.status}).`, true);
+      return;
+    }
+    screenImageBytes = null;
+    document.getElementById('screenImageSend').disabled = true;
+    document.getElementById('screenImageClear').hidden = true;
+    screenImagePreview.getContext('2d')
+      .clearRect(0, 0, SCREEN_IMAGE_W, SCREEN_IMAGE_H);
+    setScreenImageNote('Removed; this screen stays out of the BOOT cycle.');
+  } catch (_) {
+    setScreenImageNote('Removing it failed — the device is unreachable.', true);
+  }
+});
+
 // ---------------------------------------------------------------- logs
 document.getElementById('logsLoad').addEventListener('click', async () => {
   const panel = document.getElementById('logs');
@@ -462,6 +708,7 @@ requireAuth(async () => {
   await loadSettings();
   wireForm();
   readIntoForm();
+  await loadDeviceScreenImage();
   saveNote.textContent = '';
 
   // Best-effort: the device's own view of the network, from its logs.

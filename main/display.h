@@ -2,6 +2,12 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stdio.h>
+
+// LILYGO run this panel in LANDSCAPE: 160 wide x 80 tall. Public because the
+// packed screen image is sized from it and a mismatch must be a build error.
+#define LCD_W  160
+#define LCD_H  80
 
 // Initialize ST7735 display. NON-FATAL: if the panel fails to init,
 // every subsequent draw call becomes a no-op and the device keeps running.
@@ -42,6 +48,12 @@ bool display_qr(const char *text);
 // Pass the whole stored string: the marker can only be honest when the renderer
 // actually sees the text that was dropped.
 void display_message(const char *text);
+
+// Draw a packed 4-bit greyscale image: 80 rows of 80 bytes, high nibble first,
+// exactly the payload the browser produces. Reads one row at a time through a
+// 16-entry RGB565 LUT straight into the framebuffer, so the image is never held
+// in RAM. Returns false (having flushed nothing) when the stream ends early.
+bool display_grey4(FILE *f);
 
 // Shared line layout, so main.c and web_server.c agree on the screen.
 #define LCD_LINE_TITLE   0

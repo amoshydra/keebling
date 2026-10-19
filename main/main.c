@@ -16,6 +16,7 @@
 #include "wifi_manager.h"
 #include "log_buffer.h"
 #include "settings.h"
+#include "screen_image.h"
 #include "ui_fs.h"
 
 static const char *TAG = "main";
@@ -38,10 +39,14 @@ static const char *TAG = "main";
 // Sleep is orthogonal to the mode: after the timeout the screen blanks and
 // the backlight goes off, and a press wakes it showing the same mode. A
 // separate "off" mode would now be redundant with sleeping.
+//
+// The last two modes exist only while the user has put something there to
+// show, and the cycle skips them otherwise (see cycle_display_mode).
 typedef enum {
     DISP_QR = 0,
     DISP_STATUS,
     DISP_CUSTOM,   // text from the screen_text setting
+    DISP_IMAGE,    // the uploaded screen.img
     DISP_MODE_COUNT
 } display_mode_t;
 
@@ -170,6 +175,18 @@ static void apply_display_mode(void) {
         display_message(s_screen_text);
         break;
 
+    case DISP_IMAGE:
+        // Same rule for the image: the web UI can replace or delete the file
+        // while this mode is up, and a tap must never land on a screen that
+        // does not draw.
+        display_backlight(255);
+        if (!screen_image_draw()) {
+            s_mode = DISP_STATUS;
+            apply_display_mode();
+            return;
+        }
+        break;
+
     default:
         break;
     }
@@ -200,11 +217,14 @@ static void refresh_display(void) {
 }
 
 static void cycle_display_mode(void) {
-    // Skip the custom screen while there is no text for it: a tap should never
-    // stop on a blank screen, and the mode exists to show what the user wrote.
+    // Skip a mode while there is nothing for it to show: a tap should never
+    // stop on a blank screen, and both of these exist to show something the
+    // user put there. The checks are the same questions the draw paths ask, so
+    // a mode cannot be offered and then fail to draw.
     do {
         s_mode = (display_mode_t)((s_mode + 1) % DISP_MODE_COUNT);
-    } while (s_mode == DISP_CUSTOM && !read_screen_text());
+    } while ((s_mode == DISP_CUSTOM && !read_screen_text()) ||
+             (s_mode == DISP_IMAGE && !screen_image_available()));
 
     ESP_LOGI(TAG, "display mode -> %d", (int)s_mode);
     apply_display_mode();

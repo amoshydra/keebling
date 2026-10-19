@@ -66,6 +66,27 @@
         with “...”. Leave it empty and the screen stays out of the BOOT cycle.</p>
     </div>
     <div class="field">
+      <span>Custom image <small>(the fourth BOOT screen)</small></span>
+      <div class="row" style="margin-bottom:8px">
+        <button id="screenImagePick">Choose image…</button>
+        <button id="screenImageSend" class="primary" disabled>Send to device</button>
+        <button id="screenImageClear" hidden>Remove from device</button>
+        <input type="file" id="screenImageFile" accept="image/*" hidden>
+      </div>
+      <canvas id="screenImagePreview" width="160" height="80"
+              style="width:100%;max-width:320px;display:block;background:#000;
+                     border:1px solid var(--line);border-radius:6px;
+                     image-rendering:pixelated"></canvas>
+      <p class="note" id="screenImageNote">checking the device…</p>
+      <p class="note" id="screenImageHint">The preview above is the dithered
+        160×80 copy the device will draw, not your original file. A colour
+        photo is converted to greyscale rather than reproduced, and the panel
+        is run inverted and does no gamma correction, so mid-greys are expected
+        to look flat. An image of a different shape is scaled to fill the panel
+        and cropped. With no image stored, this screen stays out of the BOOT
+        cycle.</p>
+    </div>
+    <div class="field">
       <label>Sleep after <input type="range" id="screenTimeout" min="0" max="120" step="5">
         <span id="screenTimeoutVal"></span></label>
       <p class="note">Seconds without a button press before the display blanks.

@@ -26,10 +26,6 @@ static const char *TAG = "display";
 
 #define LCD_HOST  SPI2_HOST
 
-// LILYGO run this panel in LANDSCAPE: 160 wide x 80 tall.
-#define LCD_W  160
-#define LCD_H  80
-
 // Backlight is active low and driven by LEDC PWM (0 duty = full brightness).
 #define BCKL_TIMER     LEDC_TIMER_1
 #define BCKL_CHANNEL   LEDC_CHANNEL_1
@@ -431,6 +427,53 @@ void display_message(const char *text) {
     }
     flush_locked();
     xSemaphoreGive(s_fb_lock);
+}
+
+// ---------------------------------------------------------------------------
+// Custom screen image (see screen_image.c for the file format)
+//
+// Grey level i is i * 17, so the 16 levels are evenly spaced across 0..255. The
+// LUT is RGB565 of that ramp: the panel takes 5/6/5 bits, which truncates the
+// low bits anyway, and a table keeps the per-pixel cost to two lookups and four
+// byte stores.
+// ---------------------------------------------------------------------------
+
+static const uint16_t GREY4_RGB565[16] = {
+    0x0000, 0x1082, 0x2104, 0x3186, 0x4228, 0x52AA, 0x632C, 0x73AE,
+    0x8C51, 0x9CD3, 0xAD55, 0xBDD7, 0xCE79, 0xDEFB, 0xEF7D, 0xFFFF,
+};
+
+bool display_grey4(FILE *f) {
+    if (!s_ok || !s_fb_lock || !f) return false;
+
+    const int row_bytes = LCD_W / 2;
+    uint8_t row[LCD_W / 2];
+
+    xSemaphoreTake(s_fb_lock, portMAX_DELAY);
+    s_full_screen = true;
+
+    for (int y = 0; y < LCD_H; y++) {
+        if (fread(row, 1, row_bytes, f) != (size_t)row_bytes) {
+            // A short file must not leave the rest of the screen black: the
+            // caller falls back, which clears and redraws.
+            xSemaphoreGive(s_fb_lock);
+            return false;
+        }
+
+        uint8_t *dst = &s_fb[(size_t)y * LCD_W * 2];
+        for (int x = 0; x < row_bytes; x++) {
+            const uint16_t hi = GREY4_RGB565[row[x] >> 4];
+            const uint16_t lo = GREY4_RGB565[row[x] & 0x0F];
+            *dst++ = (uint8_t)(hi >> 8);
+            *dst++ = (uint8_t)hi;
+            *dst++ = (uint8_t)(lo >> 8);
+            *dst++ = (uint8_t)lo;
+        }
+    }
+
+    flush_locked();
+    xSemaphoreGive(s_fb_lock);
+    return true;
 }
 
 // Render the device code as a QR on the left half, white-on-black with a light

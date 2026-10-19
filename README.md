@@ -127,6 +127,28 @@ is broken, Settings' **Reset UI to built-in** deletes every upload at once.
 Uploads are token-gated, limited to the UI's own file names and capped at 64 KB
 per file.
 
+### Custom screen image
+
+Settings → **Screen** → **Choose image…** puts a picture on the LCD as a
+fourth BOOT screen. The preview shows the dithered 160×80 copy the device will
+actually draw, not the original file.
+
+The browser does the whole conversion: scale to 160×80 (filled and centre
+cropped), luminance, 4-bit quantise with a Bayer 4×4 ordered dither, two pixels
+per byte, plus an 8-byte header (format, length, CRC-32). The device has no PNG
+or JPEG decoder and needs none — it validates the header and CRC, then expands
+nibbles through a 16-entry RGB565 LUT straight into the framebuffer, 80 bytes
+per row, so the image is never held in RAM.
+
+It is stored as `screen.img` on the same LittleFS partition as the uploaded web
+files, but it is not a web file: it has its own endpoints and a fixed name in
+the firmware. The BOOT cycle only offers the screen while a valid image is
+stored, and an upload the device refuses leaves the previous image in place.
+
+Two things to expect, because the panel will not tell you otherwise: it does no
+gamma correction, so mid-greys look flat; and the copy is 4-bit greyscale, so a
+colour photo is converted rather than reproduced.
+
 ### Button gestures
 
 The single BOOT button carries four things, separated by how long it is held
@@ -147,13 +169,16 @@ the panel keeps its memory and the case is transparent, so darkening the
 backlight alone would still leave the text readable in ambient light. Waking
 does not change the mode.
 
-A tap cycles the pairing QR, the status screen and — when the `screen_text`
-setting is non-empty — a user text screen. That screen is 26 columns by 10
-lines of the 5x7 font: lines wrap at a space where one fits, `\n` starts a new
-line, and anything past the tenth line is dropped with the last line ending in
-`...`. Text is redrawn from the setting every time the screen is drawn, so a
-wake-up cannot show a stale copy. This screen does not carry the device code —
-another tap brings the QR back — and a device with no text set never shows it.
+A tap cycles the pairing QR, the status screen, and — when there is something
+for them to show — a user text screen and a custom image. The text screen is 26
+columns by 10 lines of the 5x7 font: lines wrap at a space where one fits, `\n`
+starts a new line, and anything past the tenth line is dropped with the last
+line ending in `...`. It is drawn from the `screen_text` setting every time the
+screen is drawn, so a wake-up cannot show a stale copy. The image screen is
+drawn from `screen.img` on the device's filesystem and is skipped unless the
+file's header and CRC validate. Neither screen carries the device code —
+another tap brings the QR back — and a device with no text or no valid image
+never shows those screens.
 
 ### Network states
 
@@ -279,6 +304,9 @@ are snapshots of current state, so this maps 1:1 onto the hardware with no queue
 | `GET /ui/files?token=` | token | each UI file: stored on the device or still embedded |
 | `POST /ui/upload?token=&name=` | token | store one UI file (raw body, 64 KB cap) |
 | `POST /ui/reset?token=&name=` (or `&all=1`) | token | delete stored copies, restoring the embedded ones |
+| `GET /screen/image?token=` | token | the stored screen image, header and CRC included (404 when there is none) |
+| `POST /screen/image?token=` | token | store the packed screen image (raw body, exactly 6,408 bytes) |
+| `POST /screen/reset?token=` | token | delete the screen image, taking that BOOT screen out of the cycle |
 
 ## Layout
 
@@ -289,6 +317,7 @@ main/
   input_state.c/.h held-state tracking, mutex, release/watchdog logic
   web_server.c/.h SoftAP + HTTP + WebSocket, embedded assets, upload endpoints
   ui_fs.c/.h      LittleFS mount and file plumbing for the uploaded UI
+  screen_image.c/.h the custom screen image: file format, validation, storage
   display.c/.h    ST7735 driver, 80×160 framebuffer, 5×7 font (non-fatal)
   web/            the UI. Every file is embedded in the binary and can also be
                   uploaded to the LittleFS partition, which is served in
@@ -297,11 +326,13 @@ main/
                   macro.js (the macro DSL), and ui.html + ui.js (uploading the
                   rest over WiFi)
 partitions.csv    4 MB app partition, then a 320 KB LittleFS partition for
-                  uploaded UI files — appended so nvs and the app do not move
+                  uploaded UI files and the screen image — appended so nvs and
+                  the app do not move
 sdkconfig.defaults
 test/web/         browser-driven UI tests, no npm dependencies
-docs/             design notes for work not yet done
-  screen-image.md  custom screen image: measured numbers and recommendation
+docs/             design notes
+  screen-image.md  the custom screen image: what was built, the file format,
+                   and the measured numbers
 ```
 
 ## Reflashing

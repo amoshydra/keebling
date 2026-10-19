@@ -18,6 +18,7 @@
 #include "wifi_manager.h"
 #include "log_buffer.h"
 #include "settings.h"
+#include "screen_image.h"
 #include "ui_fs.h"
 
 #include <ctype.h>
@@ -764,6 +765,161 @@ static esp_err_t ui_reset_handler(httpd_req_t *req) {
     return httpd_resp_sendstr(req, "reset");
 }
 
+// ---------------------------------------------------------------------------
+// Custom screen image
+//
+// Not a UI asset: the device holds exactly one file under a fixed name, so it
+// gets its own route rather than an entry in the asset table - which is the
+// upload whitelist for *web files*, and this is not one. The name is a
+// constant in screen_image.h, never anything from the request.
+// ---------------------------------------------------------------------------
+
+// GET /screen/image streams the stored file, so the settings page can show what
+// the device actually holds rather than trusting its own conversion. The body
+// includes the header, so the page can check the format and the CRC itself.
+// 404 when there is nothing valid, which is also the answer the BOOT cycle's
+// skip rule is built on.
+static esp_err_t screen_image_get_handler(httpd_req_t *req) {
+    if (!req_authorised(req)) {
+        httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "forbidden");
+        return ESP_FAIL;
+    }
+
+    FILE *f = ui_fs_open(SCREEN_IMAGE_NAME);
+    if (!f || !screen_image_check(f)) {
+        if (f) fclose(f);
+        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "no image");
+        return ESP_FAIL;
+    }
+
+    httpd_resp_set_type(req, "application/octet-stream");
+    // Never cached: a stale image here reads as "my upload did nothing".
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+
+    rewind(f);   // the check left the stream on the payload
+    char buf[512];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), f)) > 0) {
+        if (httpd_resp_send_chunk(req, buf, n) != ESP_OK) {
+            fclose(f);
+            return ESP_FAIL;
+        }
+    }
+    bool truncated = ferror(f);
+    fclose(f);
+    if (truncated) return ESP_FAIL;
+
+    return httpd_resp_send_chunk(req, NULL, 0);
+}
+
+// POST /screen/image with the packed file as the body. Streamed to the
+// filesystem while the header and CRC are checked on the fly, and only renamed
+// into place once the whole thing validates - so a body the device would not
+// draw never replaces an image it would.
+static esp_err_t screen_image_upload_handler(httpd_req_t *req) {
+    if (req->method != HTTP_POST) {
+        httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "POST only");
+        return ESP_FAIL;
+    }
+    if (!req_authorised(req)) {
+        httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "forbidden");
+        return ESP_FAIL;
+    }
+
+    // Checked before a byte is read: the page always produces exactly this
+    // size, so anything else is a different format and there is nothing to
+    // salvage from it.
+    if (req->content_len != SCREEN_IMAGE_FILE_BYTES) {
+        ESP_LOGW(TAG, "screen image: %u bytes, expected %u",
+                 (unsigned)req->content_len, (unsigned)SCREEN_IMAGE_FILE_BYTES);
+        drain_body(req, SCREEN_IMAGE_FILE_BYTES);
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_set_type(req, "text/plain");
+        httpd_resp_send(req, "expected 6408 bytes", HTTPD_RESP_USE_STRLEN);
+        return ESP_FAIL;
+    }
+
+    if (!ui_fs_mounted()) {
+        // Drained for the same reason as the over-size case: the client should
+        // see this answer, not a dropped socket.
+        drain_body(req, SCREEN_IMAGE_FILE_BYTES);
+        httpd_resp_set_status(req, "503 Service Unavailable");
+        httpd_resp_set_type(req, "text/plain");
+        httpd_resp_send(req, "no filesystem", HTTPD_RESP_USE_STRLEN);
+        return ESP_FAIL;
+    }
+
+    FILE *f = ui_fs_open_temp(SCREEN_IMAGE_NAME);
+    if (!f) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "cannot write");
+        return ESP_FAIL;
+    }
+
+    screen_image_upload_t check;
+    screen_image_upload_begin(&check);
+
+    char buf[512];
+    size_t left = req->content_len;
+    int stalls = 0;
+    while (left > 0) {
+        int r = httpd_req_recv(req, buf, left < sizeof(buf) ? left : sizeof(buf));
+        if (r == HTTPD_SOCK_ERR_TIMEOUT) {
+            if (++stalls > 6) break;
+            continue;
+        }
+        if (r <= 0) break;
+        stalls = 0;
+        if (fwrite(buf, 1, r, f) != (size_t)r) break;
+        screen_image_upload_feed(&check, (const uint8_t *)buf, (size_t)r);
+        left -= r;
+    }
+
+    if (left != 0) {
+        ui_fs_discard(SCREEN_IMAGE_NAME, f);
+        ESP_LOGW(TAG, "screen image: upload interrupted, %u bytes missing",
+                 (unsigned)left);
+        httpd_resp_send_err(req, HTTPD_408_REQ_TIMEOUT, "upload interrupted");
+        return ESP_FAIL;
+    }
+    if (!screen_image_upload_ok(&check)) {
+        ui_fs_discard(SCREEN_IMAGE_NAME, f);
+        ESP_LOGW(TAG, "screen image refused: header or CRC check failed");
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid image");
+        return ESP_FAIL;
+    }
+
+    if (ui_fs_commit(SCREEN_IMAGE_NAME, f) != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "cannot store");
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "screen image stored (%u bytes)", (unsigned)SCREEN_IMAGE_FILE_BYTES);
+    httpd_resp_set_type(req, "text/plain");
+    return httpd_resp_sendstr(req, "stored");
+}
+
+// POST /screen/reset deletes the stored image, so the BOOT cycle stops offering
+// the mode and the settings page goes back to "nothing stored".
+static esp_err_t screen_image_reset_handler(httpd_req_t *req) {
+    if (req->method != HTTP_POST) {
+        httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "POST only");
+        return ESP_FAIL;
+    }
+    if (!req_authorised(req)) {
+        httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "forbidden");
+        return ESP_FAIL;
+    }
+
+    if (ui_fs_remove(SCREEN_IMAGE_NAME) != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "cannot remove");
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "screen image removed");
+    httpd_resp_set_type(req, "text/plain");
+    return httpd_resp_sendstr(req, "reset");
+}
+
 // Lets the web UI check a code before opening the WebSocket, so a wrong code
 // gives a clear message instead of a silently failing connection.
 static esp_err_t auth_handler(httpd_req_t *req) {
@@ -933,7 +1089,7 @@ esp_err_t web_server_start(void) {
     // The default is 8 and we register more than that; at 15 the 9th
     // registration returned ESP_ERR_HTTPD_HANDLERS_FULL and, through
     // ESP_ERROR_CHECK, became a boot loop. Sized with headroom now: the asset
-    // table and the endpoint table together come to 26, so a new page or two
+    // table and the endpoint table together come to 29, so a new page or two
     // fits without touching this. Each slot is a few tens of bytes.
     cfg.max_uri_handlers = 32;
 
@@ -969,6 +1125,9 @@ esp_err_t web_server_start(void) {
         { .uri = "/ui/files",   .method = HTTP_GET,  .handler = ui_files_handler },
         { .uri = "/ui/upload",  .method = HTTP_POST, .handler = ui_upload_handler },
         { .uri = "/ui/reset",   .method = HTTP_POST, .handler = ui_reset_handler },
+        { .uri = "/screen/image", .method = HTTP_GET,  .handler = screen_image_get_handler },
+        { .uri = "/screen/image", .method = HTTP_POST, .handler = screen_image_upload_handler },
+        { .uri = "/screen/reset", .method = HTTP_POST, .handler = screen_image_reset_handler },
     };
 
     // Log rather than ESP_ERROR_CHECK: a full handler table should degrade to
