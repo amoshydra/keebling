@@ -161,8 +161,14 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *da
 
     case WIFI_EVENT_STA_DISCONNECTED: {
         wifi_event_sta_disconnected_t *e = data;
-        ESP_LOGW(TAG, "STA disconnected, reason %d", e->reason);
-        if (s_state == WIFI_MGR_STA) s_state = WIFI_MGR_CONNECTING;
+        // Logged only when we were actually associated. A network that has gone
+        // away is retried every few seconds, and a warning per retry fills the
+        // whole 4 KB log ring - which then hides everything else, including
+        // whatever you opened the log to find.
+        if (s_state == WIFI_MGR_STA) {
+            ESP_LOGW(TAG, "STA disconnected, reason %d", e->reason);
+            s_state = WIFI_MGR_CONNECTING;
+        }
         s_ip[0] = '\0';
         s_joined[0] = '\0';
         if (s_disconnected_since_ms == 0) s_disconnected_since_ms = now_ms();
