@@ -40,18 +40,26 @@ const UI_FILES = [
 // Mirrors UI_UPLOAD_MAX in main/web_server.c.
 const UI_MAX = 64 * 1024;
 
-// Mirrors the screen image format in main/screen_image.h: an 8-byte header
-// (format, reserved, payload length, CRC-32) and a 6,400-byte packed 4-bit
-// greyscale payload.
-const SCREEN_IMAGE = { format: 0x01, header: 8, payload: 6400, file: 6408 };
+// Mirrors the screen image formats in main/screen_image.h: an 8-byte header
+// (format, reserved, payload length, CRC-32) and a packed payload - 6,400 bytes
+// of 4-bit greyscale, or 25,600 bytes of little-endian RGB565.
+const SCREEN_IMAGE = {
+  0x01: { header: 8, payload: 6400, file: 6408 },
+  0x02: { header: 8, payload: 25600, file: 25608 },
+};
+const SCREEN_IMAGE_FILES = Object.values(SCREEN_IMAGE).map((f) => f.file);
 
-// The same rule the firmware applies before it will draw. A page test that
-// uploads a body the device would refuse fails here exactly as it would there.
+// The same rule the firmware applies before it will draw: the format byte picks
+// the payload size, and the file size, the length field and the CRC all have to
+// agree with it. A 0x02 header in a 6,408-byte body fails here exactly as it
+// would there - the disagreement is refused rather than guessed at.
 function screenImageOk(b) {
-  if (b.length !== SCREEN_IMAGE.file) return false;
-  if (b[0] !== SCREEN_IMAGE.format || b[1] !== 0) return false;
-  if (b.readUInt16LE(2) !== SCREEN_IMAGE.payload) return false;
-  return zlib.crc32(b.subarray(SCREEN_IMAGE.header)) === b.readUInt32LE(4);
+  if (b.length < 8) return false;
+  const f = SCREEN_IMAGE[b[0]];
+  if (!f || b.length !== f.file) return false;
+  if (b[1] !== 0) return false;
+  if (b.readUInt16LE(2) !== f.payload) return false;
+  return zlib.crc32(b.subarray(f.header)) === b.readUInt32LE(4);
 }
 
 export function startStub(port = 0) {
@@ -228,11 +236,11 @@ export function startStub(port = 0) {
         if (req.method !== 'POST') { res.writeHead(405); res.end(); return; }
 
         const len = Number(req.headers['content-length'] || 0);
-        if (len !== SCREEN_IMAGE.file) {
+        if (!SCREEN_IMAGE_FILES.includes(len)) {
           // Read the body before refusing, the same as the firmware: a client
           // that is mid-upload then sees the 400 instead of a dead socket.
           req.on('data', () => {});
-          req.on('end', () => { res.writeHead(400); res.end('expected 6408 bytes'); });
+          req.on('end', () => { res.writeHead(400); res.end('expected 6408 or 25608 bytes'); });
           return;
         }
 
@@ -240,7 +248,7 @@ export function startStub(port = 0) {
         req.on('data', (c) => chunks.push(c));
         req.on('end', () => {
           const body = Buffer.concat(chunks);
-          if (body.length !== SCREEN_IMAGE.file || !screenImageOk(body)) {
+          if (body.length !== len || !screenImageOk(body)) {
             // Nothing is stored, so a tap can never land on a garbage screen.
             res.writeHead(400); res.end('invalid image'); return;
           }

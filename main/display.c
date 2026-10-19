@@ -476,6 +476,39 @@ bool display_grey4(FILE *f) {
     return true;
 }
 
+// RGB565 arrives little-endian and the framebuffer holds the high byte first,
+// so each row is read straight into the framebuffer and its bytes swapped in
+// place. That is the whole decode: no LUT, no row buffer, and the panel's own
+// 5-6-5 quantisation is exactly what the file already carries.
+bool display_rgb565(FILE *f) {
+    if (!s_ok || !s_fb_lock || !f) return false;
+
+    const int row_bytes = LCD_W * 2;
+
+    xSemaphoreTake(s_fb_lock, portMAX_DELAY);
+    s_full_screen = true;
+
+    for (int y = 0; y < LCD_H; y++) {
+        uint8_t *row = &s_fb[(size_t)y * row_bytes];
+        if (fread(row, 1, row_bytes, f) != (size_t)row_bytes) {
+            // A short file must not leave the rest of the screen black: the
+            // caller falls back, which clears and redraws.
+            xSemaphoreGive(s_fb_lock);
+            return false;
+        }
+
+        for (int i = 0; i < row_bytes; i += 2) {
+            const uint8_t lo = row[i];
+            row[i] = row[i + 1];
+            row[i + 1] = lo;
+        }
+    }
+
+    flush_locked();
+    xSemaphoreGive(s_fb_lock);
+    return true;
+}
+
 // Render the device code as a QR on the left half, white-on-black with a light
 // quiet zone (scanners need that margin to be the *light* colour).
 //

@@ -9,13 +9,29 @@
 
 static const char *TAG = "screen_image";
 
-// The image is for this panel. A mismatch would not fail at run time - it would
-// draw a wrong stride and look like a garbled picture - so it is a build error.
-_Static_assert(SCREEN_IMAGE_PAYLOAD == (size_t)LCD_W * LCD_H / 2,
-               "screen image geometry does not match the panel");
+// The images are for this panel. A mismatch would not fail at run time - it
+// would draw a wrong stride and look like a garbled picture - so it is a build
+// error.
+_Static_assert(SCREEN_IMAGE_PAYLOAD_GREY4 == (size_t)LCD_W * LCD_H / 2,
+               "greyscale image geometry does not match the panel");
+_Static_assert(SCREEN_IMAGE_PAYLOAD_RGB565 == (size_t)LCD_W * LCD_H * 2,
+               "RGB565 image geometry does not match the panel");
+
+// Payload bytes the format byte calls for, or 0 for a format this build does
+// not draw. Everything downstream - the length field, the upload's expected
+// size, the draw path - hangs off this one answer, so the two formats cannot be
+// confused for one another.
+static size_t payload_for_format(uint8_t format) {
+    switch (format) {
+    case SCREEN_IMAGE_FORMAT_GREY4:  return SCREEN_IMAGE_PAYLOAD_GREY4;
+    case SCREEN_IMAGE_FORMAT_RGB565: return SCREEN_IMAGE_PAYLOAD_RGB565;
+    default:                         return 0;
+    }
+}
 
 // IEEE CRC-32, bitwise so there is no table to keep in step with the browser's
-// copy of the same loop. 6,400 bytes is a few microseconds either way.
+// copy of the same loop. It runs once per upload and once per draw, over at
+// most 25,600 payload bytes, so the cost is real but never on a hot path.
 static uint32_t crc32_update(uint32_t crc, const uint8_t *p, size_t n) {
     for (size_t i = 0; i < n; i++) {
         crc ^= p[i];
@@ -26,49 +42,56 @@ static uint32_t crc32_update(uint32_t crc, const uint8_t *p, size_t n) {
     return crc;
 }
 
-// Parse the 8-byte header. Fails when any field is not what this format says.
-static bool header_ok(const uint8_t *h, uint32_t *crc_out) {
-    if (h[0] != SCREEN_IMAGE_FORMAT) return false;
-    if (h[1] != 0) return false;
+// Parse the 8-byte header. Returns the format byte, or 0 when any field is not
+// what that format says - including a length field that disagrees with it. Sets
+// *payload_out to the size the format byte calls for.
+static uint8_t header_ok(const uint8_t *h, uint32_t *crc_out, size_t *payload_out) {
+    const size_t payload = payload_for_format(h[0]);
+    if (payload == 0) return 0;
+    if (h[1] != 0) return 0;
 
     const size_t len = (size_t)h[2] | ((size_t)h[3] << 8);
-    if (len != SCREEN_IMAGE_PAYLOAD) return false;
+    if (len != payload) return 0;
 
     *crc_out = (uint32_t)h[4] | ((uint32_t)h[5] << 8) |
                ((uint32_t)h[6] << 16) | ((uint32_t)h[7] << 24);
-    return true;
+    *payload_out = payload;
+    return h[0];
 }
 
-bool screen_image_check(FILE *f) {
+uint8_t screen_image_check(FILE *f) {
     uint8_t header[SCREEN_IMAGE_HEADER];
-    if (fread(header, 1, sizeof(header), f) != sizeof(header)) return false;
+    if (fread(header, 1, sizeof(header), f) != sizeof(header)) return 0;
 
     uint32_t want;
-    if (!header_ok(header, &want)) return false;
+    size_t payload;
+    const uint8_t format = header_ok(header, &want, &payload);
+    if (format == 0) return 0;
 
     uint32_t crc = 0xFFFFFFFF;
     uint8_t buf[128];
     size_t got = 0;
-    while (got < SCREEN_IMAGE_PAYLOAD) {
+    while (got < payload) {
         const size_t n = fread(buf, 1, sizeof(buf), f);
-        if (n == 0) return false;
+        if (n == 0) return 0;
         crc = crc32_update(crc, buf, n);
         got += n;
     }
-    if ((crc ^ 0xFFFFFFFF) != want) return false;
+    if ((crc ^ 0xFFFFFFFF) != want) return 0;
 
     // Nothing may follow the payload. A longer file is a different format (or
     // a stale one), not this image with a tail.
-    if (fgetc(f) != EOF) return false;
+    if (fgetc(f) != EOF) return 0;
 
-    return fseek(f, SCREEN_IMAGE_HEADER, SEEK_SET) == 0;
+    if (fseek(f, SCREEN_IMAGE_HEADER, SEEK_SET) != 0) return 0;
+    return format;
 }
 
 bool screen_image_available(void) {
     FILE *f = ui_fs_open(SCREEN_IMAGE_NAME);
     if (!f) return false;
 
-    const bool ok = screen_image_check(f);
+    const bool ok = screen_image_check(f) != SCREEN_IMAGE_FORMAT_NONE;
     fclose(f);
     return ok;
 }
@@ -78,8 +101,12 @@ bool screen_image_draw(void) {
     if (!f) return false;
 
     // Validate before the framebuffer is touched: a stale or half-written file
-    // must leave the previous screen up rather than draw garbage.
-    const bool ok = screen_image_check(f) && display_grey4(f);
+    // must leave the previous screen up rather than draw garbage. The format
+    // byte decides which reader gets it, so a file cannot be drawn as the
+    // format it is not.
+    const uint8_t format = screen_image_check(f);
+    const bool ok = (format == SCREEN_IMAGE_FORMAT_GREY4 && display_grey4(f)) ||
+                    (format == SCREEN_IMAGE_FORMAT_RGB565 && display_rgb565(f));
     fclose(f);
     return ok;
 }
@@ -102,8 +129,9 @@ void screen_image_upload_feed(screen_image_upload_t *u, const uint8_t *data, siz
         len -= take;
 
         if (u->header_len == SCREEN_IMAGE_HEADER) {
-            if (!header_ok(u->header, &u->want_crc)) {
-                ESP_LOGW(TAG, "upload refused: bad format or length field");
+            u->format = header_ok(u->header, &u->want_crc, &u->expect_payload);
+            if (u->format == SCREEN_IMAGE_FORMAT_NONE) {
+                ESP_LOGW(TAG, "upload refused: unknown format or length field");
                 u->bad = true;
                 return;
             }
@@ -111,9 +139,9 @@ void screen_image_upload_feed(screen_image_upload_t *u, const uint8_t *data, siz
     }
 
     if (len == 0) return;
-    if (u->payload_len + len > SCREEN_IMAGE_PAYLOAD) {
+    if (u->payload_len + len > u->expect_payload) {
         ESP_LOGW(TAG, "upload refused: more than %u payload bytes",
-                 (unsigned)SCREEN_IMAGE_PAYLOAD);
+                 (unsigned)u->expect_payload);
         u->bad = true;
         return;
     }
@@ -125,8 +153,9 @@ void screen_image_upload_feed(screen_image_upload_t *u, const uint8_t *data, siz
 
 bool screen_image_upload_ok(const screen_image_upload_t *u) {
     return !u->bad &&
-           u->total == SCREEN_IMAGE_FILE_BYTES &&
+           u->format != SCREEN_IMAGE_FORMAT_NONE &&
+           u->total == SCREEN_IMAGE_HEADER + u->expect_payload &&
            u->header_len == SCREEN_IMAGE_HEADER &&
-           u->payload_len == SCREEN_IMAGE_PAYLOAD &&
+           u->payload_len == u->expect_payload &&
            (u->crc ^ 0xFFFFFFFF) == u->want_crc;
 }

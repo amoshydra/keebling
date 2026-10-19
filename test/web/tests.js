@@ -540,6 +540,17 @@ const __greyImage = (fill) => {
   }
   return new ImageData(d, 160, 80);
 };
+const __colourImage = (fill) => {
+  const d = new Uint8ClampedArray(160 * 80 * 4);
+  for (let y = 0; y < 80; y++) {
+    for (let x = 0; x < 160; x++) {
+      const [r, g, b] = typeof fill === 'function' ? fill(x, y) : fill;
+      const i = (y * 160 + x) * 4;
+      d[i] = r; d[i + 1] = g; d[i + 2] = b; d[i + 3] = 255;
+    }
+  }
+  return new ImageData(d, 160, 80);
+};
 const __sameBytes = (a, b) =>
   a.length === b.length && a.every((v, i) => v === b[i]);
 
@@ -683,6 +694,161 @@ __webTests.push({
 
 __webTests.push({
   page: 'settings',
+  name: 'screen image: colour packs to 25,600 bytes of little-endian RGB565',
+  fn: async () => {
+    const img = __colourImage([0, 0, 0]);
+    const bytes = packScreenImage(img, 0x02);
+
+    __assert(bytes.length === 25608, `the file is ${bytes.length} bytes, expected 25608`);
+    __assert(bytes[0] === 0x02, `format byte is 0x${bytes[0].toString(16)}`);
+    __assert(bytes[1] === 0, `reserved byte is ${bytes[1]}`);
+    __assert((bytes[2] | (bytes[3] << 8)) === 25600, 'the length field is not 25600');
+    const want = crc32(bytes.subarray(8));
+    const got = (bytes[4] | (bytes[5] << 8) | (bytes[6] << 16) | (bytes[7] << 24)) >>> 0;
+    __assert(got === want,
+      `header CRC 0x${got.toString(16)} != payload CRC 0x${want.toString(16)}`);
+    __assert(screenImageValid(bytes), 'the packed file does not validate');
+
+    // Pixel order, byte order and row stride. The payload is little-endian, so
+    // the low byte of the RGB565 word comes first; 320 bytes a row means the
+    // first pixel of row 1 is not the second pixel of row 0. Exact channel
+    // values (0 and full) survive the dither untouched.
+    const set = (x, y, [r, g, b]) => {
+      const i = (y * 160 + x) * 4;
+      img.data[i] = r; img.data[i + 1] = g; img.data[i + 2] = b;
+    };
+    set(0, 0, [255, 0, 0]);        // 0xF800 -> 00 F8
+    set(1, 0, [0, 255, 0]);        // 0x07E0 -> E0 07
+    set(2, 0, [0, 0, 255]);        // 0x001F -> 1F 00
+    set(159, 0, [255, 255, 255]);  // 0xFFFF -> FF FF, the last pixel of row 0
+    set(0, 1, [255, 0, 255]);      // 0xF81F -> 1F F8, the first pixel of row 1
+    set(159, 79, [255, 255, 0]);   // 0xFFE0 -> E0 FF, the last pixel of the file
+    const packed = packScreenImage(img, 0x02).subarray(8);
+    const px = (x, y) => {
+      const o = (y * 160 + x) * 2;
+      return [packed[o], packed[o + 1]];
+    };
+    __assert(px(0, 0)[0] === 0x00 && px(0, 0)[1] === 0xF8,
+      `(0,0) packed as ${px(0, 0)}`);
+    __assert(px(1, 0)[0] === 0xE0 && px(1, 0)[1] === 0x07,
+      `(1,0) packed as ${px(1, 0)}`);
+    __assert(px(2, 0)[0] === 0x1F && px(2, 0)[1] === 0x00,
+      `(2,0) packed as ${px(2, 0)}`);
+    __assert(px(159, 0)[0] === 0xFF && px(159, 0)[1] === 0xFF,
+      `(159,0) packed as ${px(159, 0)}`);
+    __assert(px(0, 1)[0] === 0x1F && px(0, 1)[1] === 0xF8,
+      `(0,1) packed as ${px(0, 1)}`);
+    __assert(px(159, 79)[0] === 0xE0 && px(159, 79)[1] === 0xFF,
+      `the last pixel packed as ${px(159, 79)}`);
+    __assert(packed.length === 25600, `the payload is ${packed.length} bytes`);
+  },
+});
+
+__webTests.push({
+  page: 'settings',
+  name: 'screen image: the colour preview renders the packed 5-6-5 levels',
+  fn: async () => {
+    // A hand-built file, so the preview is checked against known RGB565 words
+    // rather than against whatever the converter happened to produce. The CRC
+    // is the page's own crc32 over the payload, the check the device runs
+    // before it will draw the file.
+    const bytes = new Uint8Array(25608);
+    bytes[0] = 0x02;
+    bytes[2] = 25600 & 0xFF;
+    bytes[3] = 25600 >> 8;
+    const words = [0xF800, 0x07E0, 0x001F, 0x8410];   // red, green, blue, mid grey
+    for (let i = 0; i < words.length; i++) {
+      bytes[8 + i * 2] = words[i] & 0xFF;
+      bytes[9 + i * 2] = words[i] >> 8;
+    }
+    const crc = crc32(bytes.subarray(8));
+    bytes[4] = crc & 0xFF; bytes[5] = (crc >> 8) & 0xFF;
+    bytes[6] = (crc >> 16) & 0xFF; bytes[7] = (crc >>> 24) & 0xFF;
+    __assert(screenImageValid(bytes), 'the hand-built colour file does not validate');
+
+    const canvas = document.getElementById('screenImagePreview');
+    renderScreenImage(canvas, bytes);
+    const px = canvas.getContext('2d').getImageData(0, 0, 160, 80).data;
+    const at = (i) => [px[i * 4], px[i * 4 + 1], px[i * 4 + 2]];
+    __assert(at(0).join() === '255,0,0', `0xF800 previewed as ${at(0)}`);
+    __assert(at(1).join() === '0,255,0', `0x07E0 previewed as ${at(1)}`);
+    __assert(at(2).join() === '0,0,255', `0x001F previewed as ${at(2)}`);
+    // 5 bits -> 8 by bit replication, 6 -> 8: 0x8410 is r=16, g=32, b=16 and
+    // must come back as 132, 130, 132.
+    __assert(at(3).join() === '132,130,132', `0x8410 previewed as ${at(3)}`);
+    __assert(at(4).join() === '0,0,0', `an unused pixel previewed as ${at(4)}`);
+  },
+});
+
+__webTests.push({
+  page: 'settings',
+  name: 'screen image: colour dithers each channel, not thresholds it',
+  fn: async () => {
+    // 128/255 is 15.56 of red's 31 levels and 31.62 of green's 63, so a plain
+    // threshold gives 16/32/16 everywhere. Each channel has to cross its own
+    // boundary in its own cells of the Bayer tile.
+    const payload = packScreenImage(__colourImage([128, 128, 128]), 0x02).subarray(8);
+    const counts = { r: new Map(), g: new Map(), b: new Map() };
+    for (let y = 0; y < 4; y++) {
+      for (let x = 0; x < 4; x++) {
+        const o = (y * 160 + x) * 2;
+        const v = payload[o] | (payload[o + 1] << 8);
+        const r = v >> 11, g = (v >> 5) & 0x3F, b = v & 0x1F;
+        __assert(r === (BAYER4[y][x] >= 7 ? 16 : 15), `red at (${x},${y}) is ${r}`);
+        __assert(g === (BAYER4[y][x] >= 6 ? 32 : 31), `green at (${x},${y}) is ${g}`);
+        __assert(b === (BAYER4[y][x] >= 7 ? 16 : 15), `blue at (${x},${y}) is ${b}`);
+        for (const [k, n] of [['r', r], ['g', g], ['b', b]]) {
+          counts[k].set(n, (counts[k].get(n) || 0) + 1);
+        }
+      }
+    }
+    // Red and blue cross in the same cells; green, with twice the levels,
+    // crosses one cell earlier. All three split, which a threshold would not.
+    __assert(counts.r.get(16) === 9 && counts.r.get(15) === 7,
+      `red tile: ${JSON.stringify([...counts.r])}`);
+    __assert(counts.g.get(32) === 10 && counts.g.get(31) === 6,
+      `green tile: ${JSON.stringify([...counts.g])}`);
+    __assert(counts.b.get(16) === 9 && counts.b.get(15) === 7,
+      `blue tile: ${JSON.stringify([...counts.b])}`);
+
+    // A channel exactly on a level does not move while a neighbour dithers:
+    // pure blue's red and green stay 0 in every cell.
+    const blue = packScreenImage(__colourImage([0, 0, 128]), 0x02).subarray(8);
+    for (let i = 0; i < 4 * 4; i++) {
+      const v = blue[i * 2] | (blue[i * 2 + 1] << 8);
+      __assert((v >> 11) === 0 && ((v >> 5) & 0x3F) === 0,
+        `pixel ${i} of a pure-blue field has red ${v >> 11}, green ${(v >> 5) & 0x3F}`);
+    }
+  },
+});
+
+__webTests.push({
+  page: 'settings',
+  name: 'screen image: greyscale still packs to format 0x01, byte for byte',
+  fn: async () => {
+    // The format byte exists to make colour additive, so the greyscale path
+    // must be unchanged by it: the files already on devices depend on that.
+    const img = __greyImage((x, y) => (x * 7 + y * 13) % 256);
+    const bytes = packScreenImage(img);              // the default format
+    const explicit = packScreenImage(img, 0x01);
+    __assert(__sameBytes(bytes, explicit), 'the default format is no longer 0x01');
+    __assert(bytes.length === 6408, `the file is ${bytes.length} bytes, expected 6408`);
+    __assert(bytes[0] === 0x01 && bytes[1] === 0, 'the header is no longer greyscale');
+    __assert((bytes[2] | (bytes[3] << 8)) === 6400, 'the length field is not 6400');
+    __assert(screenImageValid(bytes), 'a greyscale file no longer validates');
+
+    // The same picture in colour is a different file, not the greyscale payload
+    // wearing a different format byte.
+    const colour = packScreenImage(img, 0x02);
+    __assert(colour.length === 25608 && colour[0] === 0x02,
+      `the colour file is ${colour.length} bytes, format 0x${colour[0].toString(16)}`);
+    __assert(!__sameBytes(colour.subarray(8, 6408), bytes.subarray(8)),
+      'colour packing produced the greyscale payload');
+  },
+});
+
+__webTests.push({
+  page: 'settings',
   name: 'screen image: no valid image means the mode is out of the cycle',
   fn: async () => {
     await __sleep(300);   // the page checks the device on load
@@ -706,18 +872,38 @@ __webTests.push({
     __assert(/gamma/.test(hint), `the note does not mention gamma: ${hint}`);
 
     // Bodies the firmware would refuse, none of which may become an image:
-    // a corrupted payload, a format byte from a version this build does not
-    // know, a truncated body and a wrong size.
+    // a corrupted payload, an unknown format, a truncated body, a wrong size,
+    // and both ways the size and the format byte can disagree. That last rule
+    // is what keeps the two formats apart - the format byte picks the payload
+    // size, so a body cannot be drawn as the format it is not.
     const good = packScreenImage(__greyImage(200));
+    const colour = packScreenImage(__colourImage([10, 200, 30]), 0x02);
     const corrupt = Uint8Array.from(good);
     corrupt[8 + 10] ^= 0xFF;
-    const stale = Uint8Array.from(good);
-    stale[0] = 0x02;
+    const unknown = Uint8Array.from(good);
+    unknown[0] = 0x03;
+    // A body that claims 0x02 at the greyscale size, with a CRC over the bytes
+    // it actually carries and a length field that agrees with the format:
+    // everything except the file size is self-consistent, so only the
+    // size/format agreement can refuse it.
+    const colourAtGreySize = new Uint8Array(6408);
+    colourAtGreySize.set(colour.subarray(0, 6408));
+    const shortCrc = crc32(colourAtGreySize.subarray(8));
+    colourAtGreySize[4] = shortCrc & 0xFF;
+    colourAtGreySize[5] = (shortCrc >> 8) & 0xFF;
+    colourAtGreySize[6] = (shortCrc >> 16) & 0xFF;
+    colourAtGreySize[7] = (shortCrc >>> 24) & 0xFF;
+    // ...and the other way round: 0x01 at the colour size, header and CRC
+    // untouched from a valid greyscale file.
+    const greyAtColourSize = new Uint8Array(colour.length);
+    greyAtColourSize.set(good);              // 6,400-byte format, 25,608-byte body
     const cases = [
       ['corrupted', corrupt],
-      ['stale format', stale],
+      ['unknown format', unknown],
       ['truncated', good.slice(0, 100)],
       ['wrong size', new Uint8Array(10)],
+      ['colour format at the greyscale size', colourAtGreySize],
+      ['greyscale format at the colour size', greyAtColourSize],
     ];
     for (const [name, body] of cases) {
       const bad = await fetch(`/screen/image?token=${window.__CODE}`,
@@ -727,6 +913,17 @@ __webTests.push({
       __assert(after.status === 404,
         `after a refused ${name} upload the device answered HTTP ${after.status}`);
     }
+
+    // The control: a well-formed colour body is accepted, so the refusals
+    // above are about the disagreement, not about colour as such.
+    const ok = await fetch(`/screen/image?token=${window.__CODE}`,
+      { method: 'POST', body: colour });
+    __assert(ok.status === 200, `a valid colour image answered HTTP ${ok.status}`);
+    const readBack = new Uint8Array(
+      await (await fetch(`/screen/image?token=${window.__CODE}`)).arrayBuffer());
+    __assert(__sameBytes(readBack, colour), 'the stored colour image is not what was sent');
+    const reset = await fetch(`/screen/reset?token=${window.__CODE}`, { method: 'POST' });
+    __assert(reset.status === 200, `removing the colour image answered HTTP ${reset.status}`);
 
     const noToken = await fetch('/screen/image', { method: 'POST', body: good });
     __assert(noToken.status === 403,
@@ -739,14 +936,17 @@ __webTests.push({
   name: 'screen image: sending stores exactly what the preview shows',
   fn: async () => {
     // A picture with structure, so the whole path is exercised: the page
-    // scales it, dithers it and posts the packed result.
+    // scales it, dithers it and posts the packed result. The picker defaults
+    // to colour, so this is the RGB565 path end to end.
     const src = document.createElement('canvas');
     src.width = 320; src.height = 160;
     const sctx = src.getContext('2d');
-    sctx.fillStyle = '#000';
+    sctx.fillStyle = '#c33';
     sctx.fillRect(0, 0, 320, 160);
-    sctx.fillStyle = '#fff';
+    sctx.fillStyle = '#3c3';
     sctx.fillRect(0, 0, 160, 80);
+    sctx.fillStyle = '#33c';
+    sctx.fillRect(160, 80, 160, 80);
     const blob = await new Promise((r) => src.toBlob(r, 'image/png'));
     __assert(blob, 'could not build a PNG to pick');
 
@@ -760,13 +960,28 @@ __webTests.push({
     __assert(screenImageBytes, 'the picked file never became a packed image');
     __assert(!document.getElementById('screenImageSend').disabled,
       'Send stayed disabled after a file was picked');
+    __assert(screenImageBytes.length === 25608,
+      `the colour file is ${screenImageBytes.length} bytes, expected 25608`);
+    __assert(screenImageBytes[0] === 0x02,
+      `the default format is 0x${screenImageBytes[0].toString(16)}, expected colour`);
 
     // The preview is the promise the page makes, so it must be the bytes that
-    // get sent. Repacking the preview canvas is an independent route to them.
+    // get sent. A colour preview cannot be repacked - it has already been
+    // expanded to 8 bits - so the packed file is decoded independently and
+    // compared to the canvas pixel for pixel.
     const preview = document.getElementById('screenImagePreview');
-    const shown = preview.getContext('2d').getImageData(0, 0, 160, 80);
-    __assert(__sameBytes(packScreenImage(shown), screenImageBytes),
-      'the preview and the bytes to send disagree');
+    const shown = preview.getContext('2d').getImageData(0, 0, 160, 80).data;
+    let mismatch = -1;
+    for (let i = 0; i < 160 * 80 && mismatch < 0; i++) {
+      const v = screenImageBytes[8 + i * 2] | (screenImageBytes[9 + i * 2] << 8);
+      const r5 = (v >> 11) & 0x1F, g6 = (v >> 5) & 0x3F, b5 = v & 0x1F;
+      const p = i * 4;
+      if (shown[p] !== ((r5 << 3) | (r5 >> 2)) ||
+          shown[p + 1] !== ((g6 << 2) | (g6 >> 4)) ||
+          shown[p + 2] !== ((b5 << 3) | (b5 >> 2))) mismatch = i;
+    }
+    __assert(mismatch < 0,
+      `preview pixel ${mismatch} is not the 5-6-5 pixel the file carries`);
 
     document.getElementById('screenImageSend').click();
     for (let i = 0; i < 100 &&
@@ -783,7 +998,7 @@ __webTests.push({
     const r = await fetch(`/screen/image?token=${window.__CODE}`);
     __assert(r.status === 200, `the device answered HTTP ${r.status}`);
     const stored = new Uint8Array(await r.arrayBuffer());
-    __assert(stored.length === 6408, `the device holds ${stored.length} bytes`);
+    __assert(stored.length === 25608, `the device holds ${stored.length} bytes`);
     __assert(__sameBytes(stored, screenImageBytes),
       'the device holds different bytes from the ones the page sent');
     __assert(screenImageValid(stored), 'the device holds an image that does not validate');
@@ -798,6 +1013,53 @@ __webTests.push({
     const after = new Uint8Array(
       await (await fetch(`/screen/image?token=${window.__CODE}`)).arrayBuffer());
     __assert(__sameBytes(after, stored), 'a refused upload replaced the stored image');
+  },
+});
+
+__webTests.push({
+  page: 'settings',
+  name: 'screen image: switching to greyscale re-packs the same picture as 0x01',
+  fn: async () => {
+    // The send test left a colour image stored and its scaled source loaded.
+    __assert(screenImageBytes && screenImageBytes[0] === 0x02,
+      'the colour image is no longer loaded');
+
+    const grey = document.querySelector('input[name="screenImageFormat"][value="grey"]');
+    __assert(grey, 'there is no greyscale choice in the picker');
+    grey.checked = true;
+    grey.dispatchEvent(new Event('change', { bubbles: true }));
+    for (let i = 0; i < 100 && (!screenImageBytes || screenImageBytes[0] !== 0x01); i++) {
+      await __sleep(50);
+    }
+    __assert(screenImageBytes[0] === 0x01,
+      `switching re-packed as 0x${screenImageBytes[0].toString(16)}, expected greyscale`);
+    __assert(screenImageBytes.length === 6408,
+      `the greyscale file is ${screenImageBytes.length} bytes, expected 6408`);
+
+    // The greyscale preview is exactly the 17*i ramp the firmware expands, so
+    // repacking the canvas is an independent route back to the same bytes.
+    const preview = document.getElementById('screenImagePreview');
+    const shown = preview.getContext('2d').getImageData(0, 0, 160, 80);
+    __assert(__sameBytes(packScreenImage(shown), screenImageBytes),
+      'the greyscale preview and the bytes to send disagree');
+
+    document.getElementById('screenImageSend').click();
+    for (let i = 0; i < 100 &&
+         !document.getElementById('screenImageNote').textContent.includes('Stored'); i++) {
+      await __sleep(50);
+    }
+    const stored = new Uint8Array(
+      await (await fetch(`/screen/image?token=${window.__CODE}`)).arrayBuffer());
+    __assert(stored.length === 6408 && stored[0] === 0x01,
+      `the device holds ${stored.length} bytes, format 0x${stored[0].toString(16)}`);
+    __assert(__sameBytes(stored, screenImageBytes),
+      'the device holds different bytes from the ones the page sent');
+
+    // Leave the choice where the page found it: the next test is about removing
+    // the stored image, not about which format is selected.
+    const colour = document.querySelector('input[name="screenImageFormat"][value="colour"]');
+    colour.checked = true;
+    colour.dispatchEvent(new Event('change', { bubbles: true }));
   },
 });
 

@@ -192,19 +192,25 @@ document.getElementById('uiResetAll').addEventListener('click', async () => {
 // ---------------------------------------------------------------- screen image
 // The device has no PNG or JPEG decoder, and this feature must not need one, so
 // the page does the whole conversion and posts the packed result: scale to
-// 160x80, luminance, 4-bit ordered dither, two pixels per byte, then a small
-// header with a CRC. The preview shows the same bytes that get sent - a
-// washed-out panel is the risk this feature carries, and seeing the dithered
-// result beforehand is the only way to catch it without hardware.
+// 160x80, quantise with an ordered dither, pack, then a small header with a
+// CRC. Two formats share that header - 4-bit greyscale (6,400 payload bytes)
+// and RGB565 colour (25,600) - and the format byte says which. The preview
+// shows the packed result rather than the original: a washed-out panel is the
+// risk this feature carries, and seeing the dithered copy beforehand is the
+// only way to catch it without hardware.
 const SCREEN_IMAGE_W = 160;
 const SCREEN_IMAGE_H = 80;
-const SCREEN_IMAGE_PAYLOAD = SCREEN_IMAGE_W * SCREEN_IMAGE_H / 2;   // 6,400
 const SCREEN_IMAGE_HEADER = 8;
-const SCREEN_IMAGE_FILE = SCREEN_IMAGE_HEADER + SCREEN_IMAGE_PAYLOAD;
-const SCREEN_IMAGE_FORMAT = 0x01;
+const SCREEN_IMAGE_FORMAT_GREY4 = 0x01;
+const SCREEN_IMAGE_FORMAT_RGB565 = 0x02;
+const SCREEN_IMAGE_PAYLOAD = {
+  [SCREEN_IMAGE_FORMAT_GREY4]: SCREEN_IMAGE_W * SCREEN_IMAGE_H / 2,   // 6,400
+  [SCREEN_IMAGE_FORMAT_RGB565]: SCREEN_IMAGE_W * SCREEN_IMAGE_H * 2,  // 25,600
+};
 
 // Bayer 4x4, 0..15. A flat area between two levels turns into a fine pattern of
-// both instead of a hard step, which is what makes a 4-bit ramp look smooth.
+// both instead of a hard step, which is what makes a quantised ramp look
+// smooth.
 const BAYER4 = [
   [ 0,  8,  2, 10],
   [12,  4, 14,  6],
@@ -212,9 +218,15 @@ const BAYER4 = [
   [15,  7, 13,  5],
 ];
 
+// One pixel's offset within its quantisation step, 0..1, averaging 0.5 over a
+// 4x4 tile so a dithered region tracks its input rather than shifting it.
+function bayerCell(x, y) {
+  return (BAYER4[y & 3][x & 3] + 0.5) / 16;
+}
+
 // IEEE CRC-32, bitwise so it is visibly the same loop the firmware runs. Kept
 // here rather than fetched because the point is that the two agree byte for
-// byte on a 6,400-byte payload.
+// byte on the payload, whichever format it carries.
 function crc32(bytes) {
   let crc = 0xFFFFFFFF;
   for (let i = 0; i < bytes.length; i++) {
@@ -229,31 +241,56 @@ function crc32(bytes) {
 // the input; exactly on a level (black, white, 3*17) nothing moves at all.
 function quantiseGrey4(r, g, b, x, y) {
   const luma = (299 * r + 587 * g + 114 * b) / 1000 / 255;
-  const cell = (BAYER4[y & 3][x & 3] + 0.5) / 16;
-  return Math.floor(luma * 15 + cell);
+  return Math.floor(luma * 15 + bayerCell(x, y));
 }
 
-// ImageData at exactly 160x80 -> the file the device stores: header, then 80
-// rows of 80 bytes, high nibble is the left pixel.
-function packScreenImage(imageData) {
+// The same dither, applied to each channel on its own: 5 bits red, 6 green,
+// 5 blue, packed into one RGB565 word. Quantising a photo to those bands
+// without the dither bands as badly as 16 grey levels would.
+function quantiseRgb565(r, g, b, x, y) {
+  const cell = bayerCell(x, y);
+  const r5 = Math.floor((r / 255) * 31 + cell);
+  const g6 = Math.floor((g / 255) * 63 + cell);
+  const b5 = Math.floor((b / 255) * 31 + cell);
+  return (r5 << 11) | (g6 << 5) | b5;
+}
+
+// ImageData at exactly 160x80 -> the file the device stores: the 8-byte header,
+// then the payload in the chosen format. Greyscale is two pixels a byte, high
+// nibble first; colour is two little-endian bytes a pixel, row after row.
+function packScreenImage(imageData, format = SCREEN_IMAGE_FORMAT_GREY4) {
   if (imageData.width !== SCREEN_IMAGE_W || imageData.height !== SCREEN_IMAGE_H) {
     throw new Error(`expected ${SCREEN_IMAGE_W}x${SCREEN_IMAGE_H}, ` +
                     `got ${imageData.width}x${imageData.height}`);
   }
+  const payload = SCREEN_IMAGE_PAYLOAD[format];
+  if (!payload) throw new Error(`unknown screen image format 0x${format.toString(16)}`);
 
   const px = imageData.data;
-  const out = new Uint8Array(SCREEN_IMAGE_FILE);
-  out[0] = SCREEN_IMAGE_FORMAT;
+  const out = new Uint8Array(SCREEN_IMAGE_HEADER + payload);
+  out[0] = format;
   out[1] = 0;
-  out[2] = SCREEN_IMAGE_PAYLOAD & 0xFF;
-  out[3] = (SCREEN_IMAGE_PAYLOAD >> 8) & 0xFF;
+  out[2] = payload & 0xFF;
+  out[3] = (payload >> 8) & 0xFF;
 
-  for (let y = 0; y < SCREEN_IMAGE_H; y++) {
-    for (let x = 0; x < SCREEN_IMAGE_W; x += 2) {
-      const i = (y * SCREEN_IMAGE_W + x) * 4;
-      const hi = quantiseGrey4(px[i], px[i + 1], px[i + 2], x, y);
-      const lo = quantiseGrey4(px[i + 4], px[i + 5], px[i + 6], x + 1, y);
-      out[SCREEN_IMAGE_HEADER + (y * SCREEN_IMAGE_W + x) / 2] = (hi << 4) | lo;
+  if (format === SCREEN_IMAGE_FORMAT_RGB565) {
+    let o = SCREEN_IMAGE_HEADER;
+    for (let y = 0; y < SCREEN_IMAGE_H; y++) {
+      for (let x = 0; x < SCREEN_IMAGE_W; x++) {
+        const i = (y * SCREEN_IMAGE_W + x) * 4;
+        const v = quantiseRgb565(px[i], px[i + 1], px[i + 2], x, y);
+        out[o++] = v & 0xFF;        // little-endian: low byte first
+        out[o++] = v >> 8;
+      }
+    }
+  } else {
+    for (let y = 0; y < SCREEN_IMAGE_H; y++) {
+      for (let x = 0; x < SCREEN_IMAGE_W; x += 2) {
+        const i = (y * SCREEN_IMAGE_W + x) * 4;
+        const hi = quantiseGrey4(px[i], px[i + 1], px[i + 2], x, y);
+        const lo = quantiseGrey4(px[i + 4], px[i + 5], px[i + 6], x + 1, y);
+        out[SCREEN_IMAGE_HEADER + (y * SCREEN_IMAGE_W + x) / 2] = (hi << 4) | lo;
+      }
     }
   }
 
@@ -265,34 +302,50 @@ function packScreenImage(imageData) {
   return out;
 }
 
-// The same checks the firmware makes before it will draw: exact size, format
-// byte, length field and a CRC that matches. Applied to what comes back from
-// the device too, so a truncated file is noticed rather than shown.
+// The same checks the firmware makes before it will draw: the format byte
+// picks the payload size, and the exact file size, the length field and a CRC
+// that matches all have to agree with it. Applied to what comes back from the
+// device too, so a truncated or mismatched file is noticed rather than shown.
 function screenImageValid(bytes) {
-  if (!bytes || bytes.length !== SCREEN_IMAGE_FILE) return false;
-  if (bytes[0] !== SCREEN_IMAGE_FORMAT || bytes[1] !== 0) return false;
-  if ((bytes[2] | (bytes[3] << 8)) !== SCREEN_IMAGE_PAYLOAD) return false;
+  if (!bytes || bytes.length < SCREEN_IMAGE_HEADER) return false;
+  const payload = SCREEN_IMAGE_PAYLOAD[bytes[0]];
+  if (!payload || bytes.length !== SCREEN_IMAGE_HEADER + payload) return false;
+  if (bytes[1] !== 0) return false;
+  if ((bytes[2] | (bytes[3] << 8)) !== payload) return false;
   const want = (bytes[4] | (bytes[5] << 8) | (bytes[6] << 16) |
                 (bytes[7] << 24)) >>> 0;
   return crc32(bytes.subarray(SCREEN_IMAGE_HEADER)) === want;
 }
 
-// Expand packed nibbles back to pixels. Level i is i*17, which is the ramp the
-// firmware's RGB565 table is built from, so this is what the panel will show
-// (modulo the panel's own colour response, which is the part only hardware can
-// settle).
+// Expand packed pixels back to 8-bit for the canvas. Greyscale level i is i*17,
+// the ramp the firmware's RGB565 table is built from; each colour channel is
+// bit-replicated to 8 bits. This is the browser's rendering of the bytes, not
+// the panel's rendition of them.
 function renderScreenImage(canvas, bytes) {
   const ctx = canvas.getContext('2d');
   const img = ctx.createImageData(SCREEN_IMAGE_W, SCREEN_IMAGE_H);
-  for (let y = 0; y < SCREEN_IMAGE_H; y++) {
-    for (let x = 0; x < SCREEN_IMAGE_W; x += 2) {
-      const b = bytes[SCREEN_IMAGE_HEADER + (y * SCREEN_IMAGE_W + x) / 2];
-      const hi = b >> 4, lo = b & 0x0F;
-      for (let dx = 0; dx < 2; dx++) {
-        const v = (dx ? lo : hi) * 17;
-        const i = (y * SCREEN_IMAGE_W + x + dx) * 4;
-        img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
-        img.data[i + 3] = 255;
+  if (bytes[0] === SCREEN_IMAGE_FORMAT_RGB565) {
+    for (let i = 0; i < SCREEN_IMAGE_W * SCREEN_IMAGE_H; i++) {
+      const o = SCREEN_IMAGE_HEADER + i * 2;
+      const v = bytes[o] | (bytes[o + 1] << 8);
+      const r5 = (v >> 11) & 0x1F, g6 = (v >> 5) & 0x3F, b5 = v & 0x1F;
+      const p = i * 4;
+      img.data[p]     = (r5 << 3) | (r5 >> 2);
+      img.data[p + 1] = (g6 << 2) | (g6 >> 4);
+      img.data[p + 2] = (b5 << 3) | (b5 >> 2);
+      img.data[p + 3] = 255;
+    }
+  } else {
+    for (let y = 0; y < SCREEN_IMAGE_H; y++) {
+      for (let x = 0; x < SCREEN_IMAGE_W; x += 2) {
+        const b = bytes[SCREEN_IMAGE_HEADER + (y * SCREEN_IMAGE_W + x) / 2];
+        const hi = b >> 4, lo = b & 0x0F;
+        for (let dx = 0; dx < 2; dx++) {
+          const v = (dx ? lo : hi) * 17;
+          const i = (y * SCREEN_IMAGE_W + x + dx) * 4;
+          img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
+          img.data[i + 3] = 255;
+        }
       }
     }
   }
@@ -322,10 +375,38 @@ async function imageFileToCanvas(file) {
 const screenImagePreview = document.getElementById('screenImagePreview');
 const screenImageNote = document.getElementById('screenImageNote');
 let screenImageBytes = null;    // the packed file waiting to be sent, or last sent
+let screenImageSource = null;   // the scaled 160x80 original, to re-pack on a format change
 
 function setScreenImageNote(text, warn) {
   screenImageNote.className = 'note' + (warn ? ' warn' : '');
   screenImageNote.textContent = text;
+}
+
+// The picker's own state, not a device setting: it decides how this browser
+// packs the picture, and nothing about it reaches the settings blob.
+function selectedScreenImageFormat() {
+  const el = document.querySelector('input[name="screenImageFormat"]:checked');
+  return el && el.value === 'grey' ? SCREEN_IMAGE_FORMAT_GREY4
+                                   : SCREEN_IMAGE_FORMAT_RGB565;
+}
+
+// Pack whatever was picked, in the selected format, and show it. Re-packing
+// from the scaled original rather than from the preview: the preview is already
+// quantised, and quantising it again would compound the loss.
+function repackScreenImage() {
+  if (!screenImageSource) return;
+  screenImageBytes = packScreenImage(screenImageSource, selectedScreenImageFormat());
+  renderScreenImage(screenImagePreview, screenImageBytes);
+  document.getElementById('screenImageSend').disabled = false;
+
+  const colour = screenImageBytes[0] === SCREEN_IMAGE_FORMAT_RGB565;
+  setScreenImageNote(`Ready to send ${screenImageBytes.length} bytes of ` +
+    (colour ? 'RGB565 colour' : '4-bit greyscale') + ' — the dithered 160×80 ' +
+    'copy above is exactly what the device will draw.');
+}
+
+for (const el of document.querySelectorAll('input[name="screenImageFormat"]')) {
+  el.addEventListener('change', repackScreenImage);
 }
 
 // What the device holds, fetched rather than assumed: this is the only view of
@@ -352,8 +433,10 @@ async function loadDeviceScreenImage() {
     }
     renderScreenImage(screenImagePreview, bytes);
     document.getElementById('screenImageClear').hidden = false;
-    setScreenImageNote('An image is stored on the device; it shows as the ' +
-      'fourth BOOT screen.');
+    const what = bytes[0] === SCREEN_IMAGE_FORMAT_RGB565
+      ? 'RGB565 colour' : '4-bit greyscale';
+    setScreenImageNote(`An image is stored on the device (${what}, ` +
+      `${bytes.length} bytes); it shows as the fourth BOOT screen.`);
   } catch (_) {
     setScreenImageNote('Could not reach the device to check for an image.', true);
   }
@@ -368,23 +451,19 @@ document.getElementById('screenImageFile').addEventListener('change', async (e) 
   e.target.value = '';          // so the same file can be chosen twice in a row
   if (!file) return;
 
-  const send = document.getElementById('screenImageSend');
   try {
     const canvas = await imageFileToCanvas(file);
-    const data = canvas.getContext('2d')
+    screenImageSource = canvas.getContext('2d')
       .getImageData(0, 0, SCREEN_IMAGE_W, SCREEN_IMAGE_H);
-    screenImageBytes = packScreenImage(data);
   } catch (_) {
+    screenImageSource = null;
     screenImageBytes = null;
-    send.disabled = true;
+    document.getElementById('screenImageSend').disabled = true;
     setScreenImageNote('That file could not be read as an image.', true);
     return;
   }
 
-  renderScreenImage(screenImagePreview, screenImageBytes);
-  send.disabled = false;
-  setScreenImageNote(`Ready to send ${SCREEN_IMAGE_FILE} bytes — the dithered ` +
-    '160×80 copy above is exactly what the device will draw.');
+  repackScreenImage();
 });
 
 document.getElementById('screenImageSend').addEventListener('click', async () => {
@@ -425,6 +504,7 @@ document.getElementById('screenImageClear').addEventListener('click', async () =
       return;
     }
     screenImageBytes = null;
+    screenImageSource = null;
     document.getElementById('screenImageSend').disabled = true;
     document.getElementById('screenImageClear').hidden = true;
     screenImagePreview.getContext('2d')

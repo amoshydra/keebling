@@ -826,23 +826,28 @@ static esp_err_t screen_image_upload_handler(httpd_req_t *req) {
         return ESP_FAIL;
     }
 
-    // Checked before a byte is read: the page always produces exactly this
-    // size, so anything else is a different format and there is nothing to
-    // salvage from it.
-    if (req->content_len != SCREEN_IMAGE_FILE_BYTES) {
-        ESP_LOGW(TAG, "screen image: %u bytes, expected %u",
-                 (unsigned)req->content_len, (unsigned)SCREEN_IMAGE_FILE_BYTES);
-        drain_body(req, SCREEN_IMAGE_FILE_BYTES);
+    // Either format's exact size is acceptable; anything else is a different
+    // format and there is nothing to salvage from it. Which of the two a body
+    // claims to be is settled by its own format byte as it streams - a 0x02
+    // header cannot satisfy the length and size checks in a 6,408-byte body,
+    // so the disagreement is refused rather than guessed at.
+    if (req->content_len != SCREEN_IMAGE_FILE_GREY4 &&
+        req->content_len != SCREEN_IMAGE_FILE_RGB565) {
+        ESP_LOGW(TAG, "screen image: %u bytes, expected %u or %u",
+                 (unsigned)req->content_len,
+                 (unsigned)SCREEN_IMAGE_FILE_GREY4,
+                 (unsigned)SCREEN_IMAGE_FILE_RGB565);
+        drain_body(req, SCREEN_IMAGE_FILE_RGB565);
         httpd_resp_set_status(req, "400 Bad Request");
         httpd_resp_set_type(req, "text/plain");
-        httpd_resp_send(req, "expected 6408 bytes", HTTPD_RESP_USE_STRLEN);
+        httpd_resp_send(req, "expected 6408 or 25608 bytes", HTTPD_RESP_USE_STRLEN);
         return ESP_FAIL;
     }
 
     if (!ui_fs_mounted()) {
         // Drained for the same reason as the over-size case: the client should
         // see this answer, not a dropped socket.
-        drain_body(req, SCREEN_IMAGE_FILE_BYTES);
+        drain_body(req, SCREEN_IMAGE_FILE_RGB565);
         httpd_resp_set_status(req, "503 Service Unavailable");
         httpd_resp_set_type(req, "text/plain");
         httpd_resp_send(req, "no filesystem", HTTPD_RESP_USE_STRLEN);
@@ -893,7 +898,9 @@ static esp_err_t screen_image_upload_handler(httpd_req_t *req) {
         return ESP_FAIL;
     }
 
-    ESP_LOGI(TAG, "screen image stored (%u bytes)", (unsigned)SCREEN_IMAGE_FILE_BYTES);
+    ESP_LOGI(TAG, "screen image stored (%s, %u bytes)",
+             check.format == SCREEN_IMAGE_FORMAT_RGB565 ? "RGB565" : "grey4",
+             (unsigned)(SCREEN_IMAGE_HEADER + check.expect_payload));
     httpd_resp_set_type(req, "text/plain");
     return httpd_resp_sendstr(req, "stored");
 }

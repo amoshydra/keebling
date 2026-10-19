@@ -55,6 +55,13 @@ void display_message(const char *text);
 // in RAM. Returns false (having flushed nothing) when the stream ends early.
 bool display_grey4(FILE *f);
 
+// Draw a packed RGB565 image: 80 rows of 320 bytes, two little-endian bytes per
+// pixel, exactly the payload the browser produces. Reads one row at a time
+// straight into the framebuffer, so the image is never held in RAM and no row
+// buffer is needed. Returns false (having flushed nothing) when the stream ends
+// early.
+bool display_rgb565(FILE *f);
+
 // Shared line layout, so main.c and web_server.c agree on the screen.
 #define LCD_LINE_TITLE   0
 #define LCD_LINE_NET     1

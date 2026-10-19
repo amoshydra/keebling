@@ -63,13 +63,16 @@ assertions).
 - a screen timeout of 0 reads as "never"
 - the custom screen text is capped at one screen, keeps its line break, and
   reaches the device
-- the custom screen image: the canvas packs to exactly 6,400 payload bytes with
-  the header and CRC the device checks, a flat grey is dithered into the Bayer
-  checkerboard rather than thresholded, and the preview shows the same bytes
-  that get sent
+- the custom screen image: greyscale packs to exactly 6,400 payload bytes and
+  colour to 25,600, each with the header and CRC the device checks; the colour
+  payload is little-endian RGB565 and the row stride is asserted; a flat grey
+  and a flat colour are dithered into the Bayer pattern rather than
+  thresholded, per channel for colour; the preview shows the same bytes that
+  get sent, in both formats
 - the screen image is out of the BOOT cycle while no valid image is stored: a
-  corrupted, truncated, wrong-format or wrong-size body is refused and never
-  becomes an image, and a refused upload leaves a stored one in place
+  corrupted, truncated, unknown-format, wrong-size or format/size-disagreeing
+  body is refused and never becomes an image, and a refused upload leaves a
+  stored one in place
 - the HID report descriptor decodes into a readable tree
 - the last save actually reached the device (checked server-side, not in the form)
 
