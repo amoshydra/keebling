@@ -96,6 +96,10 @@ esp_err_t wifi_mgr_set_creds(const char *ssid, const char *pass) {
     snprintf(s_ssid, sizeof(s_ssid), "%s", ssid);
     snprintf(s_pass, sizeof(s_pass), "%s", pass ? pass : "");
     s_creds = true;
+    // A network the user just asked for should not wait out a backoff that
+    // accumulated while nothing was reachable.
+    s_retry_interval_ms = RECONNECT_INTERVAL_MS;
+    s_last_retry_ms = 0;
     ESP_LOGI(TAG, "stored network updated: \"%s\"", s_ssid);
     return ESP_OK;
 }
@@ -310,15 +314,16 @@ void wifi_mgr_tick(void) {
         ap_apply(true);
     }
 
-    // Retry the association, but not blindly. esp_wifi_connect() takes the radio
-    // away from the access point we may be serving: it scans and attempts an
-    // association, and with stale credentials that attempt always fails and
-    // repeats. Retrying at a fixed five seconds cost the AP 40% of its packets in
-    // measurement - and every connection to the AP stalled for five seconds at a
-    // time. So stay quiet while the AP has clients, and back off while it keeps
-    // failing.
-    const bool ap_in_use = s_clients > 0;
-    if (s_creds && !ap_in_use && (t - s_last_retry_ms) > s_retry_interval_ms) {
+    // Retry the association, backing off while it keeps failing. Each attempt
+    // takes the radio away from the access point we may be serving, so retrying
+    // at a fixed five seconds cost the AP 40% of its packets and produced
+    // five-second stalls - measured.
+    //
+    // Suppressing retries while the AP had clients was the wrong cure: the AP is
+    // how the device is configured, so it could then never join the network it
+    // had just been given. Backing off is the compromise - quick enough to join,
+    // rare enough not to disrupt.
+    if (s_creds && (t - s_last_retry_ms) > s_retry_interval_ms) {
         s_last_retry_ms = t;
         esp_err_t err = esp_wifi_connect();
         if (err != ESP_OK && err != ESP_ERR_WIFI_CONN) {
