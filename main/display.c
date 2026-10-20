@@ -543,7 +543,10 @@ bool display_qr(const char *text) {
     xSemaphoreTake(s_fb_lock, portMAX_DELAY);
     s_full_screen = true;
 
-    // light quiet zone / background
+    // Dark quiet zone and background, light modules - the same polarity as the
+    // text drawn beside it, so the panel reads as one screen rather than a white
+    // slab next to white words. Reversed codes are accepted by most scanners; if
+    // one refuses this, these two colour pairs are the only thing to swap back.
     for (int y = 0; y < side; y++) {
         int fy = oy + y;
         if (fy < 0 || fy >= LCD_H) continue;
@@ -551,11 +554,11 @@ bool display_qr(const char *text) {
             int fx = ox + x;
             if (fx < 0 || fx >= LCD_W) continue;
             size_t off = (size_t)(fy * LCD_W + fx) * 2;
-            s_fb[off] = 0xFF; s_fb[off + 1] = 0xFF;
+            s_fb[off] = 0x00; s_fb[off + 1] = 0x00;
         }
     }
 
-    // dark modules
+    // light modules
     for (int my = 0; my < n; my++) {
         for (int mx = 0; mx < n; mx++) {
             if (!qrcodegen_getModule(qr, mx, my)) continue;
@@ -568,7 +571,7 @@ bool display_qr(const char *text) {
                     int fx = bx + dx;
                     if (fx < 0 || fx >= LCD_W) continue;
                     size_t off = (size_t)(fy * LCD_W + fx) * 2;
-                    s_fb[off] = 0x00; s_fb[off + 1] = 0x00;
+                    s_fb[off] = 0xFF; s_fb[off + 1] = 0xFF;
                 }
             }
         }
