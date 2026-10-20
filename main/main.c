@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <string.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -284,6 +285,7 @@ static void tick_task(void *arg) {
 
     wifi_mgr_state_t last_state = (wifi_mgr_state_t)-1;
     int last_clients = 0;
+    char last_ip[16] = "";
 
     while (1) {
         input_tick();
@@ -305,12 +307,17 @@ static void tick_task(void *arg) {
             sleep_display();
         }
 
-        // WiFi state changes keep the screen current.
+        // WiFi changes keep the screen current. The address matters as much as
+        // the state: a re-join can hand out a different DHCP lease while the
+        // state stays STA, and the QR would go on pointing at an address nothing
+        // answers - which looks exactly like the device being broken.
         wifi_mgr_state_t st = wifi_mgr_state();
         int clients = wifi_mgr_client_count();
-        if (st != last_state || clients != last_clients) {
+        const char *ip = wifi_mgr_ip();
+        if (st != last_state || clients != last_clients || strcmp(ip, last_ip) != 0) {
             last_state = st;
             last_clients = clients;
+            snprintf(last_ip, sizeof(last_ip), "%s", ip);
             refresh_display();
         }
         if (clients < last_clients) input_release_all();
