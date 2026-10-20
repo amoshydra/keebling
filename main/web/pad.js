@@ -298,6 +298,50 @@ function onPointerEnd(e) {
 pad.addEventListener('pointerup', onPointerEnd);
 pad.addEventListener('pointercancel', onPointerEnd);
 
+// ---------------------------------------------------------------- wake lock
+// The page must stay *visible* for pointermove to be delivered at all. While it
+// is hidden the browser stops delivering them - the same lifecycle that suspends
+// requestAnimationFrame - so the movement accumulates in the OS and arrives as
+// one burst when the page comes back. That reads as "nothing happens, then the
+// cursor flies", and a phone screen turning off is enough to cause it. Holding a
+// wake lock is what stops the screen sleeping while captured.
+let wakeLock = null;
+let hiddenCount = 0;
+let hiddenSince = 0;
+let hiddenLongest = 0;
+
+async function holdWakeLock() {
+  if (!('wakeLock' in navigator) || wakeLock) return;
+  try {
+    wakeLock = await navigator.wakeLock.request('screen');
+    wakeLock.addEventListener('release', () => { wakeLock = null; });
+  } catch (_) {
+    // Refused or unsupported. Not fatal, but the page may go hidden - which is
+    // exactly what the counter below is for.
+  }
+}
+
+function releaseWakeLock() {
+  if (!wakeLock) return;
+  try { wakeLock.release(); } catch (_) {}
+  wakeLock = null;
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    hiddenCount++;
+    hiddenSince = performance.now();
+  } else {
+    if (hiddenSince) {
+      const ms = performance.now() - hiddenSince;
+      if (ms > hiddenLongest) hiddenLongest = ms;
+      hiddenSince = 0;
+    }
+    // The browser drops the lock when the page is hidden, so re-take it.
+    if (captured) holdWakeLock();
+  }
+});
+
 // ---------------------------------------------------------------- mouse capture
 // Pointer lock is the only way a desktop mouse can drive the remote cursor
 // without being bounded by the window edge.
@@ -340,7 +384,13 @@ pad.addEventListener('pointerdown', (e) => {
 document.addEventListener('pointerlockchange', () => {
   captured = document.pointerLockElement === pad;
   pad.classList.toggle('captured', captured);
-  if (!captured) { buttons = 0; sendMouse(0, 0, 0); }
+  if (captured) {
+    holdWakeLock();
+  } else {
+    releaseWakeLock();
+    buttons = 0;
+    sendMouse(0, 0, 0);
+  }
 });
 
 // Fired when a request is refused. Without this the refusal is invisible.
@@ -403,7 +453,7 @@ pad.addEventListener('pointermove', (e) => {
   dbg.rawX += e.movementX; dbg.rawY += e.movementY;
   dbg.sentX += Math.round(e.movementX * gain); dbg.sentY += Math.round(e.movementY * gain);
   dbgEl.textContent =
-    `events ${dbg.n}\n` +
+    `events ${dbg.n}   hidden ${hiddenCount}x longest ${Math.round(hiddenLongest)}ms\n` +
     `last raw ${e.movementX},${e.movementY}  gain ${gain}  ` +
     `sent ${Math.round(e.movementX * gain)},${Math.round(e.movementY * gain)}\n` +
     `totals raw ${dbg.rawX},${dbg.rawY}  sent ${dbg.sentX},${dbg.sentY}`;
@@ -411,7 +461,12 @@ pad.addEventListener('pointermove', (e) => {
 
 document.addEventListener('pointerlockchange', () => {
   dbgEl.style.display = captured ? 'block' : 'none';
-  if (captured) { dbg = { n: 0, rawX: 0, rawY: 0, sentX: 0, sentY: 0 }; }
+  if (captured) {
+    dbg = { n: 0, rawX: 0, rawY: 0, sentX: 0, sentY: 0 };
+    hiddenCount = 0;
+    hiddenLongest = 0;
+    hiddenSince = 0;
+  }
 });
 
 window.addEventListener('mousedown', (e) => {
