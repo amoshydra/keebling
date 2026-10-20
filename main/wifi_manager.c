@@ -31,6 +31,9 @@ static const char *TAG = "wifi_mgr";
 #define AP_FALLBACK_AFTER_MS   20000
 
 #define RECONNECT_INTERVAL_MS   5000
+// Ceiling for the retry backoff. A network that comes back is still found, just
+// not by shouting at it every five seconds while it is gone.
+#define RECONNECT_MAX_MS        120000
 
 static esp_netif_t *s_ap_netif;
 static esp_netif_t *s_sta_netif;
@@ -50,6 +53,7 @@ static volatile int s_clients;
 
 static int64_t s_disconnected_since_ms;
 static int64_t s_last_retry_ms;
+static int64_t s_retry_interval_ms = RECONNECT_INTERVAL_MS;
 
 static inline int64_t now_ms(void) { return esp_timer_get_time() / 1000; }
 
@@ -203,6 +207,7 @@ static void on_ip_event(void *arg, esp_event_base_t base, int32_t id, void *data
     }
     s_state = WIFI_MGR_STA;
     s_disconnected_since_ms = 0;
+    s_retry_interval_ms = RECONNECT_INTERVAL_MS;   // joined: forget the backoff
     ESP_LOGI(TAG, "joined \"%s\" as %s", s_joined, s_ip);
 }
 
@@ -305,12 +310,23 @@ void wifi_mgr_tick(void) {
         ap_apply(true);
     }
 
-    // Retry the association at a steady interval.
-    if (s_creds && (t - s_last_retry_ms) > RECONNECT_INTERVAL_MS) {
+    // Retry the association, but not blindly. esp_wifi_connect() takes the radio
+    // away from the access point we may be serving: it scans and attempts an
+    // association, and with stale credentials that attempt always fails and
+    // repeats. Retrying at a fixed five seconds cost the AP 40% of its packets in
+    // measurement - and every connection to the AP stalled for five seconds at a
+    // time. So stay quiet while the AP has clients, and back off while it keeps
+    // failing.
+    const bool ap_in_use = s_clients > 0;
+    if (s_creds && !ap_in_use && (t - s_last_retry_ms) > s_retry_interval_ms) {
         s_last_retry_ms = t;
         esp_err_t err = esp_wifi_connect();
         if (err != ESP_OK && err != ESP_ERR_WIFI_CONN) {
             ESP_LOGD(TAG, "reconnect: %s", esp_err_to_name(err));
+        }
+        if (s_retry_interval_ms < RECONNECT_MAX_MS) {
+            s_retry_interval_ms = (s_retry_interval_ms * 2 > RECONNECT_MAX_MS)
+                                    ? RECONNECT_MAX_MS : s_retry_interval_ms * 2;
         }
     }
 }
