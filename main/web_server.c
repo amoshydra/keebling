@@ -499,9 +499,18 @@ static esp_err_t serve_stored(httpd_req_t *req, const char *name) {
     return httpd_resp_send_chunk(req, NULL, 0);
 }
 
+// req->uri carries the query string, so "/?token=..." has to match the asset
+// path "/". Comparing the whole string meant every asset link with a query -
+// including the URL printed on the LCD - fell through to a 404, and the token
+// shortcut never worked: the gate was the only way in.
+static bool uri_matches(const char *uri, const char *path) {
+    const size_t n = strlen(path);
+    return strncmp(uri, path, n) == 0 && (uri[n] == '\0' || uri[n] == '?');
+}
+
 static esp_err_t static_handler(httpd_req_t *req) {
     for (size_t i = 0; i < ASSET_COUNT; i++) {
-        if (strcmp(req->uri, s_assets[i].path) != 0) continue;
+        if (!uri_matches(req->uri, s_assets[i].path)) continue;
 
         httpd_resp_set_type(req, s_assets[i].type);
 
