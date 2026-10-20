@@ -136,20 +136,25 @@ static bool qr_is_url(void) {
 static void draw_qr_panel(void) {
     const bool url = qr_is_url();
 
-    display_text_line(80, 0, "ESP32 Remote");
+    // Start past the code, whatever width it turned out to be. An IPv4 address
+    // needs 15 cells; starting at a fixed x=80 left 13 and cut the last digit,
+    // which printed a perfectly plausible address that nothing answered.
+    const int x = display_qr_right() + 2;
+
+    display_text_line(x, 0, "ESP32 Remote");
     if (wifi_mgr_state() == WIFI_MGR_STA) {
         char l[16];
         snprintf(l, sizeof(l), "STA %.9s", wifi_mgr_joined_ssid());
-        display_text_line(80, 1, l);
-        display_text_line(80, 2, wifi_mgr_ip());
+        display_text_line(x, 1, l);
+        display_text_line(x, 2, wifi_mgr_ip());
     } else {
-        display_text_line(80, 1, "AP " AP_SSID);
-        display_text_line(80, 2, wifi_mgr_ap_ip());
+        display_text_line(x, 1, "AP " AP_SSID);
+        display_text_line(x, 2, wifi_mgr_ap_ip());
     }
 
-    display_text_line(80, 4, url ? "scan to open" : "scan to join");
-    display_text_line(80, 5, url ? "the web UI" : "this Wi-Fi");
-    display_text_line(80, 6, security_code());
+    display_text_line(x, 4, url ? "scan to open" : "scan to join");
+    display_text_line(x, 5, url ? "the web UI" : "this Wi-Fi");
+    display_text_line(x, 6, security_code());
 }
 
 static void show_status_screen(void) {

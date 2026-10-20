@@ -515,6 +515,13 @@ bool display_rgb565(FILE *f) {
 // Payload is the bare 12-character code, not a URL: the code never changes
 // while the URL can (DHCP address, mDNS name), and 12 bytes fits version 1 at
 // EC level Q, which keeps the modules large enough to actually scan.
+// Rightmost column the QR used, so the text beside it starts past the code
+// instead of at a guessed x. A hard-coded 80 left only 13 character cells,
+// which quietly truncated any IPv4 address ending in three digits.
+static int s_qr_right;
+
+int display_qr_right(void) { return s_qr_right; }
+
 bool display_qr(const char *text) {
     if (!s_ok || !s_fb_lock || !text) return false;
 
@@ -539,6 +546,7 @@ bool display_qr(const char *text) {
     const int side = total * scale;
     const int ox = 2;
     const int oy = (LCD_H - side) / 2;
+    s_qr_right = ox + side;
 
     xSemaphoreTake(s_fb_lock, portMAX_DELAY);
     s_full_screen = true;

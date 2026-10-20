@@ -36,6 +36,10 @@ void display_clear(void);
 // display_clear() to take the screen back. Returns false if it did not fit.
 bool display_qr(const char *text);
 
+// Rightmost column used by the last QR drawn, so callers can lay text beside it
+// without guessing how wide the code turned out.
+int display_qr_right(void);
+
 // Show `text` full screen, white on black: the 5x7 font cell is 6x8 px, so the
 // panel holds 26 columns x 10 lines. Wraps at the last space that fits (a single
 // word longer than a line is broken), '\n' and '\r\n' force a break. Bytes the
