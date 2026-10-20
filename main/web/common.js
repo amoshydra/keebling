@@ -110,9 +110,25 @@ function setLocal(setting, value) {
   try { localStorage.setItem('esp32remote.settings', JSON.stringify(o)); } catch (_) {}
 }
 
+// Keys that older builds wrote and nothing reads any more. `macros` moved into
+// the browser's localStorage; the device stores the blob verbatim and cannot
+// clean it up itself, so a device that still has it would round-trip it through
+// every save for ever.
+//
+// `hid_name` is also dead: it was the original key for the product name before
+// the manufacturer string existed, and usb_hid.c no longer reads it.
+const DEAD_SETTINGS = ['macros', 'hid_name'];
+
 async function saveSettingsToDevice() {
-  // Only send the keys the device model knows about plus its own; send the lot.
-  return apiPost('/settings', appSettings);
+  // Send the lot, minus the keys that are no longer part of the model.
+  const outgoing = Object.assign({}, appSettings);
+  for (const k of DEAD_SETTINGS) delete outgoing[k];
+
+  // Drop them from the in-memory settings too, so they do not reappear in a
+  // backup, and so a later save cannot resurrect what this one removed.
+  for (const k of DEAD_SETTINGS) delete appSettings[k];
+
+  return apiPost('/settings', outgoing);
 }
 
 // ---------------------------------------------------------------- access gate

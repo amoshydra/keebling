@@ -91,12 +91,10 @@ void tud_hid_report_complete_cb(uint8_t instance, uint8_t const *report, uint16_
 // The product and manufacturer strings are byte-copied string descriptors:
 // only ASCII survives, and the driver caps them at MAX_DESC_BUF_SIZE-1
 // characters. Substitute anything else here rather than let it be mangled.
-static void load_string_setting(const char *key, const char *legacy_key,
+static void load_string_setting(const char *key,
                                 char *dest, size_t destlen, const char *what) {
     char buf[SETTINGS_HID_NAME_MAX + 1];
-    bool found = settings_get_str(key, buf, sizeof(buf));
-    if (!found && legacy_key) found = settings_get_str(legacy_key, buf, sizeof(buf));
-    if (!found) return;
+    if (!settings_get_str(key, buf, sizeof(buf))) return;
 
     for (char *p = buf; *p; p++) {
         if ((unsigned char)*p < 0x20 || (unsigned char)*p > 0x7E) *p = '?';
@@ -121,13 +119,10 @@ void usb_hid_init(void) {
     }
     ESP_LOGI(TAG, "USB serial: %s", s_serial);
 
-    // "hid_name" was the original key before the manufacturer was exposed;
-    // still honoured so an existing name is not silently dropped.
-    load_string_setting("usb_manufacturer", NULL, s_manufacturer,
+    load_string_setting("usb_manufacturer", s_manufacturer,
                         sizeof(s_manufacturer), "manufacturer");
-    load_string_setting("usb_product", "hid_name", s_product,
-                        sizeof(s_product), "product name");
-    load_string_setting("usb_interface", NULL, s_interface,
+    load_string_setting("usb_product", s_product, sizeof(s_product), "product name");
+    load_string_setting("usb_interface", s_interface,
                         sizeof(s_interface), "interface label");
 
     ESP_LOGI(TAG, "Installing TinyUSB composite HID");

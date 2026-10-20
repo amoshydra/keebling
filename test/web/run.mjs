@@ -304,9 +304,12 @@ try {
 
   // Macros live in the browser now, so this check runs the other way round:
   // the page must never have put them on the device...
-  const withMacros = payloads.find((p) => Array.isArray(p.macros) && p.macros.length);
-  report(!withMacros, 'macros were not written to the device',
-    `a saved payload carried macros: ${JSON.stringify(withMacros)}`);
+  // ...and no payload may carry a key the model no longer has. `macros` moved
+  // into the browser, and the device stores the blob verbatim, so a device still
+  // holding it would round-trip it for ever.
+  const withDead = payloads.find((p) => 'macros' in p || 'hid_name' in p);
+  report(!withDead, 'settings no longer carry removed keys',
+    `a saved payload carried a removed key: ${JSON.stringify(withDead)}`);
 
   // ...and the one-time migration must have taken the legacy list off it, while
   // leaving the rest of the settings alone.

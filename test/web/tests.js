@@ -617,6 +617,23 @@ __webTests.push({
 });
 
 
+__webTests.push({
+  page: 'settings',
+  name: 'saving drops keys that no longer exist in the model',
+  fn: async () => {
+    // An older build left these in the blob, and the device stores it verbatim -
+    // so every save used to carry them along for ever.
+    appSettings.macros = [{ name: 'stale', steps: '{ENTER}' }];
+    appSettings.hid_name = 'old name';
+
+    const r = await saveSettingsToDevice();
+    __assert(r && r.ok, 'the save did not succeed');
+
+    __assert(!('macros' in appSettings), 'macros survived the save in memory');
+    __assert(!('hid_name' in appSettings), 'hid_name survived the save in memory');
+  },
+});
+
 // ---------------------------------------------------------------- HID descriptor
 __webTests.push({
   page: 'settings',
