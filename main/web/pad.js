@@ -312,9 +312,6 @@ pad.addEventListener('pointercancel', onPointerEnd);
 let captured = false;
 
 let wakeLock = null;
-let hiddenCount = 0;
-let hiddenSince = 0;
-let hiddenLongest = 0;
 
 async function holdWakeLock() {
   if (!('wakeLock' in navigator) || wakeLock) return;
@@ -334,18 +331,8 @@ function releaseWakeLock() {
 }
 
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) {
-    hiddenCount++;
-    hiddenSince = performance.now();
-  } else {
-    if (hiddenSince) {
-      const ms = performance.now() - hiddenSince;
-      if (ms > hiddenLongest) hiddenLongest = ms;
-      hiddenSince = 0;
-    }
-    // The browser drops the lock when the page is hidden, so re-take it.
-    if (captured) holdWakeLock();
-  }
+  // The browser drops the lock when the page is hidden, so re-take it.
+  if (!document.hidden && captured) holdWakeLock();
 });
 
 // ---------------------------------------------------------------- mouse capture
@@ -437,42 +424,6 @@ pad.addEventListener('pointermove', (e) => {
   if (!captured || e.pointerType !== 'mouse') return;
   const gain = Number(appSettings.mouse_gain) || 1;
   queueMove(e.movementX * gain, e.movementY * gain);
-});
-
-// ------------------------------------------------------------------ temporary
-// Readout for the "cursor pins to a corner" report. It shows what the browser
-// is actually computing per event and in total, which is the fork that decides
-// whether the fault is here or in the report path below. Delete once resolved.
-const dbgEl = document.createElement('div');
-dbgEl.style.cssText =
-  'position:absolute;left:0;right:0;top:4px;text-align:center;line-height:1.5;' +
-  'font:11px ui-monospace,SFMono-Regular,monospace;color:#7fd;pointer-events:none';
-dbgEl.style.display = 'none';
-pad.appendChild(dbgEl);
-
-let dbg = { n: 0, rawX: 0, rawY: 0, sentX: 0, sentY: 0 };
-
-pad.addEventListener('pointermove', (e) => {
-  if (!captured || e.pointerType !== 'mouse') return;
-  const gain = Number(appSettings.mouse_gain) || 1;
-  dbg.n++;
-  dbg.rawX += e.movementX; dbg.rawY += e.movementY;
-  dbg.sentX += Math.round(e.movementX * gain); dbg.sentY += Math.round(e.movementY * gain);
-  dbgEl.textContent =
-    `events ${dbg.n}   hidden ${hiddenCount}x longest ${Math.round(hiddenLongest)}ms\n` +
-    `last raw ${e.movementX},${e.movementY}  gain ${gain}  ` +
-    `sent ${Math.round(e.movementX * gain)},${Math.round(e.movementY * gain)}\n` +
-    `totals raw ${dbg.rawX},${dbg.rawY}  sent ${dbg.sentX},${dbg.sentY}`;
-});
-
-document.addEventListener('pointerlockchange', () => {
-  dbgEl.style.display = captured ? 'block' : 'none';
-  if (captured) {
-    dbg = { n: 0, rawX: 0, rawY: 0, sentX: 0, sentY: 0 };
-    hiddenCount = 0;
-    hiddenLongest = 0;
-    hiddenSince = 0;
-  }
 });
 
 window.addEventListener('mousedown', (e) => {
