@@ -40,6 +40,13 @@ bool display_qr(const char *text);
 // without guessing how wide the code turned out.
 int display_qr_right(void);
 
+// Ask for a redraw of whatever mode is current. Safe to call from any task: it
+// only sets a flag that the tick task consumes.
+void display_request_refresh(void);
+
+// True once per request, then cleared. Called by the tick task.
+bool display_take_refresh(void);
+
 // Show `text` full screen, white on black: the 5x7 font cell is 6x8 px, so the
 // panel holds 26 columns x 10 lines. Wraps at the last space that fits (a single
 // word longer than a line is broken), '\n' and '\r\n' force a break. Bytes the

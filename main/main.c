@@ -312,6 +312,11 @@ static void tick_task(void *arg) {
             sleep_display();
         }
 
+        // Something the screen shows changed - an uploaded image, an edited
+        // setting. Redraw here rather than in the HTTP handler, which would race
+        // the mode state this task owns.
+        if (display_take_refresh()) refresh_display();
+
         // WiFi changes keep the screen current. The address matters as much as
         // the state: a re-join can hand out a different DHCP lease while the
         // state stays STA, and the QR would go on pointing at an address nothing

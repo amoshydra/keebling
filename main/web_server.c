@@ -449,6 +449,9 @@ static esp_err_t settings_post_handler(httpd_req_t *req) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid settings");
         return ESP_FAIL;
     }
+    // screen_text may have changed, and the text screen is drawn from it each
+    // time - but nothing would redraw it until a tap or a wake.
+    display_request_refresh();
     httpd_resp_set_type(req, "text/plain");
     return httpd_resp_sendstr(req, "ok");
 }
@@ -720,6 +723,7 @@ static esp_err_t ui_upload_handler(httpd_req_t *req) {
         return ESP_FAIL;
     }
 
+    display_request_refresh();     // the file changed; if it is on screen, show it
     ESP_LOGI(TAG, "%s: %u bytes stored on the device", name, (unsigned)req->content_len);
     httpd_resp_set_type(req, "text/plain");
     return httpd_resp_sendstr(req, "stored");
@@ -769,6 +773,7 @@ static esp_err_t ui_reset_handler(httpd_req_t *req) {
         return ESP_FAIL;
     }
 
+    display_request_refresh();
     ESP_LOGI(TAG, "%s: stored copy removed, embedded copy is back", name);
     httpd_resp_set_type(req, "text/plain");
     return httpd_resp_sendstr(req, "reset");
@@ -907,6 +912,9 @@ static esp_err_t screen_image_upload_handler(httpd_req_t *req) {
         return ESP_FAIL;
     }
 
+    // Redraw now if the image screen is the mode currently on display; otherwise
+    // the new picture would sit in the filesystem until the next tap or wake.
+    display_request_refresh();
     ESP_LOGI(TAG, "screen image stored (%s, %u bytes)",
              check.format == SCREEN_IMAGE_FORMAT_RGB565 ? "RGB565" : "grey4",
              (unsigned)(SCREEN_IMAGE_HEADER + check.expect_payload));
@@ -931,6 +939,7 @@ static esp_err_t screen_image_reset_handler(httpd_req_t *req) {
         return ESP_FAIL;
     }
 
+    display_request_refresh();     // the image is gone; drop to the next mode
     ESP_LOGI(TAG, "screen image removed");
     httpd_resp_set_type(req, "text/plain");
     return httpd_resp_sendstr(req, "reset");

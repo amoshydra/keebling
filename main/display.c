@@ -520,6 +520,19 @@ bool display_rgb565(FILE *f) {
 // which quietly truncated any IPv4 address ending in three digits.
 static int s_qr_right;
 
+// Set when something the screen shows has changed - an uploaded image, an edited
+// text setting. The redraw itself happens in the tick task, which owns the mode
+// state; doing it from the HTTP handler would race that.
+static volatile bool s_refresh_request;
+
+void display_request_refresh(void) { s_refresh_request = true; }
+
+bool display_take_refresh(void) {
+    if (!s_refresh_request) return false;
+    s_refresh_request = false;
+    return true;
+}
+
 int display_qr_right(void) { return s_qr_right; }
 
 bool display_qr(const char *text) {
