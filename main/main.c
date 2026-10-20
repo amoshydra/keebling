@@ -100,26 +100,40 @@ static const char *reset_reason_str(esp_reset_reason_t r) {
 }
 
 // Right-hand panel beside the QR. x = 80 leaves 13 characters.
-// What the QR carries depends on whether anyone is using the device yet.
+// What the QR carries depends on where the device can be reached.
 //
-// With nobody connected, the useful thing is a way *in*: the standard Wi-Fi join
-// payload, which a phone camera understands, joins "esp-remote" without typing
-// the twelve-character code. Once a client is connected, the useful thing is the
-// UI itself, so the payload becomes the URL with the access code already in it.
+// - On a network with an address, or with a client on its own access point: the
+//   URL for that address, so scanning opens the UI already authenticated.
+// - Otherwise the only way in is the access point itself, so the payload becomes
+//   the standard Wi-Fi join string, which a phone camera understands and which
+//   saves typing the twelve-character code.
+//
+// Gating on "a client is connected" alone was wrong: a device associated to a
+// network has a perfectly good address even with nobody on its AP.
 static void screen_qr_payload(char *out, size_t len) {
-    const char *ap_ip = wifi_mgr_ap_ip();
+    const char *sta_ip = wifi_mgr_ip();        // "" when not associated
+    const char *ap_ip = wifi_mgr_ap_ip();      // "" when the AP is down
 
+    if (sta_ip[0]) {
+        snprintf(out, len, "http://%s/?token=%s", sta_ip, security_code());
+        return;
+    }
     if (wifi_mgr_client_count() > 0 && ap_ip[0]) {
         snprintf(out, len, "http://%s/?token=%s", ap_ip, security_code());
         return;
     }
 
-    // No client, or no AP address to put in a URL: the join payload.
     snprintf(out, len, "WIFI:T:WPA;S:%s;P:%s;;", AP_SSID, security_code());
 }
 
+// True when the QR above is a URL rather than a join payload, so the labels
+// beside it say what scanning will actually do.
+static bool qr_is_url(void) {
+    return wifi_mgr_ip()[0] || (wifi_mgr_client_count() > 0 && wifi_mgr_ap_ip()[0]);
+}
+
 static void draw_qr_panel(void) {
-    const bool in_use = wifi_mgr_client_count() > 0;
+    const bool url = qr_is_url();
 
     display_text_line(80, 0, "ESP32 Remote");
     if (wifi_mgr_state() == WIFI_MGR_STA) {
@@ -132,9 +146,8 @@ static void draw_qr_panel(void) {
         display_text_line(80, 2, wifi_mgr_ap_ip());
     }
 
-    // Say what the code is for, so it is not a mystery picture.
-    display_text_line(80, 4, in_use ? "scan to open" : "scan to join");
-    display_text_line(80, 5, in_use ? "the web UI" : "this Wi-Fi");
+    display_text_line(80, 4, url ? "scan to open" : "scan to join");
+    display_text_line(80, 5, url ? "the web UI" : "this Wi-Fi");
     display_text_line(80, 6, security_code());
 }
 
