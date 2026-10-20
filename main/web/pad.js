@@ -305,6 +305,12 @@ pad.addEventListener('pointercancel', onPointerEnd);
 // one burst when the page comes back. That reads as "nothing happens, then the
 // cursor flies", and a phone screen turning off is enough to cause it. Holding a
 // wake lock is what stops the screen sleeping while captured.
+//
+// Declared here, above the visibility handler that reads it: a `let` further
+// down would be in its temporal dead zone if the page changed visibility during
+// load, which a phone browser opening a background tab does.
+let captured = false;
+
 let wakeLock = null;
 let hiddenCount = 0;
 let hiddenSince = 0;
@@ -345,7 +351,7 @@ document.addEventListener('visibilitychange', () => {
 // ---------------------------------------------------------------- mouse capture
 // Pointer lock is the only way a desktop mouse can drive the remote cursor
 // without being bounded by the window edge.
-let captured = false;
+// (`captured` is declared above, next to the wake lock that also uses it.)
 
 // A refusal is not an exception: requestPointerLock returns a promise that
 // rejects, and browsers refuse for about a second after a lock is released. So
