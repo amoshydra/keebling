@@ -471,9 +471,9 @@ __webTests.push({
     __assert(!document.getElementById('gate'), 'settings page asked for the code');
     const v = (id) => { const e = document.getElementById(id); return e && (e.type === 'checkbox' ? e.checked : e.value); };
     __assert(v('usbProduct') === 'ESP32 Remote', `usbProduct = ${v('usbProduct')}`);
-    __assert(v('screenTimeout') === '10', `screenTimeout = ${v('screenTimeout')}`);
+    __assert(v('screenTimeout') === '60', `screenTimeout = ${v('screenTimeout')}`);
     __assert(v('typeSpeed') === '20', `typeSpeed = ${v('typeSpeed')}`);
-    __assert(document.getElementById('screenTimeoutVal').textContent === '10 s',
+    __assert(document.getElementById('screenTimeoutVal').textContent === '60 s',
       'range label not rendered');
   },
 });

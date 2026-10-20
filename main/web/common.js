@@ -73,7 +73,7 @@ const SETTINGS_DEFAULTS = {
   usb_manufacturer: 'ESP32',        // USB string 1
   usb_interface: 'Keyboard Mouse Media',  // USB string 4 - cosmetic label
   screen_text: '',                  // the third BOOT screen, drawn as 10x26
-  screen_timeout_s: 10,             // blank the display after this idle time
+  screen_timeout_s: 60,             // blank the display after this idle time
   type_speed: 20,
   mouse_gain: 1.0,
   scroll_scale: 1.0,

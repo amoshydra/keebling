@@ -58,7 +58,7 @@ typedef enum {
 static display_mode_t s_mode = DISP_QR;
 static bool s_sleeping = false;
 static int64_t s_last_press_us = 0;
-static int s_screen_timeout_s = 10;   // 0 disables sleeping
+static int s_screen_timeout_s = 60;   // 0 disables sleeping
 
 // The whole stored string, because the renderer's "no room left" marker is only
 // honest if it sees the text that was dropped - and the settings blob caps the
@@ -257,7 +257,7 @@ static void tick_task(void *arg) {
         static int timeout_poll = 0;
         if (++timeout_poll >= 100) {
             timeout_poll = 0;
-            s_screen_timeout_s = settings_get_int("screen_timeout_s", 10);
+            s_screen_timeout_s = settings_get_int("screen_timeout_s", 60);
         }
 
         // Screen timeout. Any button press resets it.

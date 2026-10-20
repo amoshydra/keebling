@@ -163,7 +163,7 @@ fumbling:
 
 A release between 600 ms and 3 s deliberately does nothing.
 
-The display sleeps after the configured idle time (10 s by default, settable
+The display sleeps after the configured idle time (60 s by default, settable
 in settings, 0 disables). Sleeping blanks the pixels as well as the backlight —
 the panel keeps its memory and the case is transparent, so darkening the
 backlight alone would still leave the text readable in ambient light. Waking
