@@ -209,7 +209,8 @@ burn, which is permanent, so it's a deliberate separate decision.
 
 It changes with state, because what is useful changes.
 
-**No client connected** — the standard Wi-Fi join payload:
+**The device has no usable address** — that is, access-point only with nobody on
+it — so the only way in is to join the network. The standard Wi-Fi join payload:
 
 ```
 WIFI:T:WPA;S:esp-remote;P:<code>;;
@@ -218,7 +219,8 @@ WIFI:T:WPA;S:esp-remote;P:<code>;;
 A phone camera understands that, so joining the access point no longer means
 typing a twelve-character password.
 
-**A client connected** — the UI URL with the code already in it:
+**The device has an address** — associated to a network, or with a client on its
+own access point — so the URL for that address, with the code already in it:
 
 ```
 http://<address>/?token=<code>
@@ -227,9 +229,9 @@ http://<address>/?token=<code>
 so scanning it opens the page authenticated.
 
 The earlier design encoded only the bare code, and argued against a URL because
-the address is the part that moves. That is why the URL appears only once
-something is already connected: by then the address is current and proven, and
-the join payload is what covers the case where nothing is.
+the address is the part that moves. That is why the URL appears only once the
+device actually has one: it is read at draw time, so it cannot be stale, and the
+join payload covers the case where there is nothing to point at.
 
 The cost is module size. 40 characters needs QR **version 3** rather than
 version 1, which on an 80px panel means **2px modules (0.27mm)** instead of 3px
