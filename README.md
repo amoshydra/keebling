@@ -205,19 +205,40 @@ Storing credentials puts the WiFi password in flash, unencrypted. Use a
 protects your laptop and NAS. NVS encryption is possible but needs an eFuse key
 burn, which is permanent, so it's a deliberate separate decision.
 
-### Why the QR holds the code and not a URL
+### What the QR carries
 
-A URL would be more convenient — scan, and the page opens already
-authenticated — but the URL is the part that moves (DHCP address now, possibly
-a different one once STA mode exists, or an mDNS name). The code never changes.
+It changes with state, because what is useful changes.
 
-Encoding the bare 12 characters also keeps the payload to 12 bytes, which fits
-QR **version 1** and lets the modules be 3px (0.41 mm) instead of 2px
-(0.27 mm). A URL needs version 3 for the same screen, and 0.27 mm modules are
-much harder to scan off a 0.96" panel.
+**No client connected** — the standard Wi-Fi join payload:
+
+```
+WIFI:T:WPA;S:esp-remote;P:<code>;;
+```
+
+A phone camera understands that, so joining the access point no longer means
+typing a twelve-character password.
+
+**A client connected** — the UI URL with the code already in it:
+
+```
+http://<address>/?token=<code>
+```
+
+so scanning it opens the page authenticated.
+
+The earlier design encoded only the bare code, and argued against a URL because
+the address is the part that moves. That is why the URL appears only once
+something is already connected: by then the address is current and proven, and
+the join payload is what covers the case where nothing is.
+
+The cost is module size. 40 characters needs QR **version 3** rather than
+version 1, which on an 80px panel means **2px modules (0.27mm)** instead of 3px
+(0.41mm). Two pixels is harder for a camera at a glancing angle, so the access
+code is also printed as text beside the QR — the QR is the convenience, not the
+only way in.
 
 `qrcodegen` is vendored under `main/qr/` (Nayuki, MIT) and `boostEcl` is
-enabled, so a small payload gets upgraded to EC level Q for free.
+enabled, so a small payload gets upgraded to a higher EC level for free.
 
 ## Security model
 

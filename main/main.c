@@ -100,7 +100,27 @@ static const char *reset_reason_str(esp_reset_reason_t r) {
 }
 
 // Right-hand panel beside the QR. x = 80 leaves 13 characters.
+// What the QR carries depends on whether anyone is using the device yet.
+//
+// With nobody connected, the useful thing is a way *in*: the standard Wi-Fi join
+// payload, which a phone camera understands, joins "esp-remote" without typing
+// the twelve-character code. Once a client is connected, the useful thing is the
+// UI itself, so the payload becomes the URL with the access code already in it.
+static void screen_qr_payload(char *out, size_t len) {
+    const char *ap_ip = wifi_mgr_ap_ip();
+
+    if (wifi_mgr_client_count() > 0 && ap_ip[0]) {
+        snprintf(out, len, "http://%s/?token=%s", ap_ip, security_code());
+        return;
+    }
+
+    // No client, or no AP address to put in a URL: the join payload.
+    snprintf(out, len, "WIFI:T:WPA;S:%s;P:%s;;", AP_SSID, security_code());
+}
+
 static void draw_qr_panel(void) {
+    const bool in_use = wifi_mgr_client_count() > 0;
+
     display_text_line(80, 0, "ESP32 Remote");
     if (wifi_mgr_state() == WIFI_MGR_STA) {
         char l[16];
@@ -108,10 +128,13 @@ static void draw_qr_panel(void) {
         display_text_line(80, 1, l);
         display_text_line(80, 2, wifi_mgr_ip());
     } else {
-        display_text_line(80, 1, "AP esp-remote");
-        display_text_line(80, 2, "192.168.4.1");
+        display_text_line(80, 1, "AP " AP_SSID);
+        display_text_line(80, 2, wifi_mgr_ap_ip());
     }
-    display_text_line(80, 5, "code");
+
+    // Say what the code is for, so it is not a mystery picture.
+    display_text_line(80, 4, in_use ? "scan to open" : "scan to join");
+    display_text_line(80, 5, in_use ? "the web UI" : "this Wi-Fi");
     display_text_line(80, 6, security_code());
 }
 
@@ -147,9 +170,11 @@ static void show_status_screen(void) {
 // Draw whatever the current mode calls for.
 static void apply_display_mode(void) {
     switch (s_mode) {
-    case DISP_QR:
+    case DISP_QR: {
+        char payload[96];
+        screen_qr_payload(payload, sizeof(payload));
         display_clear();
-        if (!display_qr(security_code())) {
+        if (!display_qr(payload)) {
             s_mode = DISP_STATUS;      // payload would not fit: fall back
             apply_display_mode();
             return;
@@ -157,6 +182,7 @@ static void apply_display_mode(void) {
         display_backlight(255);
         draw_qr_panel();
         break;
+    }
 
     case DISP_STATUS:
         display_backlight(255);
