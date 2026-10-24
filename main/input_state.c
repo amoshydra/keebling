@@ -34,6 +34,12 @@ static uint16_t s_consumer = 0;
 static bool    s_kbd_dirty, s_mouse_btn_dirty, s_consumer_dirty;
 static int16_t s_pending_dx, s_pending_dy, s_pending_wheel;
 
+// Refusals are retried, so they are not errors - but a burst of them means the
+// endpoint is not keeping up, and that used to be completely invisible. Log the
+// first of an outage, not every one: the recovery line says when it ended.
+static uint32_t s_refused;
+static bool     s_refusal_logged;
+
 // True when a key, modifier or mouse button is currently held down.
 static bool    s_held = false;
 // Wall-clock of the last heartbeat. Watchdog only arms once we've seen one,
@@ -146,13 +152,18 @@ void input_hid_flush(void) {
     const bool move = (sx || sy || sw);
     unlock();
 
+    bool refused = false;
+
     if (kbd && !usb_hid_keyboard_report(mod, keys)) {
         lock(); s_kbd_dirty = true; unlock();
+        refused = true;
     }
     if (cons && !usb_hid_consumer_report(consumer)) {
         lock(); s_consumer_dirty = true; unlock();
+        refused = true;
     }
     if ((btn || move) && !usb_hid_mouse_report(buttons, sx, sy, sw)) {
+        refused = true;
         lock();
         s_mouse_btn_dirty = true;
         s_pending_dx = sat16(s_pending_dx, sx);
@@ -163,6 +174,22 @@ void input_hid_flush(void) {
         // More movement than one report could carry. The report-complete
         // callback will fire for the one just sent and flush the rest.
         lock(); s_mouse_btn_dirty = true; unlock();
+    }
+
+    if (refused) {
+        lock();
+        s_refused++;
+        const bool first = !s_refusal_logged;
+        s_refusal_logged = true;
+        const uint32_t n = s_refused;
+        unlock();
+        if (first) ESP_LOGW(TAG, "HID endpoint refused a report; retrying (%u so far)", (unsigned)n);
+    } else if (s_refusal_logged) {
+        lock();
+        const uint32_t n = s_refused;
+        s_refusal_logged = false;
+        unlock();
+        ESP_LOGI(TAG, "HID endpoint accepting reports again (%u refused)", (unsigned)n);
     }
 }
 
