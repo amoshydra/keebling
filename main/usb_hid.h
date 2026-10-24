@@ -12,6 +12,9 @@
 // Init USB HID subsystem. Call once from app_main.
 void usb_hid_init(void);
 
+// True while a host is enumerated. Reports sent while false go nowhere.
+bool usb_hid_mounted(void);
+
 // Send a keyboard report. mod = modifier bitmask, keys = up to 6 usage IDs.
 // Returns true if queued successfully.
 bool usb_hid_keyboard_report(uint8_t mod, const uint8_t keys[6]);
@@ -31,9 +34,6 @@ const char *usb_hid_product_name(void);
 
 // String descriptor by index (1 manufacturer, 2 product, 3 serial, 4 interface).
 const char *usb_hid_string(int index);
-
-// True if USB is mounted by host.
-bool usb_hid_mounted(void);
 
 // True if ready to accept a report.
 bool usb_hid_ready(void);

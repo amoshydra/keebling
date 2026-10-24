@@ -46,6 +46,13 @@ static inline int8_t clamp8(int16_t v) {
     return (int8_t)(v > 127 ? 127 : v < -127 ? -127 : v);
 }
 
+// Saturating add for the movement accumulator: a burst (or an unplugged gap)
+// must not wrap a signed 16-bit value into the opposite direction.
+static inline int16_t sat16(int16_t a, int16_t b) {
+    int32_t v = (int32_t)a + b;
+    return (int16_t)(v > 32000 ? 32000 : v < -32000 ? -32000 : v);
+}
+
 static inline void lock(void)   { xSemaphoreTake(s_lock, portMAX_DELAY); }
 static inline void unlock(void) { xSemaphoreGive(s_lock); }
 
@@ -76,9 +83,9 @@ void input_mouse(uint8_t buttons, int8_t dx, int8_t dy, int8_t wheel) {
     lock();
     s_mouse_buttons = buttons;
     s_mouse_btn_dirty = true;
-    s_pending_dx += dx;
-    s_pending_dy += dy;
-    s_pending_wheel += wheel;
+    s_pending_dx = sat16(s_pending_dx, dx);
+    s_pending_dy = sat16(s_pending_dy, dy);
+    s_pending_wheel = sat16(s_pending_wheel, wheel);
     recompute_held();
     unlock();
 
@@ -101,22 +108,42 @@ void input_consumer(uint16_t usage) {
 // deliberate: a change that lands while the report is in flight sets it again,
 // and would otherwise be cleared by this call and never sent.
 void input_hid_flush(void) {
+    // Nothing is listening: drop what is outstanding rather than let it pile up.
+    // Movement queued while unplugged is not worth delivering when the host comes
+    // back - replaying it would fling the cursor - and the host re-reads the
+    // keyboard state when it enumerates, so the dirty flags are moot.
+    if (!usb_hid_mounted()) {
+        lock();
+        s_pending_dx = s_pending_dy = s_pending_wheel = 0;
+        s_kbd_dirty = s_mouse_btn_dirty = s_consumer_dirty = false;
+        unlock();
+        return;
+    }
+
     uint8_t mod, keys[6], buttons;
     uint16_t consumer;
-    int16_t dx, dy, wheel;
-    bool kbd, btn, cons, move;
+    int8_t sx, sy, sw;
+    bool kbd, btn, cons;
 
     lock();
-    kbd  = s_kbd_dirty;      s_kbd_dirty = false;
+    kbd  = s_kbd_dirty;       s_kbd_dirty = false;
     btn  = s_mouse_btn_dirty; s_mouse_btn_dirty = false;
-    cons = s_consumer_dirty; s_consumer_dirty = false;
+    cons = s_consumer_dirty;  s_consumer_dirty = false;
     mod = s_mod;
     memcpy(keys, s_keys, sizeof(keys));
     buttons = s_mouse_buttons;
     consumer = s_consumer;
-    dx = s_pending_dx; dy = s_pending_dy; wheel = s_pending_wheel;
-    s_pending_dx = s_pending_dy = s_pending_wheel = 0;
-    move = (dx || dy || wheel);
+
+    // Take only what one report can carry, and give that much back on failure.
+    // Draining the whole accumulator here would drop everything past +-127 even
+    // when the send succeeded.
+    sx = clamp8(s_pending_dx);
+    sy = clamp8(s_pending_dy);
+    sw = clamp8(s_pending_wheel);
+    s_pending_dx -= sx;
+    s_pending_dy -= sy;
+    s_pending_wheel -= sw;
+    const bool move = (sx || sy || sw);
     unlock();
 
     if (kbd && !usb_hid_keyboard_report(mod, keys)) {
@@ -125,11 +152,17 @@ void input_hid_flush(void) {
     if (cons && !usb_hid_consumer_report(consumer)) {
         lock(); s_consumer_dirty = true; unlock();
     }
-    if ((btn || move) && !usb_hid_mouse_report(buttons, clamp8(dx), clamp8(dy), clamp8(wheel))) {
+    if ((btn || move) && !usb_hid_mouse_report(buttons, sx, sy, sw)) {
         lock();
         s_mouse_btn_dirty = true;
-        s_pending_dx += dx; s_pending_dy += dy; s_pending_wheel += wheel;
+        s_pending_dx = sat16(s_pending_dx, sx);
+        s_pending_dy = sat16(s_pending_dy, sy);
+        s_pending_wheel = sat16(s_pending_wheel, sw);
         unlock();
+    } else if (s_pending_dx || s_pending_dy || s_pending_wheel) {
+        // More movement than one report could carry. The report-complete
+        // callback will fire for the one just sent and flush the rest.
+        lock(); s_mouse_btn_dirty = true; unlock();
     }
 }
 
