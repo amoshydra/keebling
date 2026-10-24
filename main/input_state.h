@@ -26,3 +26,8 @@ bool input_is_active(void);
 
 // Called by web server on heartbeat/ping to reset watchdog.
 void input_heartbeat(void);
+
+// Send anything still outstanding. Called after every input change, from the
+// USB task's report-complete callback (which is exactly when the endpoint frees
+// up), and from the tick task as a backstop.
+void input_hid_flush(void);

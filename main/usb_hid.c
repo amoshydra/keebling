@@ -1,4 +1,5 @@
 #include "usb_hid.h"
+#include "input_state.h"
 #include "settings.h"
 
 #include "tinyusb.h"
@@ -84,6 +85,9 @@ void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id,
 
 void tud_hid_report_complete_cb(uint8_t instance, uint8_t const *report, uint16_t len) {
     (void)instance; (void)report; (void)len;
+    // A report has just gone out, so the endpoint is free: this is the moment to
+    // retry anything an earlier send could not deliver.
+    input_hid_flush();
 }
 
 // ---- Public API ----

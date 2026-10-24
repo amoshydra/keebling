@@ -1,4 +1,5 @@
 #include "input_state.h"
+#include <string.h>
 #include "usb_hid.h"
 
 #include "esp_log.h"
@@ -21,12 +22,29 @@ static uint8_t s_keys[6] = {0};
 static uint8_t s_mouse_buttons = 0;
 static uint16_t s_consumer = 0;
 
+// What still needs to reach the host. tud_hid_report() returns false when the
+// endpoint is busy, and TinyUSB then sends nothing - the host keeps polling the
+// previous report. For a keyboard that means a dropped press never arrives and a
+// dropped release leaves the key down; for a mouse a dropped release leaves a
+// button held. So nothing here assumes a report was delivered.
+//
+// States (keys, buttons, media) are cheap to resend and idempotent. Movement is
+// not: a lost delta is lost distance, so unsent movement is accumulated and
+// carried until the endpoint accepts it.
+static bool    s_kbd_dirty, s_mouse_btn_dirty, s_consumer_dirty;
+static int16_t s_pending_dx, s_pending_dy, s_pending_wheel;
+
 // True when a key, modifier or mouse button is currently held down.
 static bool    s_held = false;
 // Wall-clock of the last heartbeat. Watchdog only arms once we've seen one,
 // so the device is never "released" before a browser has ever connected.
 static int64_t s_last_ping_us = 0;
 static bool    s_watchdog_armed = false;
+
+// The report field is a signed byte; unsent movement is carried in int16_t.
+static inline int8_t clamp8(int16_t v) {
+    return (int8_t)(v > 127 ? 127 : v < -127 ? -127 : v);
+}
 
 static inline void lock(void)   { xSemaphoreTake(s_lock, portMAX_DELAY); }
 static inline void unlock(void) { xSemaphoreGive(s_lock); }
@@ -47,19 +65,24 @@ void input_keyboard(uint8_t mod, const uint8_t keys[6]) {
     lock();
     s_mod = mod;
     for (int i = 0; i < 6; i++) s_keys[i] = keys[i];
+    s_kbd_dirty = true;
     recompute_held();
     unlock();
 
-    usb_hid_keyboard_report(mod, keys);
+    input_hid_flush();
 }
 
 void input_mouse(uint8_t buttons, int8_t dx, int8_t dy, int8_t wheel) {
     lock();
     s_mouse_buttons = buttons;
+    s_mouse_btn_dirty = true;
+    s_pending_dx += dx;
+    s_pending_dy += dy;
+    s_pending_wheel += wheel;
     recompute_held();
     unlock();
 
-    usb_hid_mouse_report(buttons, dx, dy, wheel);
+    input_hid_flush();
 }
 
 void input_consumer(uint16_t usage) {
@@ -67,10 +90,47 @@ void input_consumer(uint16_t usage) {
     // A held media key counts as activity so the watchdog can release it -
     // otherwise a stuck volume key would repeat forever.
     s_consumer = usage;
+    s_consumer_dirty = true;
     recompute_held();
     unlock();
 
-    usb_hid_consumer_report(usage);
+    input_hid_flush();
+}
+
+// Send whatever is outstanding. Clearing the dirty flag *before* the send is
+// deliberate: a change that lands while the report is in flight sets it again,
+// and would otherwise be cleared by this call and never sent.
+void input_hid_flush(void) {
+    uint8_t mod, keys[6], buttons;
+    uint16_t consumer;
+    int16_t dx, dy, wheel;
+    bool kbd, btn, cons, move;
+
+    lock();
+    kbd  = s_kbd_dirty;      s_kbd_dirty = false;
+    btn  = s_mouse_btn_dirty; s_mouse_btn_dirty = false;
+    cons = s_consumer_dirty; s_consumer_dirty = false;
+    mod = s_mod;
+    memcpy(keys, s_keys, sizeof(keys));
+    buttons = s_mouse_buttons;
+    consumer = s_consumer;
+    dx = s_pending_dx; dy = s_pending_dy; wheel = s_pending_wheel;
+    s_pending_dx = s_pending_dy = s_pending_wheel = 0;
+    move = (dx || dy || wheel);
+    unlock();
+
+    if (kbd && !usb_hid_keyboard_report(mod, keys)) {
+        lock(); s_kbd_dirty = true; unlock();
+    }
+    if (cons && !usb_hid_consumer_report(consumer)) {
+        lock(); s_consumer_dirty = true; unlock();
+    }
+    if ((btn || move) && !usb_hid_mouse_report(buttons, clamp8(dx), clamp8(dy), clamp8(wheel))) {
+        lock();
+        s_mouse_btn_dirty = true;
+        s_pending_dx += dx; s_pending_dy += dy; s_pending_wheel += wheel;
+        unlock();
+    }
 }
 
 void input_release_all(void) {
@@ -82,13 +142,12 @@ void input_release_all(void) {
     s_consumer = 0;
     s_held = false;
     s_watchdog_armed = false;
+    s_kbd_dirty = s_mouse_btn_dirty = s_consumer_dirty = true;
     unlock();
 
     if (was_held) ESP_LOGW(TAG, "Releasing all held inputs");
 
-    usb_hid_keyboard_report(0, (const uint8_t[6]){0, 0, 0, 0, 0, 0});
-    usb_hid_mouse_report(0, 0, 0, 0);
-    usb_hid_consumer_report(0);
+    input_hid_flush();
 }
 
 void input_heartbeat(void) {
@@ -112,6 +171,10 @@ void input_tick(void) {
         ESP_LOGW(TAG, "Watchdog: heartbeat lost while inputs held");
         input_release_all();
     }
+
+    // Backstop: retry anything the USB task has not managed to deliver. Rare,
+    // and harmless when there is nothing outstanding.
+    input_hid_flush();
 
 }
 
