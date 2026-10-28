@@ -41,18 +41,14 @@ extern const unsigned char common_js_start[]     asm("_binary_common_js_start");
 extern const unsigned char common_js_end[]       asm("_binary_common_js_end");
 extern const unsigned char pad_js_start[]        asm("_binary_pad_js_start");
 extern const unsigned char pad_js_end[]          asm("_binary_pad_js_end");
-extern const unsigned char settings_html_start[] asm("_binary_settings_html_start");
-extern const unsigned char settings_html_end[]   asm("_binary_settings_html_end");
+extern const unsigned char router_js_start[]     asm("_binary_router_js_start");
+extern const unsigned char router_js_end[]       asm("_binary_router_js_end");
 extern const unsigned char settings_js_start[]   asm("_binary_settings_js_start");
 extern const unsigned char settings_js_end[]     asm("_binary_settings_js_end");
-extern const unsigned char macros_html_start[]   asm("_binary_macros_html_start");
-extern const unsigned char macros_html_end[]     asm("_binary_macros_html_end");
 extern const unsigned char macros_js_start[]     asm("_binary_macros_js_start");
 extern const unsigned char macros_js_end[]       asm("_binary_macros_js_end");
 extern const unsigned char macro_js_start[]      asm("_binary_macro_js_start");
 extern const unsigned char macro_js_end[]        asm("_binary_macro_js_end");
-extern const unsigned char ui_html_start[]       asm("_binary_ui_html_start");
-extern const unsigned char ui_html_end[]         asm("_binary_ui_html_end");
 extern const unsigned char ui_js_start[]         asm("_binary_ui_js_start");
 extern const unsigned char ui_js_end[]           asm("_binary_ui_js_end");
 
@@ -76,12 +72,10 @@ static const static_asset_t s_assets[] = {
     { "/style.css",     "text/css",               "style.css",     style_css_start,     style_css_end },
     { "/common.js",     "application/javascript", "common.js",     common_js_start,     common_js_end },
     { "/pad.js",        "application/javascript", "pad.js",        pad_js_start,        pad_js_end },
-    { "/settings.html", "text/html",              "settings.html", settings_html_start, settings_html_end },
+    { "/router.js",     "application/javascript", "router.js",     router_js_start,     router_js_end },
     { "/settings.js",   "application/javascript", "settings.js",   settings_js_start,   settings_js_end },
-    { "/macros.html",   "text/html",              "macros.html",   macros_html_start,   macros_html_end },
     { "/macros.js",     "application/javascript", "macros.js",     macros_js_start,     macros_js_end },
     { "/macro.js",      "application/javascript", "macro.js",      macro_js_start,      macro_js_end },
-    { "/ui.html",       "text/html",              "ui.html",       ui_html_start,       ui_html_end },
     { "/ui.js",         "application/javascript", "ui.js",         ui_js_start,         ui_js_end },
 };
 #define ASSET_COUNT (sizeof(s_assets) / sizeof(s_assets[0]))
@@ -544,12 +538,13 @@ static esp_err_t static_handler(httpd_req_t *req) {
 // can do is need a reset - never a reflash.
 // ---------------------------------------------------------------------------
 
-// Largest single file the device will store. The biggest today is macros.js at
-// around 17 KB, and the planned screen image is about 32 KB; 64 KB leaves room
-// for both without letting one request exhaust the 320 KB partition.
+// Largest single file the device will store. The biggest today is pad.js at
+// around 34 KB (settings.js is about the same), and the planned screen image is
+// about 32 KB; 64 KB leaves room for both without letting one request exhaust
+// the 320 KB partition.
 #define UI_UPLOAD_MAX (64 * 1024)
 
-// Longest name in the asset table is "settings.html".
+// Longest name in the asset table is "settings.js".
 #define UI_NAME_MAX 32
 
 // The asset table is the whitelist. A name that is not one of the UI's own
@@ -731,8 +726,8 @@ static esp_err_t ui_upload_handler(httpd_req_t *req) {
 
 // POST /ui/reset?name=<whitelisted> deletes one stored file; ?all=1 deletes
 // every one. Either way the embedded copy is served again. Reset-all exists so
-// a broken ui.html - the page that would otherwise do the resetting - is
-// recoverable from the settings page.
+// a broken view script is recoverable from another view's page; a broken
+// index.html takes the whole shell with it and is not recoverable this way.
 static esp_err_t ui_reset_handler(httpd_req_t *req) {
     if (req->method != HTTP_POST) {
         httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "POST only");

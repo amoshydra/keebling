@@ -11,6 +11,12 @@
 // A mouse (desktop, or a laptop trackpad, which both report pointerType
 // "mouse") cannot express multi-touch, so it uses pointer lock instead: click
 // the pad to capture, move freely, Escape to release.
+//
+// The view is mounted and unmounted by router.js. Every element is looked up
+// and every listener is attached in init(), because the pad is a fresh clone
+// each time; destroy() has to put back what init() took out.
+
+const PadView = (() => {
 
 // ---------------------------------------------------------------- HID maps
 // Keyboard/Keypad usage page 0x07
@@ -43,10 +49,18 @@ let wsReady = false;
 let reconnectTimer = null;
 let reconnectAttempts = 0;
 
-const pad = document.getElementById('pad');
-const dot = document.getElementById('dot');
-const statusText = document.getElementById('statusText');
-const flashEl = document.getElementById('flash');
+// Assigned by init(); null while the view is not mounted.
+let pad = null;
+let dot = null;
+let statusText = null;
+let flashEl = null;
+let kbd = null;
+let mediaEl = null;
+let mediaPanel = null;
+let typePanel = null;
+let typeTextEl = null;
+let typeNote = null;
+let heartbeatTimer = null;
 
 // ---------------------------------------------------------------- transport
 function connect() {
@@ -193,7 +207,7 @@ function click(bit, label) {
   setTimeout(() => { buttons &= ~bit; sendMouse(0, 0, 0); }, 25);
 }
 
-pad.addEventListener('pointerdown', (e) => {
+function onTouchPointerDown(e) {
   if (e.pointerType === 'mouse') return;     // mouse uses pointer lock instead
 
   // Only real pointers can be captured; synthetic ones (and some browsers
@@ -218,9 +232,9 @@ pad.addEventListener('pointerdown', (e) => {
     sendMouse(0, 0, 0);                      // button down, then drag
     flash('drag');
   }
-});
+}
 
-pad.addEventListener('pointermove', (e) => {
+function onTouchPointerMove(e) {
   if (e.pointerType === 'mouse') return;
 
   const p = pointers.get(e.pointerId);
@@ -261,7 +275,7 @@ pad.addEventListener('pointermove', (e) => {
       sendMouse(0, 0, whole);
     }
   }
-});
+}
 
 function finishGesture() {
   const duration = Date.now() - startedAt;
@@ -296,9 +310,6 @@ function onPointerEnd(e) {
   if (mode !== 'drag') endDrag();
 }
 
-pad.addEventListener('pointerup', onPointerEnd);
-pad.addEventListener('pointercancel', onPointerEnd);
-
 // ---------------------------------------------------------------- wake lock
 // The page must stay *visible* for pointermove to be delivered at all. While it
 // is hidden the browser stops delivering them - the same lifecycle that suspends
@@ -331,10 +342,10 @@ function releaseWakeLock() {
   wakeLock = null;
 }
 
-document.addEventListener('visibilitychange', () => {
+function onVisibilityChange() {
   // The browser drops the lock when the page is hidden, so re-take it.
   if (!document.hidden && captured) holdWakeLock();
-});
+}
 
 // ---------------------------------------------------------------- mouse capture
 // Pointer lock is the only way a desktop mouse can drive the remote cursor
@@ -363,7 +374,7 @@ function requestCapture() {
   if (p && typeof p.then === 'function') p.then(undefined, captureRefused);
 }
 
-pad.addEventListener('pointerdown', (e) => {
+function onMousePointerDown(e) {
   if (e.pointerType !== 'mouse' || captured) return;
   // Locked on *mouse* pointerdown only. Doing this from the click event caught
   // taps as well, so every touch grabbed pointer lock and the pad appeared to
@@ -373,9 +384,9 @@ pad.addEventListener('pointerdown', (e) => {
   // land on whatever the host cursor happens to be over, which is a good way to
   // press a button you did not mean to.
   requestCapture();
-});
+}
 
-document.addEventListener('pointerlockchange', () => {
+function onPointerLockChange() {
   captured = document.pointerLockElement === pad;
   pad.classList.toggle('captured', captured);
   if (captured) {
@@ -385,10 +396,7 @@ document.addEventListener('pointerlockchange', () => {
     buttons = 0;
     sendMouse(0, 0, 0);
   }
-});
-
-// Fired when a request is refused. Without this the refusal is invisible.
-document.addEventListener('pointerlockerror', captureRefused);
+}
 
 // Movement is coalesced to a maximum rate rather than sent per event: a gaming
 // mouse emits over a thousand events a second, and the device cannot drain a
@@ -421,13 +429,13 @@ function queueMove(dx, dy) {
   if (moveTimer === null) moveTimer = setTimeout(flushMove, wait);
 }
 
-pad.addEventListener('pointermove', (e) => {
+function onMousePointerMove(e) {
   if (!captured || e.pointerType !== 'mouse') return;
   const gain = Number(appSettings.mouse_gain) || 1;
   queueMove(e.movementX * gain, e.movementY * gain);
-});
+}
 
-window.addEventListener('mousedown', (e) => {
+function onMouseDown(e) {
   if (!captured) return;
   e.preventDefault();     // no middle-click autoscroll while driving a remote
   flushMove();            // so a click is not overtaken by movement queued before it
@@ -435,16 +443,16 @@ window.addEventListener('mousedown', (e) => {
   if (e.button === 2) buttons |= 2;
   if (e.button === 1) buttons |= 4;
   sendMouse(0, 0, 0);
-});
+}
 
-window.addEventListener('mouseup', (e) => {
+function onMouseUp(e) {
   if (!captured) return;
   flushMove();
   if (e.button === 0) buttons &= ~1;
   if (e.button === 2) buttons &= ~2;
   if (e.button === 1) buttons &= ~4;
   sendMouse(0, 0, 0);
-});
+}
 
 // Wheel accumulation, mirroring the touch scroll path above. deltaMode is the
 // part that matters: Firefox reports lines, where a full notch is a deltaY of
@@ -452,7 +460,7 @@ window.addEventListener('mouseup', (e) => {
 // the wheel would do nothing at all while captured.
 let wheelAccum = 0;
 
-window.addEventListener('wheel', (e) => {
+function onWheel(e) {
   if (!captured) return;
   e.preventDefault();
 
@@ -468,13 +476,13 @@ window.addEventListener('wheel', (e) => {
     wheelAccum -= whole;
     sendMouse(0, 0, whole);
   }
-}, { passive: false });
+}
 
-window.addEventListener('contextmenu', (e) => { if (captured) e.preventDefault(); });
+function onContextMenu(e) { if (captured) e.preventDefault(); }
 
 // A drag that starts on the pad takes the pointer with it and the capture is
 // gone. Nothing here is draggable, so refusing all of them costs nothing.
-window.addEventListener('dragstart', (e) => e.preventDefault());
+function onDragStart(e) { e.preventDefault(); }
 
 // ---------------------------------------------------------------- on-screen buttons
 function bindButton(id, bit) {
@@ -486,9 +494,6 @@ function bindButton(id, bit) {
   el.addEventListener('pointerleave', up);
   el.addEventListener('pointercancel', up);
 }
-bindButton('bLeft', 1);
-bindButton('bRight', 2);
-bindButton('bMid', 4);
 
 // ---------------------------------------------------------------- panels
 // The keyboard and the panels share the space under the pad. On a phone that
@@ -510,21 +515,21 @@ function togglePanel(el) {
 }
 
 // ---------------------------------------------------------------- physical keyboard
-window.addEventListener('keydown', (e) => {
+function onKeyDown(e) {
   if (e.key === 'Escape' && captured) return;    // let the browser exit capture
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
   e.preventDefault();
   if (e.repeat || held.has(e.code)) return;      // HID reports are snapshots
   held.add(e.code);
   sendKeyboard();
-});
+}
 
-window.addEventListener('keyup', (e) => {
+function onKeyUp(e) {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
   e.preventDefault();
   held.delete(e.code);
   sendKeyboard();
-});
+}
 
 // ---------------------------------------------------------------- virtual keyboard
 const KBD_ROWS = [
@@ -554,8 +559,12 @@ const KBD_ROWS = [
 // Alt+Tab; the latch releases with the key that used it.
 const latched = new Set();
 
-const kbd = document.getElementById('kbd');
-for (const row of KBD_ROWS) {
+function buildKeyboard() {
+  const kbd = document.getElementById('kbd');
+  for (const row of KBD_ROWS) addKeyboardRow(kbd, row);
+}
+
+function addKeyboardRow(kbd, row) {
   const rowEl = document.createElement('div');
   rowEl.className = 'krow';
   for (const [code, label, extra] of row) {
@@ -622,10 +631,7 @@ for (const row of KBD_ROWS) {
 
 // Long-press on a touch screen is a right-click; the menu it opens would
 // cancel the pointer stream and drop a held key.
-kbd.addEventListener('contextmenu', (e) => e.preventDefault());
-
-document.getElementById('bKbd').addEventListener('click', () => togglePanel(kbd));
-document.getElementById('bRelease').addEventListener('click', releaseAll);
+function preventContextMenu(e) { e.preventDefault(); }
 
 // ---------------------------------------------------------------- media keys
 // Consumer Control (usage page 0x0C). Sent as a press/release pair like any
@@ -649,35 +655,37 @@ function sendConsumer(usage) {
   send(new Uint8Array([0x03, usage & 0xFF, (usage >> 8) & 0xFF]));
 }
 
-const mediaEl = document.getElementById('media');
-for (const [glyph, usage, label] of MEDIA_KEYS) {
-  const el = document.createElement('div');
-  el.className = 'm';
-  el.innerHTML = `${glyph}<small>${label}</small>`;
+function buildMedia() {
+  mediaEl = document.getElementById('media');
+  mediaPanel = document.getElementById('mediaPanel');
 
-  const press = (e) => {
-    e.preventDefault();
-    try { el.setPointerCapture(e.pointerId); } catch (_) {}
-    el.classList.add('active');
-    sendConsumer(usage);
-    flash(label);
-  };
-  const rel = (e) => {
-    e.preventDefault();
-    el.classList.remove('active');
-    sendConsumer(0);
-  };
+  for (const [glyph, usage, label] of MEDIA_KEYS) {
+    const el = document.createElement('div');
+    el.className = 'm';
+    el.innerHTML = `${glyph}<small>${label}</small>`;
 
-  el.addEventListener('pointerdown', press);
-  el.addEventListener('pointerup', rel);
-  el.addEventListener('pointerleave', rel);
-  el.addEventListener('pointercancel', rel);
-  mediaEl.appendChild(el);
+    const press = (e) => {
+      e.preventDefault();
+      try { el.setPointerCapture(e.pointerId); } catch (_) {}
+      el.classList.add('active');
+      sendConsumer(usage);
+      flash(label);
+    };
+    const rel = (e) => {
+      e.preventDefault();
+      el.classList.remove('active');
+      sendConsumer(0);
+    };
+
+    el.addEventListener('pointerdown', press);
+    el.addEventListener('pointerup', rel);
+    el.addEventListener('pointerleave', rel);
+    el.addEventListener('pointercancel', rel);
+    mediaEl.appendChild(el);
+  }
+
+  mediaPanel.addEventListener('contextmenu', preventContextMenu);
 }
-
-const mediaPanel = document.getElementById('mediaPanel');
-mediaPanel.addEventListener('contextmenu', (e) => e.preventDefault());
-document.getElementById('bMedia').addEventListener('click', () => togglePanel(mediaPanel));
 
 // ---------------------------------------------------------------- type text
 // USB HID has no "type this string" notion - it only carries physical key
@@ -711,28 +719,23 @@ const TYPE_MAP = (() => {
   return m;
 })();
 
-const typePanel = document.getElementById('type');
-const typeTextEl = document.getElementById('typeText');
-const typeNote = document.getElementById('typeNote');
-
 let typing = false;
 let typeAbort = false;
+let typeRun = 0;               // destroys an in-flight typing run on unmount
 
-document.getElementById('bType').addEventListener('click', () => togglePanel(typePanel));
-
-document.getElementById('typeClear').addEventListener('click', () => {
+function onTypeClear() {
   typeTextEl.value = '';
   typeNote.className = 'note';
   typeNote.textContent = '';
-});
+}
 
-document.getElementById('typeStop').addEventListener('click', () => {
+function onTypeStop() {
   if (typing) typeAbort = true;      // the loop notices at the next character
-});
+}
 
 const sleepMs = (ms) => new Promise((r) => setTimeout(r, ms));
 
-document.getElementById('typeGo').addEventListener('click', async () => {
+async function onTypeGo() {
   if (typing) return;
   const text = typeTextEl.value;
   if (!text) return;
@@ -742,6 +745,7 @@ document.getElementById('typeGo').addEventListener('click', async () => {
   const gap = Math.max(5, Math.round(500 / cps));
   const skipped = [...new Set([...text].filter((c) => !TYPE_MAP[c] && c !== '\r'))];
 
+  const run = ++typeRun;
   typing = true;
   typeAbort = false;
   const total = text.length;
@@ -749,13 +753,14 @@ document.getElementById('typeGo').addEventListener('click', async () => {
 
   typeNote.className = 'note';
   for (const ch of text) {
-    if (typeAbort) break;
+    if (typeAbort || run !== typeRun) break;
     if (ch === '\r') { done++; continue; }   // Windows line endings
     const entry = TYPE_MAP[ch];
     if (!entry) { done++; continue; }        // no US-QWERTY key for this one
 
     sendKeyboardExtra(entry[0], entry[1]);   // press
     await sleepMs(gap);
+    if (typeAbort || run !== typeRun) break;
     sendKeyboardExtra(null, false);          // release, held keys untouched
     await sleepMs(gap);
 
@@ -765,6 +770,8 @@ document.getElementById('typeGo').addEventListener('click', async () => {
     }
   }
 
+  // A newer run (or an unmount) owns the state now; leave it alone.
+  if (run !== typeRun) return;
   typing = false;
   typeAbort = false;
 
@@ -776,15 +783,190 @@ document.getElementById('typeGo').addEventListener('click', async () => {
     typeNote.className = 'note';
     typeNote.textContent = `Done ${done} / ${total}.`;
   }
-});
+}
 
 // ---------------------------------------------------------------- lifecycle
-setInterval(() => send(new Uint8Array([0x04])), 1000);   // heartbeat
-window.addEventListener('pagehide', releaseAll);
-window.addEventListener('beforeunload', releaseAll);
+// The router calls init() after mounting the control template and destroy()
+// before replacing it. Everything attached to window or document is removed
+// here, or the next mount would double it up.
+function init() {
+  pad = document.getElementById('pad');
+  dot = document.getElementById('dot');
+  statusText = document.getElementById('statusText');
+  flashEl = document.getElementById('flash');
+  typePanel = document.getElementById('type');
+  typeTextEl = document.getElementById('typeText');
+  typeNote = document.getElementById('typeNote');
 
-// ---------------------------------------------------------------- start
-requireAuth(async () => {
-  await loadSettings();
+  held.clear();
+  latched.clear();
+  buttons = 0;
+  pointers.clear();
+  mode = null;
+  dragHeld = false;
+  captured = false;
+  typing = false;
+  typeAbort = false;
+  resetGestureState();
+
+  buildKeyboard();
+  buildMedia();
+  kbd = document.getElementById('kbd');
+  kbd.addEventListener('contextmenu', preventContextMenu);
+
+  pad.addEventListener('pointerdown', onTouchPointerDown);
+  pad.addEventListener('pointermove', onTouchPointerMove);
+  pad.addEventListener('pointerup', onPointerEnd);
+  pad.addEventListener('pointercancel', onPointerEnd);
+  pad.addEventListener('pointerdown', onMousePointerDown);
+  pad.addEventListener('pointermove', onMousePointerMove);
+
+  bindButton('bLeft', 1);
+  bindButton('bRight', 2);
+  bindButton('bMid', 4);
+
+  document.getElementById('bKbd').addEventListener('click', () => togglePanel(kbd));
+  document.getElementById('bRelease').addEventListener('click', releaseAll);
+  document.getElementById('bMedia').addEventListener('click', () => togglePanel(mediaPanel));
+  document.getElementById('bType').addEventListener('click', () => togglePanel(typePanel));
+  document.getElementById('typeClear').addEventListener('click', onTypeClear);
+  document.getElementById('typeStop').addEventListener('click', onTypeStop);
+  document.getElementById('typeGo').addEventListener('click', onTypeGo);
+
+  document.addEventListener('visibilitychange', onVisibilityChange);
+  document.addEventListener('pointerlockchange', onPointerLockChange);
+  document.addEventListener('pointerlockerror', captureRefused);
+
+  window.addEventListener('mousedown', onMouseDown);
+  window.addEventListener('mouseup', onMouseUp);
+  window.addEventListener('wheel', onWheel, { passive: false });
+  window.addEventListener('contextmenu', onContextMenu);
+  window.addEventListener('dragstart', onDragStart);
+  window.addEventListener('keydown', onKeyDown);
+  window.addEventListener('keyup', onKeyUp);
+  window.addEventListener('pagehide', releaseAll);
+  window.addEventListener('beforeunload', releaseAll);
+
+  heartbeatTimer = setInterval(() => send(new Uint8Array([0x04])), 1000);
   connect();
-});
+}
+
+// Gesture state is reset even if a previous destroy() was skipped (a reload
+// while the view was mounted, for instance).
+function resetGestureState() {
+  maxFingers = 0;
+  moved = 0;
+  startedAt = 0;
+  scrollAccum = 0;
+  lastCentre = null;
+  pendingX = 0;
+  pendingY = 0;
+  wheelAccum = 0;
+}
+
+function destroy() {
+  if (!pad) return;
+
+  // Deliberately release before closing the socket: changing a setting must
+  // never leave a key down on the host.
+  releaseAll();
+
+  typeAbort = true;             // stops an in-flight Type run at its next step
+  typeRun++;
+  typing = false;
+  clearTimeout(flashTimer);
+  flashTimer = null;
+
+  clearInterval(heartbeatTimer);
+  heartbeatTimer = null;
+  clearTimeout(reconnectTimer);
+  reconnectTimer = null;
+  clearTimeout(moveTimer);
+  moveTimer = null;
+  resetGestureState();
+
+  if (document.pointerLockElement === pad) {
+    try { document.exitPointerLock(); } catch (_) {}
+  }
+  captured = false;
+  releaseWakeLock();
+
+  if (ws) {
+    // Drop the handlers first: closing on purpose must not schedule a retry
+    // after the view is gone.
+    ws.onopen = null;
+    ws.onclose = null;
+    ws.onerror = null;
+    try { ws.close(); } catch (_) {}
+    ws = null;
+  }
+  wsReady = false;
+  reconnectAttempts = 0;
+
+  pad.removeEventListener('pointerdown', onTouchPointerDown);
+  pad.removeEventListener('pointermove', onTouchPointerMove);
+  pad.removeEventListener('pointerup', onPointerEnd);
+  pad.removeEventListener('pointercancel', onPointerEnd);
+  pad.removeEventListener('pointerdown', onMousePointerDown);
+  pad.removeEventListener('pointermove', onMousePointerMove);
+
+  document.removeEventListener('visibilitychange', onVisibilityChange);
+  document.removeEventListener('pointerlockchange', onPointerLockChange);
+  document.removeEventListener('pointerlockerror', captureRefused);
+
+  window.removeEventListener('mousedown', onMouseDown);
+  window.removeEventListener('mouseup', onMouseUp);
+  window.removeEventListener('wheel', onWheel);
+  window.removeEventListener('contextmenu', onContextMenu);
+  window.removeEventListener('dragstart', onDragStart);
+  window.removeEventListener('keydown', onKeyDown);
+  window.removeEventListener('keyup', onKeyUp);
+  window.removeEventListener('pagehide', releaseAll);
+  window.removeEventListener('beforeunload', releaseAll);
+
+  held.clear();
+  latched.clear();
+  buttons = 0;
+  pointers.clear();
+  pad = null;
+  dot = null;
+  statusText = null;
+  flashEl = null;
+  kbd = null;
+  mediaEl = null;
+  mediaPanel = null;
+  typePanel = null;
+  typeTextEl = null;
+  typeNote = null;
+}
+
+// The tests drive the real functions in the page, so the internals they reach
+// for stay on the view object rather than being copied out.
+return {
+  init,
+  destroy,
+  get pad() { return pad; },
+  get held() { return held; },
+  get latched() { return latched; },
+  get pointers() { return pointers; },
+  get ws() { return ws; },
+  set ws(v) { ws = v; },
+  get wsReady() { return wsReady; },
+  set wsReady(v) { wsReady = v; },
+  get reconnectTimer() { return reconnectTimer; },
+  set reconnectTimer(v) { reconnectTimer = v; },
+  get buttons() { return buttons; },
+  set buttons(v) { buttons = v; },
+  get mode() { return mode; },
+  set mode(v) { mode = v; },
+  get dragHeld() { return dragHeld; },
+  set dragHeld(v) { dragHeld = v; },
+  get captured() { return captured; },
+  set captured(v) { captured = v; },
+  buildKeyboardReport,
+  releaseAll,
+  KEY,
+  TYPE_MAP,
+};
+
+})();

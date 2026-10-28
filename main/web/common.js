@@ -1,5 +1,5 @@
-// Shared between the control page and the settings page: the access gate,
-// authenticated requests, and the device settings blob.
+// Shared by the shell and all four views: the access gate, authenticated
+// requests, and the device settings blob.
 
 // ---------------------------------------------------------------- access code
 const TOKEN_KEY = 'esp32remote.token';
@@ -132,25 +132,11 @@ async function saveSettingsToDevice() {
 }
 
 // ---------------------------------------------------------------- access gate
-function buildGate() {
-  const gate = document.createElement('div');
-  gate.id = 'gate';
-  gate.innerHTML = `
-    <div class="gate-box">
-      <h1>ESP32 Remote</h1>
-      <p>Enter the 12-character code shown on the device's LCD &mdash; or scan its QR.</p>
-      <input id="tokenInput" type="text" inputmode="latin" autocomplete="off"
-             autocapitalize="characters" spellcheck="false" maxlength="20"
-             placeholder="XXXXXXXXXXXX">
-      <button id="tokenGo" class="primary">Connect</button>
-      <p class="err" id="gateErr"></p>
-    </div>`;
-  document.body.appendChild(gate);
-  return gate;
-}
-
+// The gate's markup is part of the shell (index.html) and starts hidden, so it
+// never flashes on a page that already has a valid code.
 function showGate(msg) {
-  const gate = document.getElementById('gate') || buildGate();
+  const gate = document.getElementById('gate');
+  if (!gate) return;
   gate.classList.remove('hidden');
   document.getElementById('gateErr').textContent = msg || '';
   document.getElementById('tokenInput').focus();
@@ -179,7 +165,8 @@ async function requireAuth(onReady) {
     token = '';
   }
 
-  const gate = document.getElementById('gate') || buildGate();
+  const gate = document.getElementById('gate');
+  if (!gate) return;              // no shell markup, nothing to prompt with
   gate.classList.remove('hidden');
   const input = document.getElementById('tokenInput');
   const err = document.getElementById('gateErr');

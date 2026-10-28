@@ -15,7 +15,7 @@ static const char *TAG = "ui_fs";
 #define UI_FS_PARTITION  "ui"
 #define UI_FS_TMP_SUFFIX ".tmp"
 
-// Longest name in the asset table is "settings.html". The directory scan
+// Longest name in the asset table is "settings.js". The directory scan
 // below can also meet a longer name, up to the 255 a dirent holds, so paths
 // are sized for that rather than for the table.
 #define UI_FS_PATH_MAX   288

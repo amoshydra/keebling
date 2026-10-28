@@ -5,234 +5,415 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no, viewport-fit=cover">
 <title>ESP32 Remote</title>
 <link rel="stylesheet" href="style.css">
-<style>
-  /* Touchpad-specific: the pad is the whole middle of the screen. */
-  #pad {
-    flex: 1 1 auto;
-    background: #181818;
-    touch-action: none;           /* we handle every gesture ourselves */
-    position: relative;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    overflow: hidden;
-    min-height: 0;                /* let the pad give way before the panels do */
-  }
-  #pad.captured { background: #101018; cursor: none; }
-  #hint {
-    color: #555;
-    font-size: 14px;
-    text-align: center;
-    padding: 0 24px;
-    line-height: 1.6;
-    pointer-events: none;
-  }
-  #pad.captured #hint { display: none; }
-  /* While captured the hint is gone, and the only way out is a key the user has
-     to be told about - the browser's own bubble is easy to miss. */
-  #escHint {
-    display: none;
-    position: absolute;
-    bottom: 10px;
-    left: 0; right: 0;
-    text-align: center;
-    color: #666;
-    font-size: 12px;
-    pointer-events: none;
-  }
-  #pad.captured #escHint { display: block; }
-  #pad .flash {
-    position: absolute;
-    padding: 6px 12px;
-    border-radius: 20px;
-    background: rgba(25, 118, 210, .85);
-    font-size: 13px;
-    pointer-events: none;
-    opacity: 0;
-    transition: opacity .15s;
-  }
-  #pad .flash.show { opacity: 1; }
-
-  /* One row on a desktop, two on the phone. Grid rather than flex-wrap so the
-     split is the same on every phone width instead of following the label
-     widths, and so a row can be given a minimum height worth hitting. */
-  #controls {
-    padding: 8px;
-    padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
-    background: var(--panel);
-    display: grid;
-    grid-auto-flow: column;
-    grid-auto-columns: max-content;
-    gap: 6px;
-    align-items: center;
-    flex: 0 0 auto;
-  }
-  #controls a.btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 9px 14px;
-    border-radius: 7px;
-    background: #333;
-    color: var(--ink);
-    text-decoration: none;
-    font-size: 14px;
-    -webkit-tap-highlight-color: transparent;
-  }
-  #controls a.btn:active { background: #555; }
-
-  /* Phone: the panel toggles on top, the pointer buttons along the bottom edge
-     where a thumb reaches without a stretch. */
-  @media (max-width: 620px) {
-    #controls {
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      grid-template-areas:
-        "kbd   media type macros"
-        "left  right mid  release";
-      grid-template-rows: auto auto;
-      grid-auto-flow: row;
-      padding: 6px;
-      padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px));
-    }
-    #bLeft    { grid-area: left; }
-    #bRight   { grid-area: right; }
-    #bMid     { grid-area: mid; }
-    #bRelease { grid-area: release; }
-    #bKbd     { grid-area: kbd; }
-    #bMedia   { grid-area: media; }
-    #bType    { grid-area: type; }
-    #bMacros  { grid-area: macros; }
-    #controls button, #controls a.btn {
-      padding: 13px 4px;
-      font-size: 13px;
-      min-height: 46px;
-      min-width: 0;
-      white-space: nowrap;
-      overflow: hidden;
-    }
-  }
-
-  /* virtual keyboard */
-  #kbd {
-    display: none;
-    padding: 8px;
-    background: #151515;
-    /* The panel scrolls on small screens, but a press starting on a key must
-       not be claimed by the scroller: that fires pointercancel and the key
-       releases mid-hold. */
-    overflow-y: auto;
-    max-height: 45dvh;
-    touch-action: none;
-  }
-  #kbd.show { display: block; }
-  .krow { display: flex; gap: 4px; margin-bottom: 4px; }
-  .k {
-    flex: 1;
-    padding: 11px 2px;
-    text-align: center;
-    background: #2c2c2c;
-    border-radius: 4px;
-    font-size: 12px;
-    /* user-select alone is not enough on touch: without these a long press
-       opens the callout / context menu and cancels the pointer stream. */
-    user-select: none;
-    -webkit-user-select: none;
-    -webkit-touch-callout: none;
-    touch-action: none;
-    -webkit-tap-highlight-color: transparent;
-  }
-  .k.w2 { flex: 2; }
-  .k.space { flex: 7; }
-  .k.mod { background: #3a3a3a; }
-  .k.active { background: var(--accent); }
-  /* Latched is not the same as pressed: it persists after your finger leaves,
-     so it gets a ring to say "this will apply to the next key". */
-  .k.latched { background: var(--accent); outline: 2px solid #fff; outline-offset: -2px; }
-  .k.arrow { flex: 0 0 42px; }
-
-  /* media keys */
-  #media { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
-  .m {
-    padding: 14px 2px;
-    text-align: center;
-    background: #2c2c2c;
-    border-radius: 6px;
-    font-size: 19px;
-    line-height: 1;
-    user-select: none;
-    -webkit-user-select: none;
-    -webkit-touch-callout: none;
-    touch-action: none;
-    -webkit-tap-highlight-color: transparent;
-  }
-  .m small { display: block; font-size: 9px; color: #999; margin-top: 5px; }
-  .m.active { background: var(--accent); }
-  .m.active small { color: #ddd; }
-
-  /* Phone: one panel at a time (pad.js closes the others), and each one short
-     enough that the pad, the panels and the controls all stay on screen. Two
-     panels plus the on-screen keyboard used to push the controls off the
-     bottom. */
-  @media (max-width: 620px) {
-    .panel { max-height: 46dvh; }
-    #kbd { max-height: 42dvh; }
-    #hint { font-size: 13px; padding: 0 16px; }
-  }
-</style>
 </head>
 <body>
 
+<!-- One shell for every view. The top bar and the status dot live here, so a
+     view script always reports into the same elements; the views themselves
+     are <template>s below and the router mounts exactly one at a time. -->
 <div class="topbar">
   <span><span class="dot off" id="dot"></span><span id="statusText">connecting…</span></span>
-  <a href="settings.html">⚙ Settings</a>
+  <nav class="nav">
+    <a href="#/">Control</a>
+    <a href="#/settings">Settings</a>
+    <a href="#/macros">Macros</a>
+    <a href="#/ui">UI files</a>
+  </nav>
 </div>
 
-<div id="pad">
-  <div id="hint">
-    One finger moves · tap to click<br>
-    Two fingers scroll · two-finger tap right-clicks<br>
-    Three fingers drag · tap Ctrl/Alt/Cmd then a key for a chord
+<!-- One access gate for the whole shell. It stays hidden until requireAuth
+     finds no valid saved code; the markup lives here so it is parsed once. -->
+<div id="gate" class="hidden">
+  <div class="gate-box">
+    <h1>ESP32 Remote</h1>
+    <p>Enter the 12-character code shown on the device's LCD &mdash; or scan its QR.</p>
+    <input id="tokenInput" type="text" inputmode="latin" autocomplete="off"
+           autocapitalize="characters" spellcheck="false" maxlength="20"
+           placeholder="XXXXXXXXXXXX">
+    <button id="tokenGo" class="primary">Connect</button>
+    <p class="err" id="gateErr"></p>
   </div>
-  <div id="escHint">Mouse captured — Esc releases it</div>
-  <div class="flash" id="flash"></div>
 </div>
 
-<div class="panel" id="type">
-  <h2>Type text into the host</h2>
-  <textarea id="typeText" placeholder="Paste or type text here — it will be typed into the host as real keystrokes."
-            spellcheck="false" autocapitalize="none" autocomplete="off"></textarea>
-  <div class="row" style="margin:8px 0">
-    <button id="typeGo" class="primary">Type it</button>
-    <button id="typeStop" class="danger">Stop</button>
-    <button id="typeClear">Clear</button>
+<!-- The router clones one template here. Templates are inert, so their IDs do
+     not exist until they are mounted - which is what keeps the four views'
+     colliding IDs (dot, statusText, ...) out of each other's way. -->
+<main id="view"></main>
+
+<template id="view-control">
+  <div id="pad">
+    <div id="hint">
+      One finger moves · tap to click<br>
+      Two fingers scroll · two-finger tap right-clicks<br>
+      Three fingers drag · tap Ctrl/Alt/Cmd then a key for a chord
+    </div>
+    <div id="escHint">Mouse captured — Esc releases it</div>
+    <div class="flash" id="flash"></div>
   </div>
-  <p class="note" id="typeNote">Assumes a US QWERTY host layout. Keep this tab in
-    the foreground while typing &mdash; browsers throttle timers in background tabs.</p>
-</div>
 
-<div id="kbd"></div>
+  <div class="panel" id="type">
+    <h2>Type text into the host</h2>
+    <textarea id="typeText" placeholder="Paste or type text here — it will be typed into the host as real keystrokes."
+              spellcheck="false" autocapitalize="none" autocomplete="off"></textarea>
+    <div class="row" style="margin:8px 0">
+      <button id="typeGo" class="primary">Type it</button>
+      <button id="typeStop" class="danger">Stop</button>
+      <button id="typeClear">Clear</button>
+    </div>
+    <p class="note" id="typeNote">Assumes a US QWERTY host layout. Keep this tab in
+      the foreground while typing &mdash; browsers throttle timers in background tabs.</p>
+  </div>
 
-<div class="panel" id="mediaPanel">
-  <h2>Media &amp; browser keys</h2>
-  <div id="media"></div>
-  <p class="note" id="mediaNote">These are Consumer Control usages. Whether
-    they do anything depends on the host — macOS and Windows handle the
-    transport and volume keys; some Linux desktops need the keybound to an
-    action first.</p>
-</div>
+  <div id="kbd"></div>
 
-<div id="controls">
-  <button id="bLeft">L</button>
-  <button id="bRight">R</button>
-  <button id="bMid">M</button>
-  <button id="bKbd">⌨ Keys</button>
-  <button id="bMedia">🎵 Media</button>
-  <button id="bType">📋 Type</button>
-  <a id="bMacros" class="btn" href="macros.html">⚡ Macros</a>
-  <button id="bRelease" class="danger">Release</button>
-</div>
+  <div class="panel" id="mediaPanel">
+    <h2>Media &amp; browser keys</h2>
+    <div id="media"></div>
+    <p class="note" id="mediaNote">These are Consumer Control usages. Whether
+      they do anything depends on the host — macOS and Windows handle the
+      transport and volume keys; some Linux desktops need the keybound to an
+      action first.</p>
+  </div>
+
+  <div id="controls">
+    <button id="bLeft">L</button>
+    <button id="bRight">R</button>
+    <button id="bMid">M</button>
+    <button id="bKbd">⌨ Keys</button>
+    <button id="bMedia">🎵 Media</button>
+    <button id="bType">📋 Type</button>
+    <a id="bMacros" class="btn" href="#/macros">⚡ Macros</a>
+    <button id="bRelease" class="danger">Release</button>
+  </div>
+</template>
+
+<template id="view-settings">
+  <div class="wrap">
+
+    <section>
+      <h2>Device</h2>
+      <div class="field">
+        <span>Product name — the device name the host shows <small>(USB string 2)</small></span>
+        <input type="text" id="usbProduct" maxlength="31" spellcheck="false"
+               autocomplete="off" placeholder="ESP32 Remote">
+      </div>
+      <div class="field">
+        <span>Manufacturer <small>(USB string 1)</small></span>
+        <input type="text" id="usbManufacturer" maxlength="31" spellcheck="false"
+               autocomplete="off" placeholder="ESP32">
+      </div>
+      <div class="field">
+        <span>Interface label <small>(USB string 4 — cosmetic)</small></span>
+        <input type="text" id="usbInterface" maxlength="31" spellcheck="false"
+               autocomplete="off" placeholder="Keyboard Mouse Media">
+      </div>
+      <p class="note">ASCII only, up to 31 characters — anything else is replaced
+        with “?”. Both take effect after a restart, and the host must re-read the
+        USB descriptors (replug the dongle).</p>
+      <div class="row">
+        <button id="restart">Restart device</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>Screen</h2>
+      <div class="field">
+        <span>Custom text <small>(the third BOOT screen)</small></span>
+        <textarea id="screenText" rows="4" maxlength="260" spellcheck="false"
+                  placeholder="Line one&#10;line two"></textarea>
+        <p class="note">Shown on the LCD as 10 lines of 26 characters, so one
+          screen holds 260. Enter starts a new line; longer lines wrap at a
+          space, and a word with no space in it is cut. Plain ASCII only — the
+          font has 96 glyphs, so anything else shows as “?” (one per byte: an em
+          dash is three). Anything past the tenth line is dropped and marked
+          with “...”. Leave it empty and the screen stays out of the BOOT cycle.</p>
+      </div>
+      <div class="field">
+        <span>Custom image <small>(the fourth BOOT screen)</small></span>
+        <div class="row" style="margin-bottom:8px">
+          <label><input type="radio" name="screenImageFormat" value="colour" checked> Colour</label>
+          <label><input type="radio" name="screenImageFormat" value="grey"> Greyscale</label>
+        </div>
+        <div class="row" style="margin-bottom:8px">
+          <button id="screenImagePick">Choose image…</button>
+          <button id="screenImageSend" class="primary" disabled>Send to device</button>
+          <button id="screenImageClear" hidden>Remove from device</button>
+          <input type="file" id="screenImageFile" accept="image/*" hidden>
+        </div>
+        <canvas id="screenImagePreview" width="160" height="80"
+                style="width:100%;max-width:320px;display:block;background:#000;
+                       border:1px solid var(--line);border-radius:6px;
+                       image-rendering:pixelated"></canvas>
+        <p class="note" id="screenImageNote">checking the device…</p>
+        <p class="note" id="screenImageHint">The preview above is the browser's
+          rendering of the packed file — the dithered 160×80 copy the device will
+          draw, not your original image. A colour image is packed as RGB565 at
+          25,608 bytes; greyscale is 16 levels at 6,408, so a logo or a text card
+          does not need four times the file. The panel is an uncalibrated TN run
+          inverted, so colour will look muted and shift with the viewing angle;
+          no gamma correction is attempted because the panel's response is
+          unknown. An image of a different shape is scaled to fill the panel and
+          cropped. With no image stored, this screen stays out of the BOOT cycle.</p>
+      </div>
+      <div class="field">
+        <label>Sleep after <input type="range" id="screenTimeout" min="0" max="120" step="5">
+          <span id="screenTimeoutVal"></span></label>
+        <p class="note">Seconds without a button press before the display blanks.
+          Set to 0 to leave it on. A tap of BOOT wakes it; a further tap cycles
+          between the pairing QR, the status screen and the custom text.</p>
+      </div>
+    </section>
+
+    <section>
+      <h2>Touchpad</h2>
+      <div class="field">
+        <label>Pointer gain <input type="range" id="mouseGain" min="-200" max="90" step="1">
+          <span id="mouseGainVal"></span></label>
+        <span class="note">A high-DPI mouse reports raw counts while captured, and the OS
+          pointer-speed curve does not apply — so a 3200 DPI gaming mouse needs
+          roughly <code>0.02</code> here, where a basic mouse needs about
+          <code>1</code>.</span>
+      </div>
+      <div class="field">
+        <label>Scroll speed <input type="range" id="scrollScale" min="-70" max="90" step="1">
+          <span id="scrollScaleVal"></span></label>
+      </div>
+      <div class="field">
+        <label><input type="checkbox" id="scrollInvert"> Invert scroll direction</label>
+      </div>
+      <div class="field">
+        <label><input type="checkbox" id="tapClick"> Tap to click</label>
+      </div>
+      <div class="field">
+        <label>Tap timeout <input type="range" id="tapMaxMs" min="80" max="500" step="10">
+          <span id="tapMaxMsVal"></span></label>
+      </div>
+      <p class="note">Gestures: one finger moves and taps to click · two fingers
+        scroll and tap to right-click · three fingers drag (press, move, release).</p>
+    </section>
+
+    <section>
+      <h2>Typing</h2>
+      <div class="field">
+        <label>Speed <input type="range" id="typeSpeed" min="2" max="60" step="1">
+          <span id="typeSpeedVal"></span></label>
+        <p class="note">Lower this if the target drops characters. Assumes a US
+          QWERTY layout on the host.</p>
+      </div>
+    </section>
+
+    <section>
+      <h2>Network</h2>
+      <div class="field">
+        <span>Current</span>
+        <div class="note" id="netState">unknown</div>
+      </div>
+      <div class="row">
+        <button id="wifiScan">Scan networks</button>
+        <button id="wifiForget" class="danger">Forget saved network</button>
+      </div>
+      <div class="list" id="wifiList"></div>
+      <div class="field">
+        <span>Join a network</span>
+        <input type="text" id="wifiSsid" placeholder="Network name (SSID)"
+               autocomplete="off" spellcheck="false" autocapitalize="none">
+      </div>
+      <div class="field">
+        <span>Password</span>
+        <input type="password" id="wifiPass" placeholder="Password" autocomplete="off">
+      </div>
+      <div class="row">
+        <button id="wifiSave" class="primary">Save &amp; connect</button>
+      </div>
+      <p class="note">The device restarts and joins this network. If it can't, its
+        own access point comes back so you can correct it. Holding BOOT for 3
+        seconds also clears the saved network.</p>
+    </section>
+
+    <section>
+      <h2>HID descriptor</h2>
+      <p class="note">Exactly what the device reports to the operating system:
+        the report descriptor it hands over at enumeration, plus the interface
+        parameters from the configuration descriptor.</p>
+      <div class="row" style="margin:10px 0">
+        <button id="hidLoad">Show what the host sees</button>
+      </div>
+      <div class="note" id="hidSummary">not loaded</div>
+      <pre id="hidDecoded" style="font-size:11px;line-height:1.45;color:#bbb;
+           white-space:pre-wrap;font-family:ui-monospace,SFMono-Regular,monospace;margin-top:10px"></pre>
+      <details style="margin-top:10px">
+        <summary class="note" style="cursor:pointer">Raw descriptor bytes</summary>
+        <pre id="hidRaw" style="font-size:11px;line-height:1.5;color:#999;white-space:pre-wrap;
+             word-break:break-all;font-family:ui-monospace,SFMono-Regular,monospace"></pre>
+      </details>
+    </section>
+
+    <section>
+      <h2>Backup</h2>
+      <p class="note">Everything you would otherwise have to re-enter: the device
+        settings and the macros stored in <strong>this browser</strong>. It does
+        not include your WiFi password, which lives in a separate store, so after
+        a restore you may need to rejoin the network.</p>
+      <div class="row" style="margin:10px 0">
+        <button id="backupSave" class="primary">Download backup</button>
+        <button id="backupLoad">Restore from file</button>
+        <input type="file" id="backupFile" accept="application/json,.json" hidden>
+      </div>
+      <p class="note" id="backupNote"></p>
+    </section>
+
+    <section>
+      <h2>Web UI files</h2>
+      <p class="note">The pages are built into the firmware, but files uploaded to
+        the device's filesystem are served instead. Open the UI files page to
+        upload one or reset it to the built-in copy. This button deletes every
+        uploaded file at once — the way back if an uploaded view script is broken.</p>
+      <div class="row" style="margin:10px 0">
+        <button id="uiOpen">Open UI files page</button>
+        <button id="uiResetAll" class="danger">Reset UI to built-in</button>
+      </div>
+      <p class="note" id="uiNote"></p>
+    </section>
+
+    <section>
+      <h2>Diagnostics</h2>
+      <div class="row" style="margin-bottom:10px">
+        <button id="logsLoad">Load logs</button>
+        <button id="forgetCode">Forget saved code</button>
+      </div>
+      <div class="panel" id="logs" style="max-height:40dvh"><pre id="logText">—</pre></div>
+    </section>
+
+    <div class="savebar">
+      <button id="save" class="primary">Save now</button>
+      <span class="note" id="saveNote" style="margin:0">changes save automatically</span>
+    </div>
+
+  </div>
+</template>
+
+<template id="view-macros">
+  <div class="wrap wrap-macros">
+
+    <section>
+      <h2>Macros</h2>
+      <p class="note">A macro is text typed into the host, with braced tokens for
+        keys that are not characters: <code>{SEARCH}chrome{ENTER}</code> presses
+        the Search media key, types “chrome” and presses Enter. Text assumes a US
+        QWERTY layout on the host.</p>
+      <p class="note">Macros are stored in <strong>this browser</strong>, not on
+        the device. They are not shared with another phone or browser, and
+        clearing this site's data removes them.</p>
+      <div id="macroList"></div>
+      <div class="row" style="margin-top:10px">
+        <button id="macroAdd" class="primary">Add macro</button>
+      </div>
+      <p class="note" id="saveNote"></p>
+      <p class="note" id="blobMeter"></p>
+    </section>
+
+    <section id="editor">
+      <h2 id="editorTitle">New macro</h2>
+      <div class="field">
+        <span>Name</span>
+        <input type="text" id="editName" maxlength="40" spellcheck="false"
+               autocomplete="off" autocapitalize="none" placeholder="Open Chrome">
+      </div>
+      <div class="field">
+        <span>Steps</span>
+        <textarea id="editSteps" rows="3" spellcheck="false" autocapitalize="none"
+                  autocomplete="off" placeholder="{SEARCH}chrome{ENTER}"></textarea>
+      </div>
+      <details>
+        <summary class="note" style="cursor:pointer">Insert a token</summary>
+        <div class="chips" id="chips"></div>
+      </details>
+      <div class="note" id="parsePreview" style="margin-top:10px"></div>
+      <div class="row" style="margin-top:12px">
+        <button id="editSave" class="primary">Save macro</button>
+        <button id="editCancel">Cancel</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>Grammar</h2>
+      <p class="note">Anything outside braces is typed as literal text. A literal
+        brace is written <code>{{</code> or <code>}}</code>. Tokens are not case
+        sensitive.</p>
+      <div class="tokens" style="margin-top:12px">
+        <span>Keys</span>
+        <code>{ENTER} {TAB} {ESC} {BKSP} {DEL} {INS} {UP} {DOWN} {LEFT} {RIGHT}
+          {HOME} {END} {PGUP} {PGDN} {SPACE} {F1} … {F12}</code>
+      </div>
+      <div class="tokens">
+        <span>Modifier combinations — CTRL, SHIFT, ALT, CMD, then a key or one character</span>
+        <code>{CTRL+C} {CMD+SPACE} {CTRL+ALT+DEL} {CMD+SHIFT+4}</code>
+      </div>
+      <div class="tokens">
+        <span>Media and browser</span>
+        <code>{PLAYPAUSE} {PLAY} {PAUSE} {NEXTTRACK} {PREVTRACK} {STOP} {VOLUMEUP}
+          {VOLUMEDOWN} {MUTE} {SEARCH} {CALC} {BROWSERHOME} {BROWSERBACK}
+          {BROWSERFORWARD}</code>
+      </div>
+      <div class="tokens" style="margin-bottom:0">
+        <span>Delay</span>
+        <code>{WAIT:500}</code> — milliseconds, up to 60000
+      </div>
+    </section>
+
+  </div>
+
+  <div class="runbar" id="runbar">
+    <div class="info">
+      <div class="line"><span id="runName"></span><span class="dim" id="runCount"></span></div>
+      <div class="line"><span id="runStep"></span></div>
+      <div class="track"><div class="fill" id="runFill"></div></div>
+    </div>
+    <button class="danger" id="runStop">Stop</button>
+  </div>
+</template>
+
+<template id="view-ui">
+  <div class="wrap">
+
+    <section>
+      <h2>UI files</h2>
+      <p class="note">Each file the device serves has a built-in copy in the
+        firmware. Uploading one here <strong>replaces the built-in copy until it
+        is reset</strong>; resetting deletes the uploaded file and the built-in
+        copy is served again. Changes take effect on the next page load — no
+        restart and no reflashing.</p>
+      <p class="note">The four views are templates in <code>index.html</code>,
+        mounted by <code>router.js</code>. An upload that breaks the shell takes
+        every view with it, so keep a copy of a working <code>index.html</code>
+        before replacing it. A broken view script is recovered here: the shell
+        still loads and the other views keep working.</p>
+      <div id="fileList"></div>
+      <p class="note" id="fsNote"></p>
+      <p class="note" id="uiNote"></p>
+    </section>
+
+    <section>
+      <h2>How an update goes</h2>
+      <p class="note">Edit the file on this phone or on a computer, then upload
+        it here and reload. Nothing needs to be reflashed.</p>
+      <p class="note">An upload is written in one piece: if the transfer is
+        interrupted, the previous copy keeps being served, so a dropped
+        connection cannot leave a half-written page behind.</p>
+      <div class="row" style="margin-top:10px">
+        <button id="uiRefresh">Refresh list</button>
+      </div>
+    </section>
+
+  </div>
+</template>
 
 <script src="common.js"></script>
+<script src="macro.js"></script>
 <script src="pad.js"></script>
+<script src="settings.js"></script>
+<script src="macros.js"></script>
+<script src="ui.js"></script>
+<script src="router.js"></script>
 </body>
 </html>

@@ -119,13 +119,15 @@ reflash, which matters because flashing this board means BOOT, replug and a
 power cycle.
 
 An upload replaces the built-in copy until it is reset, so a bad edit can break
-a page — but not permanently. A missing, empty or half-written file is never
+a view — but not permanently. A missing, empty or half-written file is never
 served: the built-in copy is the floor, and an upload is renamed into place
-only once it is complete. If an uploaded `index.html` breaks the control page,
-`ui.html` still comes from the firmware and can reset it; if `ui.html` itself
-is broken, Settings' **Reset UI to built-in** deletes every upload at once.
-Uploads are token-gated, limited to the UI's own file names and capped at 64 KB
-per file.
+only once it is complete. The four views live in `index.html` as `<template>`s
+and are mounted by `router.js`, so an uploaded `index.html` that breaks the
+shell takes every view with it; keep a copy of a working one before replacing
+it. A broken view script is recoverable: the shell still loads the other
+views, and the UI files page (or Settings' **Reset UI to built-in**) can delete
+it. Uploads are token-gated, limited to the UI's own file names and capped at
+64 KB per file.
 
 ### Custom screen image
 
@@ -320,7 +322,7 @@ are snapshots of current state, so this maps 1:1 onto the hardware with no queue
 
 | Endpoint | Auth | Purpose |
 |---|---|---|
-| `GET /`, `/settings.html`, `/macros.html`, `/ui.html`, `/style.css`, `/*.js` | none | the web UI — a stored copy when one was uploaded, the embedded asset otherwise |
+| `GET /`, `/index.html`, `/style.css`, `/*.js` | none | the web UI — a stored copy when one was uploaded, the embedded asset otherwise |
 | `GET /auth?token=` | token | validate a code (204 or 403) |
 | `GET /ws?token=` | token | control channel |
 | `POST /bootloader?token=` | token | reboot into USB download mode |
@@ -344,10 +346,12 @@ main/
   display.c/.h    ST7735 driver, 80×160 framebuffer, 5×7 font (non-fatal)
   web/            the UI. Every file is embedded in the binary and can also be
                   uploaded to the LittleFS partition, which is served in
-                  preference: index.html + pad.js for the control page,
-                  settings.html + settings.js, macros.html + macros.js +
-                  macro.js (the macro DSL), and ui.html + ui.js (uploading the
-                  rest over WiFi)
+                  preference. index.html is the one shell: the top bar, the
+                  auth gate and a <template> per view; router.js mounts one
+                  template into <main> from the hash (#/, #/settings,
+                  #/macros, #/ui) and calls the view's init()/destroy().
+                  pad.js, settings.js, macros.js + macro.js (the macro DSL)
+                  and ui.js are those four views.
 partitions.csv    4 MB app partition, then a 320 KB LittleFS partition for
                   uploaded UI files and the screen image — appended so nvs and
                   the app do not move

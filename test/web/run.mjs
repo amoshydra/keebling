@@ -88,13 +88,22 @@ class Session {
 
   async goto(url) {
     await this.send('Page.navigate', { url });
+    await this.waitComplete(`navigation to ${url}`);
+  }
+
+  async reload() {
+    await this.send('Page.reload', { ignoreCache: true });
+    await this.waitComplete('reload');
+  }
+
+  async waitComplete(what) {
     for (let i = 0; i < 100; i++) {
       try {
         if (await this.evaluate('document.readyState === "complete"')) return;
       } catch (_) { /* mid-navigation */ }
       await delay(50);
     }
-    throw new Error(`navigation to ${url} did not complete`);
+    throw new Error(`${what} did not complete`);
   }
 }
 
@@ -190,37 +199,59 @@ try {
     { page: 'control', url: `${base}/?token=${CODE}`, reloadFirst: true, metrics: PHONE },
     // A stored stylesheet before the settings pass, so its reset-all button has
     // something to undo.
-    { page: 'settings', url: `${base}/settings.html?token=${CODE}`, metrics: DESKTOP,
+    { page: 'settings', url: `${base}/?token=${CODE}#/settings`, metrics: DESKTOP,
       storedUiFiles: { 'style.css': '/* uploaded before the settings pass */' } },
-    { page: 'macros', url: `${base}/macros.html?token=${CODE}`, metrics: PHONE,
+    { page: 'macros', url: `${base}/?token=${CODE}#/macros`, metrics: PHONE,
       seedStorage: { 'esp32remote.macros': MACROS_STORED } },
     // Before the migration pass: that one clears localStorage, which takes the
     // stored access code with it, and this pass relies on the code being there.
-    { page: 'control-desktop', url: `${base}/`, metrics: DESKTOP },
+    { page: 'control-desktop', url: `${base}/#/`, metrics: DESKTOP },
     // An untouched browser and a device still holding a list from the old
     // build: the page should adopt it and take it off the device.
-    { page: 'macros-migrate', url: `${base}/macros.html?token=${CODE}`, metrics: PHONE,
+    { page: 'macros-migrate', url: `${base}/?token=${CODE}#/macros`, metrics: PHONE,
       clearStorage: true,
       legacyMacros: [{ name: 'Left Behind', steps: '{ENTER}' }] },
-    // The upload page, with nothing stored: every file is the built-in one.
-    { page: 'ui', url: `${base}/ui.html?token=${CODE}`, metrics: PHONE },
-    // ...and the recovery story: index.html has been replaced by a broken
-    // upload, so the upload page has to still work and be able to reset it.
-    { page: 'ui-broken', url: `${base}/ui.html?token=${CODE}`, metrics: PHONE,
-      storedUiFiles: { 'index.html': '<html><body>broken' } },
+    // The upload view, with nothing stored: every file is the built-in one.
+    { page: 'ui', url: `${base}/?token=${CODE}#/ui`, metrics: PHONE },
+    // ...and the recovery story: one view's script has been replaced by a
+    // broken upload, so the shell and the upload view have to still work and
+    // be able to reset it.
+    { page: 'ui-broken', url: `${base}/?token=${CODE}#/ui`, metrics: PHONE,
+      storedUiFiles: { 'pad.js': '/* broken upload */\nconst = ;' } },
+    // Navigation between the four views, back/forward and mount/unmount.
+    { page: 'navigation', url: `${base}/?token=${CODE}#/`, metrics: PHONE },
+    // A reload has to land on the view the hash names, not back on control.
+    { page: 'refresh', url: `${base}/?token=${CODE}#/macros`, metrics: PHONE,
+      reloadFirst: true },
+    // A fresh browser: no saved code, so the shell's gate has to appear and
+    // the hash still chooses the view once the code is accepted.
+    { page: 'gate', url: `${base}/#/settings`, metrics: PHONE, clearStorage: true },
   ];
 
   let settingsSaves = [];
   let uiResetsAtSettings = 0;   // /ui/reset calls when the settings pass ended
   let migrationMark = 0;        // device.saved length when the migration pass began
 
-  for (const target of targets) {
+  // Each target gets a unique query tag. The views share one document now, so
+  // a hash-only goto is a same-document navigation: it would keep the previous
+  // run's globals, including the injected test suite whose __webTests
+  // declaration would already exist. A unique query forces a fresh document
+  // without a second reload (which would, for example, let the migration pass
+  // run once before the test could see it).
+  const tagged = (url, n) => {
+    const hashAt = url.indexOf('#');
+    const basePart = hashAt < 0 ? url : url.slice(0, hashAt);
+    const hash = hashAt < 0 ? '' : url.slice(hashAt);
+    return `${basePart}${basePart.includes('?') ? '&' : '?'}run=${n}${hash}`;
+  };
+
+  for (const [n, target] of targets.entries()) {
     await page.send('Emulation.setDeviceMetricsOverride', target.metrics);
 
     // localStorage is per-origin and survives navigation, so it is seeded by
     // visiting any page on the origin first.
     if (target.seedStorage || target.clearStorage) {
-      await page.goto(base + '/');
+      await page.goto(tagged(base + '/', n + 2000));
       if (target.clearStorage) await page.evaluate('localStorage.clear();');
       for (const [k, v] of Object.entries(target.seedStorage || {})) {
         await page.evaluate(`localStorage.setItem(${JSON.stringify(k)}, ${JSON.stringify(v)});`);
@@ -234,12 +265,12 @@ try {
       device.uiFiles.set(name, Buffer.from(body));
     }
 
-    await page.goto(target.url);
+    await page.goto(tagged(target.url, n));
     if (target.reloadFirst) {
       // The token is now in localStorage and scrubbed from the URL, so this
-      // reload lands on the bare URL - which is exactly the regression we want
-      // to catch.
-      await page.goto(base + '/');
+      // reload lands on the bare URL (and, for a hash target, on the same
+      // view) - which is exactly the regression we want to catch.
+      await page.reload();
     }
 
     await page.evaluate(`window.__CODE = ${JSON.stringify(CODE)};`);

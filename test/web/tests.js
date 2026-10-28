@@ -10,6 +10,12 @@ const __webTests = [];
 const __sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const __assert = (cond, msg) => { if (!cond) throw new Error(msg || 'assertion failed'); };
 
+// The gate is part of the shell and stays hidden once a code is accepted.
+const __gateHidden = () => {
+  const gate = document.getElementById('gate');
+  return !gate || gate.classList.contains('hidden');
+};
+
 window.__collectTests = function (page) {
   return __webTests.filter((t) => t.page === page).map((t) => t.name);
 };
@@ -30,37 +36,37 @@ window.__runTest = async function (page, name) {
 const __bytes = (arr) => arr.join(',');
 
 // Replace the socket with a recorder so we can see exactly what would go on
-// the wire. pad.js declares `ws`/`wsReady` at top level, so this reaches them.
+// the wire. The view object exposes the same state the page uses.
 function __capture() {
   const cap = [];
-  ws = { readyState: 1, send: (b) => cap.push(Array.from(b)) };
-  wsReady = true;
+  PadView.ws = { readyState: 1, send: (b) => cap.push(Array.from(b)) };
+  PadView.wsReady = true;
   return cap;
 }
 
 function __pointer(type, id, pointerType, x, y) {
-  pad.dispatchEvent(new PointerEvent(type, {
+  PadView.pad.dispatchEvent(new PointerEvent(type, {
     pointerId: id, pointerType, clientX: x, clientY: y, bubbles: true,
   }));
 }
 
 function __resetInput() {
-  pointers.clear();
-  buttons = 0;
-  mode = null;
-  dragHeld = false;
-  held.clear();
+  PadView.pointers.clear();
+  PadView.buttons = 0;
+  PadView.mode = null;
+  PadView.dragHeld = false;
+  PadView.held.clear();
 }
 
 // Same idea as __capture, for the macro page: swap the socket for a recorder.
 // The reconnect timer has to be stopped first, or a retry would replace the
 // recorder mid-test.
 function __macroCapture() {
-  clearTimeout(reconnectTimer);
-  reconnectTimer = 1;                  // keeps scheduleReconnect() from arming
+  clearTimeout(MacrosView.reconnectTimer);
+  MacrosView.reconnectTimer = 1;       // keeps scheduleReconnect() from arming
   const cap = [];
-  ws = { readyState: 1, send: (b) => cap.push(Array.from(b)) };
-  wsReady = true;
+  MacrosView.ws = { readyState: 1, send: (b) => cap.push(Array.from(b)) };
+  MacrosView.wsReady = true;
   return cap;
 }
 
@@ -81,8 +87,7 @@ __webTests.push({
   name: 'authenticated: no code prompt on the bare URL',
   fn: async () => {
     await __sleep(400);
-    __assert(!document.getElementById('gate'),
-      'gate element exists - the saved code was not restored');
+    __assert(__gateHidden(), 'the gate is showing - the saved code was not restored');
     __assert(localStorage.getItem('esp32remote.token') === window.__CODE,
       'token not stored');
   },
@@ -93,14 +98,14 @@ __webTests.push({
   name: 'keyboard report keeps held keys when typing',
   fn: async () => {
     __resetInput();
-    held.add('KeyA');
-    const a = __bytes(buildKeyboardReport(null, false));
+    PadView.held.add('KeyA');
+    const a = __bytes(PadView.buildKeyboardReport(null, false));
     __assert(a === '2,0,4,0,0,0,0,0', `A alone sent ${a}`);
 
-    const ab = __bytes(buildKeyboardReport('KeyB', false));
+    const ab = __bytes(PadView.buildKeyboardReport('KeyB', false));
     __assert(ab === '2,0,4,5,0,0,0,0', `A+B sent ${ab} - held key was dropped`);
 
-    const shifted = __bytes(buildKeyboardReport('KeyB', true));
+    const shifted = __bytes(PadView.buildKeyboardReport('KeyB', true));
     __assert(shifted === '2,2,4,5,0,0,0,0', `shift+B sent ${shifted}`);
     __resetInput();
   },
@@ -117,11 +122,11 @@ __webTests.push({
       [' ', 'Space', false], ['\n', 'Enter', false], ['\t', 'Tab', false],
     ];
     for (const [ch, code, shift] of cases) {
-      const got = TYPE_MAP[ch];
+      const got = PadView.TYPE_MAP[ch];
       __assert(got && got[0] === code && got[1] === shift,
         `'${ch}' mapped to ${JSON.stringify(got)}, expected ${code}/${shift}`);
     }
-    __assert(!TYPE_MAP['\u00e9'], 'a non-ASCII character was mapped');
+    __assert(!PadView.TYPE_MAP['\u00e9'], 'a non-ASCII character was mapped');
   },
 });
 
@@ -241,15 +246,15 @@ __webTests.push({
   fn: async () => {
     __resetInput();
     let locks = 0;
-    const orig = pad.requestPointerLock;
-    pad.requestPointerLock = () => { locks++; };
+    const orig = PadView.pad.requestPointerLock;
+    PadView.pad.requestPointerLock = () => { locks++; };
     try {
       __pointer('pointerdown', 1, 'touch', 100, 100);
       await __sleep(20);
       __pointer('pointerup', 1, 'touch', 100, 100);
       __assert(locks === 0, `a touch requested pointer lock ${locks} times`);
     } finally {
-      pad.requestPointerLock = orig;
+      PadView.pad.requestPointerLock = orig;
     }
   },
 });
@@ -259,13 +264,13 @@ __webTests.push({
   name: 'mouse does request pointer lock',
   fn: async () => {
     let locks = 0;
-    const orig = pad.requestPointerLock;
-    pad.requestPointerLock = () => { locks++; };
+    const orig = PadView.pad.requestPointerLock;
+    PadView.pad.requestPointerLock = () => { locks++; };
     try {
       __pointer('pointerdown', 9, 'mouse', 100, 100);
       __assert(locks === 1, `mouse requested pointer lock ${locks} times, expected 1`);
     } finally {
-      pad.requestPointerLock = orig;
+      PadView.pad.requestPointerLock = orig;
     }
   },
 });
@@ -278,8 +283,8 @@ __webTests.push({
     // one is released, and that refusal is a *promise rejection*, not an
     // exception - so try/catch never saw it and the click did nothing.
     let calls = 0;
-    const orig = pad.requestPointerLock;
-    pad.requestPointerLock = () => {
+    const orig = PadView.pad.requestPointerLock;
+    PadView.pad.requestPointerLock = () => {
       calls++;
       return Promise.reject(new DOMException('refused', 'NotAllowedError'));
     };
@@ -292,7 +297,7 @@ __webTests.push({
       __assert(flash.classList.contains('show'), 'a refused capture showed nothing');
       __assert(flash.textContent.includes('click again'), `the pad said: ${flash.textContent}`);
     } finally {
-      pad.requestPointerLock = orig;
+      PadView.pad.requestPointerLock = orig;
     }
   },
 });
@@ -302,7 +307,7 @@ __webTests.push({
   name: 'one wheel notch is one step, in pixels or lines',
   fn: async () => {
     __resetInput();
-    captured = true;
+    PadView.captured = true;
     const cap = __capture();
     try {
       // A pixel-mode notch (Chrome) is a deltaY of about 100. Dividing that by
@@ -332,7 +337,7 @@ __webTests.push({
       __assert(wheels.length >= 1 && wheels.every((v) => v < 0),
         `two line-mode notches produced ${JSON.stringify(wheels)}, expected negative scroll`);
     } finally {
-      captured = false;
+      PadView.captured = false;
     }
   },
 });
@@ -341,10 +346,10 @@ __webTests.push({
   page: 'control',
   name: 'a movement larger than the report is split, not clamped',
   fn: async () => {
-    captured = true;
+    PadView.captured = true;
     const cap = __capture();
     try {
-      pad.dispatchEvent(new PointerEvent('pointermove', {
+      PadView.pad.dispatchEvent(new PointerEvent('pointermove', {
         pointerId: 12, pointerType: 'mouse', movementX: 400, movementY: 0, bubbles: true,
       }));
       await __sleep(20);
@@ -358,7 +363,7 @@ __webTests.push({
       __assert(moves.every((r) => Math.abs(signed(r[1])) <= 127),
         'a report carried a delta outside the signed 8-bit field');
     } finally {
-      captured = false;
+      PadView.captured = false;
     }
   },
 });
@@ -372,13 +377,13 @@ __webTests.push({
     // rather than inheriting whatever the last run left behind.
     const savedGain = appSettings.mouse_gain;
     appSettings.mouse_gain = 1;
-    captured = true;
+    PadView.captured = true;
     const cap = __capture();
     try {
       // A gaming mouse emits over a thousand of these a second. One WebSocket
       // message each is more than the device can drain.
       for (let i = 0; i < 20; i++) {
-        pad.dispatchEvent(new PointerEvent('pointermove', {
+        PadView.pad.dispatchEvent(new PointerEvent('pointermove', {
           pointerId: 13, pointerType: 'mouse', movementX: 3, movementY: -1, bubbles: true,
         }));
       }
@@ -400,7 +405,7 @@ __webTests.push({
       __assert(dx === 60, `dx totalled ${dx}, expected 60 - distance was dropped`);
       __assert(dy === -20, `dy totalled ${dy}, expected -20 - distance was dropped`);
     } finally {
-      captured = false;
+      PadView.captured = false;
       appSettings.mouse_gain = savedGain;
     }
   },
@@ -420,19 +425,19 @@ __webTests.push({
       pointerId: 3, pointerType: 'touch', clientX: 10, clientY: 10, bubbles: true,
     }));
     await __sleep(30);
-    __assert(held.has('KeyW'), 'key not held after pointerdown');
+    __assert(PadView.held.has('KeyW'), 'key not held after pointerdown');
 
     // A long press must not release it by itself.
     await __sleep(120);
-    __assert(held.has('KeyW'), 'key released by itself during a hold');
+    __assert(PadView.held.has('KeyW'), 'key released by itself during a hold');
 
     key.dispatchEvent(new PointerEvent('pointerup', {
       pointerId: 3, pointerType: 'touch', clientX: 10, clientY: 10, bubbles: true,
     }));
     await __sleep(20);
-    __assert(!held.has('KeyW'), 'key still held after pointerup');
+    __assert(!PadView.held.has('KeyW'), 'key still held after pointerup');
 
-    const pressed = cap.find((r) => r[0] === 2 && r[2] === KEY.KeyW);
+    const pressed = cap.find((r) => r[0] === 2 && r[2] === PadView.KEY.KeyW);
     __assert(pressed, 'no keyboard report containing KeyW');
   },
 });
@@ -442,7 +447,7 @@ __webTests.push({
   name: 'a latched modifier forms a chord with one finger',
   fn: async () => {
     __resetInput();
-    latched.clear();
+    PadView.latched.clear();
     const cap = __capture();
 
     const key = (c) => document.querySelector(`.k[data-code="${c}"]`);
@@ -456,7 +461,7 @@ __webTests.push({
     tap(alt, 20);
     tap(alt, 20, true);
     await __sleep(20);
-    __assert(latched.has('AltLeft'), 'Alt did not latch');
+    __assert(PadView.latched.has('AltLeft'), 'Alt did not latch');
     __assert(alt.classList.contains('latched'), 'Alt is latched but not shown as such');
 
     // The next key carries it: one finger, no chord.
@@ -474,7 +479,7 @@ __webTests.push({
     const up = cap.filter((r) => r[0] === 2).pop();
     __assert(up[1] === 0 && up[2] === 0,
       `final report mod ${up[1]} key ${up[2]}, expected everything released`);
-    __assert(!latched.size, 'the latch survived the chord');
+    __assert(!PadView.latched.size, 'the latch survived the chord');
     __assert(!alt.classList.contains('latched'), 'Alt still looks latched');
   },
 });
@@ -484,7 +489,7 @@ __webTests.push({
   name: 'tapping a latched modifier again cancels it',
   fn: async () => {
     __resetInput();
-    latched.clear();
+    PadView.latched.clear();
     const cap = __capture();
     const alt = document.querySelector('.k[data-code="AltLeft"]');
     const tap = (id) => {
@@ -496,11 +501,11 @@ __webTests.push({
 
     tap(30);
     await __sleep(20);
-    __assert(latched.has('AltLeft'), 'first tap did not latch');
+    __assert(PadView.latched.has('AltLeft'), 'first tap did not latch');
 
     tap(31);
     await __sleep(20);
-    __assert(!latched.has('AltLeft'), 'second tap did not cancel');
+    __assert(!PadView.latched.has('AltLeft'), 'second tap did not cancel');
     const last = cap.filter((r) => r[0] === 2).pop();
     __assert(last[1] === 0, `modifier byte ${last[1]} after cancelling, expected 0`);
   },
@@ -537,7 +542,7 @@ __webTests.push({
   name: 'settings form binds to device values',
   fn: async () => {
     await __sleep(300);
-    __assert(!document.getElementById('gate'), 'settings page asked for the code');
+    __assert(__gateHidden(), 'the settings view asked for the code');
     const v = (id) => { const e = document.getElementById(id); return e && (e.type === 'checkbox' ? e.checked : e.value); };
     __assert(v('usbProduct') === 'ESP32 Remote', `usbProduct = ${v('usbProduct')}`);
     __assert(v('screenTimeout') === '60', `screenTimeout = ${v('screenTimeout')}`);
@@ -599,7 +604,7 @@ __webTests.push({
     localStorage.setItem('esp32remote.macros',
       JSON.stringify([{ name: 'Phone Only', steps: '{ENTER}' }]));
 
-    const b = collectBackup();
+    const b = SettingsView.collectBackup();
     __assert(b.app === 'esp32-remote' && b.version === 1,
       `envelope: ${JSON.stringify({ app: b.app, version: b.version })}`);
     __assert(b.device && b.device.usb_product === 'ESP32 Remote',
@@ -813,25 +818,25 @@ __webTests.push({
   fn: async () => {
     // The standard CRC-32 vector, so an implementation that is wrong in the
     // same way as the firmware's cannot agree with itself and pass.
-    const vector = crc32(new TextEncoder().encode('123456789'));
+    const vector = SettingsView.crc32(new TextEncoder().encode('123456789'));
     __assert(vector === 0xCBF43926,
-      `crc32('123456789') = 0x${vector.toString(16)}, expected 0xcbf43926`);
+      `SettingsView.crc32('123456789') = 0x${vector.toString(16)}, expected 0xcbf43926`);
 
     const img = __greyImage(0);
     img.data[0] = img.data[1] = img.data[2] = 255;            // (0,0) white
     img.data[640] = img.data[641] = img.data[642] = 255;      // (0,1) white
-    const bytes = packScreenImage(img);
+    const bytes = SettingsView.packScreenImage(img);
 
     __assert(bytes.length === 6408, `the file is ${bytes.length} bytes, expected 6408`);
     __assert(bytes.length - 8 === 6400, `the payload is ${bytes.length - 8} bytes`);
     __assert(bytes[0] === 0x01, `format byte is 0x${bytes[0].toString(16)}`);
     __assert(bytes[1] === 0, `reserved byte is ${bytes[1]}`);
     __assert((bytes[2] | (bytes[3] << 8)) === 6400, 'the length field is not 6400');
-    const want = crc32(bytes.subarray(8));
+    const want = SettingsView.crc32(bytes.subarray(8));
     const got = (bytes[4] | (bytes[5] << 8) | (bytes[6] << 16) | (bytes[7] << 24)) >>> 0;
     __assert(got === want,
       `header CRC 0x${got.toString(16)} != payload CRC 0x${want.toString(16)}`);
-    __assert(screenImageValid(bytes), 'the packed file does not validate');
+    __assert(SettingsView.screenImageValid(bytes), 'the packed file does not validate');
 
     // Packing: high nibble is the left pixel, 80 bytes per row.
     __assert(bytes[8] === 0xF0, `row 0 byte 0 is 0x${bytes[8].toString(16)}, expected 0xf0`);
@@ -845,14 +850,14 @@ __webTests.push({
     // ...and the bottom-right pair lands on exactly the last byte.
     const last = (79 * 160 + 158) * 4;
     img.data[last] = img.data[last + 1] = img.data[last + 2] = 255;   // (158,79)
-    const tail = packScreenImage(img);
+    const tail = SettingsView.packScreenImage(img);
     __assert(tail[8 + 6399] === 0xF0,
       `the bottom-right pair packed to 0x${tail[8 + 6399].toString(16)}, expected 0xf0`);
 
     // Black and white are the ends of the ramp, and every payload byte moves
     // with the input rather than being left as it was.
-    const black = packScreenImage(__greyImage(0));
-    const white = packScreenImage(__greyImage(255));
+    const black = SettingsView.packScreenImage(__greyImage(0));
+    const white = SettingsView.packScreenImage(__greyImage(255));
     for (let i = 8; i < 6408; i++) {
       __assert(black[i] === 0x00, `black byte ${i} is 0x${black[i].toString(16)}`);
       __assert(white[i] === 0xFF, `white byte ${i} is 0x${white[i].toString(16)}`);
@@ -864,7 +869,7 @@ __webTests.push({
   page: 'settings',
   name: 'screen image: a flat grey is dithered, not thresholded',
   fn: async () => {
-    const payload = packScreenImage(__greyImage(128)).subarray(8);
+    const payload = SettingsView.packScreenImage(__greyImage(128)).subarray(8);
 
     // 128/255 * 15 = 7.53, so a plain threshold gives level 8 everywhere. The
     // ordered dither must give both 7 and 8, arranged as the Bayer matrix
@@ -886,7 +891,7 @@ __webTests.push({
 
     // A different input moves the boundary: at 140 (8.24 levels) only the four
     // highest Bayer cells round up.
-    const higher = packScreenImage(__greyImage(140)).subarray(8);
+    const higher = SettingsView.packScreenImage(__greyImage(140)).subarray(8);
     let nines = 0;
     for (let y = 0; y < 4; y++) {
       for (let x = 0; x < 4; x++) {
@@ -898,7 +903,7 @@ __webTests.push({
 
     // Exactly on a level nothing moves: black, white and 3*17 stay put.
     for (const [v, level] of [[0, 0], [255, 15], [51, 3]]) {
-      for (const b of packScreenImage(__greyImage(v)).subarray(8)) {
+      for (const b of SettingsView.packScreenImage(__greyImage(v)).subarray(8)) {
         __assert((b >> 4) === level && (b & 0x0F) === level,
           `grey ${v} packed to 0x${b.toString(16)}, expected level ${level} both halves`);
       }
@@ -907,7 +912,7 @@ __webTests.push({
     // The dither tracks a ramp: the mean level over the image is the mean of
     // the input (15 * 0.5 = 7.5), which a threshold that ignored the input
     // would not manage.
-    const ramp = packScreenImage(__greyImage((x) => Math.round(x * 255 / 159))).subarray(8);
+    const ramp = SettingsView.packScreenImage(__greyImage((x) => Math.round(x * 255 / 159))).subarray(8);
     let sum = 0, n = 0;
     for (const b of ramp) { sum += (b >> 4) + (b & 0x0F); n += 2; }
     const mean = sum / n;
@@ -926,7 +931,7 @@ __webTests.push({
 
     const img = __greyImage(0);
     img.data[0] = img.data[1] = img.data[2] = 255;            // (0,0) white
-    renderScreenImage(canvas, packScreenImage(img));
+    SettingsView.renderScreenImage(canvas, SettingsView.packScreenImage(img));
     const px = canvas.getContext('2d').getImageData(0, 0, 160, 80).data;
     // Level 15 comes back as 255 and level 0 as 0: the preview uses the same
     // 17*i ramp the firmware's RGB565 table is built from.
@@ -936,7 +941,7 @@ __webTests.push({
       `(2,0) previews as ${px[8]},${px[9]},${px[10]}, expected black`);
 
     // A dithered grey must come back as the two levels, not one flat block.
-    renderScreenImage(canvas, packScreenImage(__greyImage(128)));
+    SettingsView.renderScreenImage(canvas, SettingsView.packScreenImage(__greyImage(128)));
     const mid = canvas.getContext('2d').getImageData(0, 0, 160, 80).data;
     const seen = new Set();
     for (let i = 0; i < 4 * 4 * 4; i += 4) seen.add(mid[i]);
@@ -950,17 +955,17 @@ __webTests.push({
   name: 'screen image: colour packs to 25,600 bytes of little-endian RGB565',
   fn: async () => {
     const img = __colourImage([0, 0, 0]);
-    const bytes = packScreenImage(img, 0x02);
+    const bytes = SettingsView.packScreenImage(img, 0x02);
 
     __assert(bytes.length === 25608, `the file is ${bytes.length} bytes, expected 25608`);
     __assert(bytes[0] === 0x02, `format byte is 0x${bytes[0].toString(16)}`);
     __assert(bytes[1] === 0, `reserved byte is ${bytes[1]}`);
     __assert((bytes[2] | (bytes[3] << 8)) === 25600, 'the length field is not 25600');
-    const want = crc32(bytes.subarray(8));
+    const want = SettingsView.crc32(bytes.subarray(8));
     const got = (bytes[4] | (bytes[5] << 8) | (bytes[6] << 16) | (bytes[7] << 24)) >>> 0;
     __assert(got === want,
       `header CRC 0x${got.toString(16)} != payload CRC 0x${want.toString(16)}`);
-    __assert(screenImageValid(bytes), 'the packed file does not validate');
+    __assert(SettingsView.screenImageValid(bytes), 'the packed file does not validate');
 
     // Pixel order, byte order and row stride. The payload is little-endian, so
     // the low byte of the RGB565 word comes first; 320 bytes a row means the
@@ -976,7 +981,7 @@ __webTests.push({
     set(159, 0, [255, 255, 255]);  // 0xFFFF -> FF FF, the last pixel of row 0
     set(0, 1, [255, 0, 255]);      // 0xF81F -> 1F F8, the first pixel of row 1
     set(159, 79, [255, 255, 0]);   // 0xFFE0 -> E0 FF, the last pixel of the file
-    const packed = packScreenImage(img, 0x02).subarray(8);
+    const packed = SettingsView.packScreenImage(img, 0x02).subarray(8);
     const px = (x, y) => {
       const o = (y * 160 + x) * 2;
       return [packed[o], packed[o + 1]];
@@ -1014,13 +1019,13 @@ __webTests.push({
       bytes[8 + i * 2] = words[i] & 0xFF;
       bytes[9 + i * 2] = words[i] >> 8;
     }
-    const crc = crc32(bytes.subarray(8));
+    const crc = SettingsView.crc32(bytes.subarray(8));
     bytes[4] = crc & 0xFF; bytes[5] = (crc >> 8) & 0xFF;
     bytes[6] = (crc >> 16) & 0xFF; bytes[7] = (crc >>> 24) & 0xFF;
-    __assert(screenImageValid(bytes), 'the hand-built colour file does not validate');
+    __assert(SettingsView.screenImageValid(bytes), 'the hand-built colour file does not validate');
 
     const canvas = document.getElementById('screenImagePreview');
-    renderScreenImage(canvas, bytes);
+    SettingsView.renderScreenImage(canvas, bytes);
     const px = canvas.getContext('2d').getImageData(0, 0, 160, 80).data;
     const at = (i) => [px[i * 4], px[i * 4 + 1], px[i * 4 + 2]];
     __assert(at(0).join() === '255,0,0', `0xF800 previewed as ${at(0)}`);
@@ -1040,16 +1045,16 @@ __webTests.push({
     // 128/255 is 15.56 of red's 31 levels and 31.62 of green's 63, so a plain
     // threshold gives 16/32/16 everywhere. Each channel has to cross its own
     // boundary in its own cells of the Bayer tile.
-    const payload = packScreenImage(__colourImage([128, 128, 128]), 0x02).subarray(8);
+    const payload = SettingsView.packScreenImage(__colourImage([128, 128, 128]), 0x02).subarray(8);
     const counts = { r: new Map(), g: new Map(), b: new Map() };
     for (let y = 0; y < 4; y++) {
       for (let x = 0; x < 4; x++) {
         const o = (y * 160 + x) * 2;
         const v = payload[o] | (payload[o + 1] << 8);
         const r = v >> 11, g = (v >> 5) & 0x3F, b = v & 0x1F;
-        __assert(r === (BAYER4[y][x] >= 7 ? 16 : 15), `red at (${x},${y}) is ${r}`);
-        __assert(g === (BAYER4[y][x] >= 6 ? 32 : 31), `green at (${x},${y}) is ${g}`);
-        __assert(b === (BAYER4[y][x] >= 7 ? 16 : 15), `blue at (${x},${y}) is ${b}`);
+        __assert(r === (SettingsView.BAYER4[y][x] >= 7 ? 16 : 15), `red at (${x},${y}) is ${r}`);
+        __assert(g === (SettingsView.BAYER4[y][x] >= 6 ? 32 : 31), `green at (${x},${y}) is ${g}`);
+        __assert(b === (SettingsView.BAYER4[y][x] >= 7 ? 16 : 15), `blue at (${x},${y}) is ${b}`);
         for (const [k, n] of [['r', r], ['g', g], ['b', b]]) {
           counts[k].set(n, (counts[k].get(n) || 0) + 1);
         }
@@ -1066,7 +1071,7 @@ __webTests.push({
 
     // A channel exactly on a level does not move while a neighbour dithers:
     // pure blue's red and green stay 0 in every cell.
-    const blue = packScreenImage(__colourImage([0, 0, 128]), 0x02).subarray(8);
+    const blue = SettingsView.packScreenImage(__colourImage([0, 0, 128]), 0x02).subarray(8);
     for (let i = 0; i < 4 * 4; i++) {
       const v = blue[i * 2] | (blue[i * 2 + 1] << 8);
       __assert((v >> 11) === 0 && ((v >> 5) & 0x3F) === 0,
@@ -1082,17 +1087,17 @@ __webTests.push({
     // The format byte exists to make colour additive, so the greyscale path
     // must be unchanged by it: the files already on devices depend on that.
     const img = __greyImage((x, y) => (x * 7 + y * 13) % 256);
-    const bytes = packScreenImage(img);              // the default format
-    const explicit = packScreenImage(img, 0x01);
+    const bytes = SettingsView.packScreenImage(img);              // the default format
+    const explicit = SettingsView.packScreenImage(img, 0x01);
     __assert(__sameBytes(bytes, explicit), 'the default format is no longer 0x01');
     __assert(bytes.length === 6408, `the file is ${bytes.length} bytes, expected 6408`);
     __assert(bytes[0] === 0x01 && bytes[1] === 0, 'the header is no longer greyscale');
     __assert((bytes[2] | (bytes[3] << 8)) === 6400, 'the length field is not 6400');
-    __assert(screenImageValid(bytes), 'a greyscale file no longer validates');
+    __assert(SettingsView.screenImageValid(bytes), 'a greyscale file no longer validates');
 
     // The same picture in colour is a different file, not the greyscale payload
     // wearing a different format byte.
-    const colour = packScreenImage(img, 0x02);
+    const colour = SettingsView.packScreenImage(img, 0x02);
     __assert(colour.length === 25608 && colour[0] === 0x02,
       `the colour file is ${colour.length} bytes, format 0x${colour[0].toString(16)}`);
     __assert(!__sameBytes(colour.subarray(8, 6408), bytes.subarray(8)),
@@ -1129,8 +1134,8 @@ __webTests.push({
     // and both ways the size and the format byte can disagree. That last rule
     // is what keeps the two formats apart - the format byte picks the payload
     // size, so a body cannot be drawn as the format it is not.
-    const good = packScreenImage(__greyImage(200));
-    const colour = packScreenImage(__colourImage([10, 200, 30]), 0x02);
+    const good = SettingsView.packScreenImage(__greyImage(200));
+    const colour = SettingsView.packScreenImage(__colourImage([10, 200, 30]), 0x02);
     const corrupt = Uint8Array.from(good);
     corrupt[8 + 10] ^= 0xFF;
     const unknown = Uint8Array.from(good);
@@ -1141,7 +1146,7 @@ __webTests.push({
     // size/format agreement can refuse it.
     const colourAtGreySize = new Uint8Array(6408);
     colourAtGreySize.set(colour.subarray(0, 6408));
-    const shortCrc = crc32(colourAtGreySize.subarray(8));
+    const shortCrc = SettingsView.crc32(colourAtGreySize.subarray(8));
     colourAtGreySize[4] = shortCrc & 0xFF;
     colourAtGreySize[5] = (shortCrc >> 8) & 0xFF;
     colourAtGreySize[6] = (shortCrc >> 16) & 0xFF;
@@ -1209,14 +1214,14 @@ __webTests.push({
     picker.files = dt.files;
     picker.dispatchEvent(new Event('change', { bubbles: true }));
 
-    for (let i = 0; i < 100 && !screenImageBytes; i++) await __sleep(50);
-    __assert(screenImageBytes, 'the picked file never became a packed image');
+    for (let i = 0; i < 100 && !SettingsView.screenImageBytes; i++) await __sleep(50);
+    __assert(SettingsView.screenImageBytes, 'the picked file never became a packed image');
     __assert(!document.getElementById('screenImageSend').disabled,
       'Send stayed disabled after a file was picked');
-    __assert(screenImageBytes.length === 25608,
-      `the colour file is ${screenImageBytes.length} bytes, expected 25608`);
-    __assert(screenImageBytes[0] === 0x02,
-      `the default format is 0x${screenImageBytes[0].toString(16)}, expected colour`);
+    __assert(SettingsView.screenImageBytes.length === 25608,
+      `the colour file is ${SettingsView.screenImageBytes.length} bytes, expected 25608`);
+    __assert(SettingsView.screenImageBytes[0] === 0x02,
+      `the default format is 0x${SettingsView.screenImageBytes[0].toString(16)}, expected colour`);
 
     // The preview is the promise the page makes, so it must be the bytes that
     // get sent. A colour preview cannot be repacked - it has already been
@@ -1226,7 +1231,7 @@ __webTests.push({
     const shown = preview.getContext('2d').getImageData(0, 0, 160, 80).data;
     let mismatch = -1;
     for (let i = 0; i < 160 * 80 && mismatch < 0; i++) {
-      const v = screenImageBytes[8 + i * 2] | (screenImageBytes[9 + i * 2] << 8);
+      const v = SettingsView.screenImageBytes[8 + i * 2] | (SettingsView.screenImageBytes[9 + i * 2] << 8);
       const r5 = (v >> 11) & 0x1F, g6 = (v >> 5) & 0x3F, b5 = v & 0x1F;
       const p = i * 4;
       if (shown[p] !== ((r5 << 3) | (r5 >> 2)) ||
@@ -1252,9 +1257,9 @@ __webTests.push({
     __assert(r.status === 200, `the device answered HTTP ${r.status}`);
     const stored = new Uint8Array(await r.arrayBuffer());
     __assert(stored.length === 25608, `the device holds ${stored.length} bytes`);
-    __assert(__sameBytes(stored, screenImageBytes),
+    __assert(__sameBytes(stored, SettingsView.screenImageBytes),
       'the device holds different bytes from the ones the page sent');
-    __assert(screenImageValid(stored), 'the device holds an image that does not validate');
+    __assert(SettingsView.screenImageValid(stored), 'the device holds an image that does not validate');
 
     // A stored image must survive a refused upload: the mode is still offered
     // and the old picture is what it draws.
@@ -1274,26 +1279,26 @@ __webTests.push({
   name: 'screen image: switching to greyscale re-packs the same picture as 0x01',
   fn: async () => {
     // The send test left a colour image stored and its scaled source loaded.
-    __assert(screenImageBytes && screenImageBytes[0] === 0x02,
+    __assert(SettingsView.screenImageBytes && SettingsView.screenImageBytes[0] === 0x02,
       'the colour image is no longer loaded');
 
     const grey = document.querySelector('input[name="screenImageFormat"][value="grey"]');
     __assert(grey, 'there is no greyscale choice in the picker');
     grey.checked = true;
     grey.dispatchEvent(new Event('change', { bubbles: true }));
-    for (let i = 0; i < 100 && (!screenImageBytes || screenImageBytes[0] !== 0x01); i++) {
+    for (let i = 0; i < 100 && (!SettingsView.screenImageBytes || SettingsView.screenImageBytes[0] !== 0x01); i++) {
       await __sleep(50);
     }
-    __assert(screenImageBytes[0] === 0x01,
-      `switching re-packed as 0x${screenImageBytes[0].toString(16)}, expected greyscale`);
-    __assert(screenImageBytes.length === 6408,
-      `the greyscale file is ${screenImageBytes.length} bytes, expected 6408`);
+    __assert(SettingsView.screenImageBytes[0] === 0x01,
+      `switching re-packed as 0x${SettingsView.screenImageBytes[0].toString(16)}, expected greyscale`);
+    __assert(SettingsView.screenImageBytes.length === 6408,
+      `the greyscale file is ${SettingsView.screenImageBytes.length} bytes, expected 6408`);
 
     // The greyscale preview is exactly the 17*i ramp the firmware expands, so
     // repacking the canvas is an independent route back to the same bytes.
     const preview = document.getElementById('screenImagePreview');
     const shown = preview.getContext('2d').getImageData(0, 0, 160, 80);
-    __assert(__sameBytes(packScreenImage(shown), screenImageBytes),
+    __assert(__sameBytes(SettingsView.packScreenImage(shown), SettingsView.screenImageBytes),
       'the greyscale preview and the bytes to send disagree');
 
     document.getElementById('screenImageSend').click();
@@ -1305,7 +1310,7 @@ __webTests.push({
       await (await fetch(`/screen/image?token=${window.__CODE}`)).arrayBuffer());
     __assert(stored.length === 6408 && stored[0] === 0x01,
       `the device holds ${stored.length} bytes, format 0x${stored[0].toString(16)}`);
-    __assert(__sameBytes(stored, screenImageBytes),
+    __assert(__sameBytes(stored, SettingsView.screenImageBytes),
       'the device holds different bytes from the ones the page sent');
 
     // Leave the choice where the page found it: the next test is about removing
@@ -1592,7 +1597,7 @@ __webTests.push({
   name: 'macro page lists the stored macros',
   fn: async () => {
     await __sleep(400);
-    __assert(!document.getElementById('gate'), 'the macro page asked for the code');
+    __assert(__gateHidden(), 'the macro view asked for the code');
 
     const cards = [...document.querySelectorAll('.macro')];
     __assert(cards.length === 3, `listed ${cards.length} macros, expected the 3 stored`);
@@ -1792,7 +1797,7 @@ __webTests.push({
   name: 'a list left on the device is adopted into the browser',
   fn: async () => {
     await __sleep(400);
-    __assert(!document.getElementById('gate'), 'the macro page asked for the code');
+    __assert(__gateHidden(), 'the macro view asked for the code');
 
     const names = [...document.querySelectorAll('.macro .name')].map((e) => e.textContent);
     __assert(names.includes('Left Behind'), `list: ${names.join('|')}`);
@@ -1811,8 +1816,8 @@ __webTests.push({
 // the firmware's fallback: a stored file is served when it is non-empty, the
 // embedded copy otherwise.
 async function __waitForUiFiles() {
-  for (let i = 0; i < 100 && !loaded; i++) await __sleep(50);
-  __assert(loaded, 'the file list never loaded');
+  for (let i = 0; i < 100 && !UiView.loaded; i++) await __sleep(50);
+  __assert(UiView.loaded, 'the file list never loaded');
 }
 
 const __row = (name) => document.querySelector(`.file[data-file="${name}"]`);
@@ -1840,13 +1845,16 @@ __webTests.push({
   name: 'lists every UI file and says where it is served from',
   fn: async () => {
     await __waitForUiFiles();
-    __assert(!document.getElementById('gate'), 'the page asked for the code');
+    __assert(__gateHidden(), 'the upload view asked for the code');
 
     const rows = [...document.querySelectorAll('#fileList .file')];
     const names = rows.map((r) => r.dataset.file);
-    __assert(rows.length === 11, `listed ${rows.length} files: ${names.join('|')}`);
+    __assert(rows.length === 9, `listed ${rows.length} files: ${names.join('|')}`);
     __assert(names.includes('index.html') && names.includes('ui.js'),
       `missing files: ${names.join('|')}`);
+    __assert(names.includes('router.js'), `missing files: ${names.join('|')}`);
+    __assert(!names.includes('settings.html') && !names.includes('macros.html')
+      && !names.includes('ui.html'), `the removed pages are still listed: ${names.join('|')}`);
     __assert(names.filter((n) => n === 'index.html').length === 1,
       'index.html was listed twice');
     for (const r of rows) {
@@ -1940,7 +1948,7 @@ __webTests.push({
   name: 'an over-size file is refused, and the page refuses it first',
   fn: async () => {
     await __waitForUiFiles();
-    const big = new Uint8Array(maxSize + 1);
+    const big = new Uint8Array(UiView.maxSize + 1);
 
     const r = await fetch(`/ui/upload?name=macros.js&token=${window.__CODE}`,
       { method: 'POST', body: big });
@@ -1971,29 +1979,27 @@ __webTests.push({
   },
 });
 
-// ---------------------------------------------------------------- broken index.html
-// The point of the page: when an uploaded index.html breaks, ui.html is still
-// served from the firmware and can put the built-in copy back. The runner
-// stores the broken file before this pass.
+// ---------------------------------------------------------------- broken view script
+// The point of the page: when an uploaded view script breaks, the shell still
+// loads and the other views keep working, so the upload view can put the
+// built-in copy back. The runner stores the broken file before this pass.
 __webTests.push({
   page: 'ui-broken',
-  name: 'ui.html works while index.html is broken, and can reset it',
+  name: 'the upload view works while another view script is broken, and can reset it',
   fn: async () => {
     await __waitForUiFiles();
 
-    const broken = await (await fetch('/index.html')).text();
-    __assert(broken.includes('broken'), 'the runner did not store a broken index.html');
-    __assert(__state('index.html').startsWith('uploaded'),
-      `index.html is "${__state('index.html')}"`);
+    const broken = await (await fetch('/pad.js')).text();
+    __assert(broken.includes('broken upload'), 'the runner did not store a broken pad.js');
+    __assert(__state('pad.js').startsWith('uploaded'), `pad.js is "${__state('pad.js')}"`);
 
     window.confirm = () => true;
-    __row('index.html').querySelector('.reset').click();
-    await __waitState('index.html', 'built-in');
+    __row('pad.js').querySelector('.reset').click();
+    await __waitState('pad.js', 'built-in');
 
-    const served = await (await fetch('/index.html')).text();
-    __assert(served.includes('<title>ESP32 Remote</title>'),
-      'the built-in index.html did not come back');
-    __assert(!served.includes('broken'), 'the broken copy is still being served');
+    const served = await (await fetch('/pad.js')).text();
+    __assert(served.includes('const PadView'), 'the built-in pad.js did not come back');
+    __assert(!served.includes('broken upload'), 'the broken copy is still being served');
   },
 });
 
@@ -2071,5 +2077,216 @@ __webTests.push({
     // Leave the page as the other tests expect it.
     document.getElementById('bKbd').click();
     __assert(!kbd.classList.contains('show'), 'the keyboard did not close');
+  },
+});
+
+// ---------------------------------------------------------------- navigation
+// The four views are templates in one shell; changing the hash mounts one and
+// unmounts the other. These tests drive the router exactly as a user does.
+const __VIEW_MARKERS = {
+  control: 'pad', settings: 'usbProduct', macros: 'macroList', ui: 'fileList',
+};
+
+const __viewName = () => document.getElementById('view').dataset.view;
+
+async function __waitView(name) {
+  for (let i = 0; i < 100 && __viewName() !== name; i++) await __sleep(50);
+  __assert(__viewName() === name, `view is "${__viewName()}", expected "${name}"`);
+}
+
+async function __goView(name, hash) {
+  location.hash = hash;
+  await __waitView(name);
+  __assertOnlyMounted(name);
+}
+
+function __assertOnlyMounted(name) {
+  for (const [view, id] of Object.entries(__VIEW_MARKERS)) {
+    const present = !!document.getElementById(id);
+    __assert(present === (view === name),
+      `${id} is ${present ? 'mounted' : 'missing'} while ${name} is the view`);
+  }
+  __assert(document.querySelectorAll('#view > *').length > 0,
+    `nothing is mounted for ${name}`);
+}
+
+__webTests.push({
+  page: 'navigation',
+  name: 'each hash mounts its view and only its view',
+  fn: async () => {
+    await __waitView('control');
+    __assertOnlyMounted('control');
+
+    await __goView('settings', '#/settings');
+    __assert(document.getElementById('usbProduct'), 'the settings form is missing');
+
+    await __goView('macros', '#/macros');
+    __assert(document.querySelector('#macroList'), 'the macro list is missing');
+
+    await __goView('ui', '#/ui');
+    __assert(document.querySelector('#fileList'), 'the file list is missing');
+
+    await __goView('control', '#/');
+    __assert(document.getElementById('hint'), 'the hint is missing from the control view');
+  },
+});
+
+__webTests.push({
+  page: 'navigation',
+  name: 'back and forward land on the view the hash names',
+  fn: async () => {
+    await __goView('settings', '#/settings');
+    await __goView('macros', '#/macros');
+
+    history.back();
+    await __waitView('settings');
+    __assertOnlyMounted('settings');
+
+    history.back();
+    await __waitView('control');
+    __assertOnlyMounted('control');
+
+    history.forward();
+    await __waitView('settings');
+    __assertOnlyMounted('settings');
+
+    await __goView('control', '#/');
+  },
+});
+
+__webTests.push({
+  page: 'navigation',
+  name: 'an unknown hash falls back to the control view',
+  fn: async () => {
+    await __goView('settings', '#/settings');
+    location.hash = '#/not-a-view';
+    await __waitView('control');
+    __assertOnlyMounted('control');
+    await __goView('control', '#/');
+  },
+});
+
+__webTests.push({
+  page: 'navigation',
+  name: 'leaving the pad releases held state and closes its socket',
+  fn: async () => {
+    await __goView('control', '#/');
+
+    // The recorder stands in for the device, so the reports are visible.
+    const cap = __capture();
+    PadView.held.add('KeyA');
+    PadView.buttons = 1;
+
+    location.hash = '#/settings';
+    await __waitView('settings');
+
+    __assert(cap.some((r) => r[0] === 5),
+      'leaving the pad did not send a release report');
+    __assert(PadView.held.size === 0, 'held keys survived the unmount');
+    __assert(PadView.ws === null, 'the pad socket was not closed');
+    __assert(PadView.reconnectTimer === null, 'the pad left a reconnect timer armed');
+
+    // Longer than the 1.5 s retry: a stray onclose handler would reconnect.
+    await __sleep(1800);
+    __assert(PadView.ws === null, 'the pad opened a socket after it was unmounted');
+  },
+});
+
+__webTests.push({
+  page: 'navigation',
+  name: 'leaving the macros view closes its socket and stops the heartbeat',
+  fn: async () => {
+    location.hash = '#/macros';
+    await __waitView('macros');
+    for (let i = 0; i < 40 && !MacrosView.ws; i++) await __sleep(50);
+    __assert(MacrosView.ws, 'the macros view never opened a socket');
+
+    location.hash = '#/ui';
+    await __waitView('ui');
+    __assert(MacrosView.ws === null, 'the macros socket was not closed');
+    __assert(MacrosView.reconnectTimer === null,
+      'the macros view left a reconnect timer armed');
+
+    // Its pagehide listener belongs to the mounted view too.
+    const cap = [];
+    MacrosView.ws = { readyState: 1, send: (b) => cap.push(Array.from(b)) };
+    MacrosView.wsReady = true;
+    window.dispatchEvent(new Event('pagehide'));
+    __assert(cap.length === 0,
+      `the macros pagehide listener sent ${cap.length} reports after unmounting`);
+    MacrosView.ws = null;
+    MacrosView.wsReady = false;
+
+    await __sleep(1800);
+    __assert(MacrosView.ws === null, 'the macros view reopened a socket after unmount');
+  },
+});
+
+__webTests.push({
+  page: 'navigation',
+  name: 'window listeners belong to the mounted view only',
+  fn: async () => {
+    await __goView('control', '#/');
+
+    // Leave the pad, then give its module a recorder and press a key. If its
+    // window listener survived the unmount, this produces a report.
+    location.hash = '#/settings';
+    await __waitView('settings');
+    const afterLeave = [];
+    PadView.ws = { readyState: 1, send: (b) => afterLeave.push(Array.from(b)) };
+    PadView.wsReady = true;
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', code: 'KeyA' }));
+    __assert(afterLeave.length === 0,
+      `the pad listener sent ${afterLeave.length} reports after unmounting`);
+    PadView.ws = null;
+    PadView.wsReady = false;
+
+    // Back on the pad, the listener must be attached once: a duplicate would
+    // send both a press and two release reports.
+    await __goView('control', '#/');
+    const cap = __capture();
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', code: 'KeyA' }));
+    window.dispatchEvent(new KeyboardEvent('keyup', { key: 'a', code: 'KeyA' }));
+    const presses = cap.filter((r) => r[0] === 2 && r[2] === 4).length;
+    const releases = cap.filter((r) => r[0] === 2 && r[2] === 0).length;
+    __assert(presses === 1, `${presses} key press reports after remounting, expected 1`);
+    __assert(releases === 1, `${releases} key release reports after remounting, expected 1`);
+  },
+});
+
+// The runner reloaded this page after the access code had been saved and
+// scrubbed from the URL; the hash survived, so the same view must come back.
+__webTests.push({
+  page: 'refresh',
+  name: 'a reload lands on the view named in the hash',
+  fn: async () => {
+    await __waitView('macros');
+    __assertOnlyMounted('macros');
+    __assert(document.getElementById('macroAdd'), 'the macro view did not initialise');
+    __assert(location.hash === '#/macros', `the hash is "${location.hash}"`);
+  },
+});
+
+// ---------------------------------------------------------------- access gate
+// One gate in the shell, not one per view. A fresh browser has no saved code,
+// so entering it must unlock the view the hash already names.
+__webTests.push({
+  page: 'gate',
+  name: 'the shell gate unlocks the view in the hash and saves the code',
+  fn: async () => {
+    await __sleep(300);
+    const gate = document.getElementById('gate');
+    __assert(gate && !gate.classList.contains('hidden'),
+      'the gate is hidden with no saved code');
+    __assert(location.hash === '#/settings', `hash: ${location.hash}`);
+
+    document.getElementById('tokenInput').value = window.__CODE;
+    document.getElementById('tokenGo').click();
+    await __waitView('settings');
+
+    __assert(__gateHidden(), 'the gate stayed up after a valid code');
+    __assert(localStorage.getItem('esp32remote.token') === window.__CODE,
+      'the accepted code was not saved');
+    __assertOnlyMounted('settings');
   },
 });

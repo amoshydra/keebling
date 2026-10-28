@@ -9,27 +9,35 @@
 //
 // A list left on the device by an older build is adopted on first load, in
 // loadMacros() below.
+//
+// The view is mounted and unmounted by router.js: refs and listeners belong to
+// init(), and destroy() has to stop the socket, the heartbeat and any run.
+
+const MacrosView = (() => {
 
 const STORE_KEY = 'esp32remote.macros';
 
-const dot = document.getElementById('dot');
-const statusText = document.getElementById('statusText');
-const listEl = document.getElementById('macroList');
-const meterEl = document.getElementById('blobMeter');
-const saveNoteEl = document.getElementById('saveNote');
-const editorEl = document.getElementById('editor');
-const editorTitleEl = document.getElementById('editorTitle');
-const nameEl = document.getElementById('editName');
-const stepsEl = document.getElementById('editSteps');
-const previewEl = document.getElementById('parsePreview');
-const saveEl = document.getElementById('editSave');
-const chipsEl = document.getElementById('chips');
-const runbar = document.getElementById('runbar');
-const runNameEl = document.getElementById('runName');
-const runCountEl = document.getElementById('runCount');
-const runStepEl = document.getElementById('runStep');
-const runFill = document.getElementById('runFill');
-const runStopEl = document.getElementById('runStop');
+// Assigned by init(); nothing here reaches the document at load.
+let dot = null;
+let statusText = null;
+let listEl = null;
+let meterEl = null;
+let saveNoteEl = null;
+let editorEl = null;
+let editorTitleEl = null;
+let nameEl = null;
+let stepsEl = null;
+let previewEl = null;
+let saveEl = null;
+let chipsEl = null;
+let runbar = null;
+let runNameEl = null;
+let runCountEl = null;
+let runStepEl = null;
+let runFill = null;
+let runStopEl = null;
+let heartbeatTimer = null;
+let mountGen = 0;              // invalidates an init that is still awaiting
 
 function setStatus(text, cls) {
   statusText.textContent = text;
@@ -81,10 +89,9 @@ function send(bytes) {
 }
 
 // Same heartbeat as the control page: the device releases everything held when
-// it stops hearing from a browser.
-setInterval(() => send(new Uint8Array([0x04])), 1000);
-window.addEventListener('pagehide', () => send(new Uint8Array([0x05])));
-window.addEventListener('beforeunload', () => send(new Uint8Array([0x05])));
+// it stops hearing from a browser. Both this timer and the pagehide listener
+// are owned by init() and stopped by destroy().
+function onPageHide() { send(new Uint8Array([0x05])); }
 
 // ---------------------------------------------------------------- model
 let macros = [];
@@ -361,8 +368,10 @@ const CHIPS = [
   ['WAIT:500', '{WAIT:500}'], ['{', '{{'], ['}', '}}'],
 ];
 
-for (const [label, token] of CHIPS) {
-  chipsEl.appendChild(actionButton(label, () => insertToken(token)));
+function buildChips() {
+  for (const [label, token] of CHIPS) {
+    chipsEl.appendChild(actionButton(label, () => insertToken(token)));
+  }
 }
 
 function insertToken(token) {
@@ -376,6 +385,7 @@ function insertToken(token) {
 // ---------------------------------------------------------------- run
 let running = false;
 let runAbort = false;
+let runGen = 0;                // invalidates a run when the view is left
 let runIndex = 0;
 let runTotal = 1;
 let runCharFrac = 0;
@@ -405,6 +415,7 @@ function runBarRefused(title, message) {
 
 async function runMacroAt(index) {
   if (running) return;
+  const gen = runGen;
   const m = macros[index];
   const title = macroTitle(m, index);
   const parsed = parseMacro(m.steps);
@@ -448,7 +459,7 @@ async function runMacroAt(index) {
   const result = await runMacro(parsed.steps, {
     send,
     gapMs: Math.max(5, Math.round(500 / cps)),
-    stopped: () => runAbort,
+    stopped: () => runAbort || gen !== runGen,
     onStep: (i, step) => {
       runIndex = i;
       runCharFrac = 0;
@@ -461,6 +472,10 @@ async function runMacroAt(index) {
       paintRunBar();
     },
   });
+
+  // The view was unmounted while the run was in flight; the detached DOM is
+  // no longer ours to paint, and the socket has already been closed.
+  if (gen !== runGen) return;
 
   running = false;
   runStopEl.textContent = 'Hide';
@@ -483,22 +498,108 @@ async function runMacroAt(index) {
 }
 
 // ---------------------------------------------------------------- wiring
-document.getElementById('macroAdd').addEventListener('click', () => openEditor(-1));
-saveEl.addEventListener('click', saveEditor);
-document.getElementById('editCancel').addEventListener('click', closeEditor);
-stepsEl.addEventListener('input', updatePreview);
-nameEl.addEventListener('input', updateMeter);
-
-runStopEl.addEventListener('click', () => {
+function onRunStop() {
   if (running) runAbort = true;          // the runner notices at the next step
   else runbar.classList.remove('show', 'error');
-});
+}
 
-// ---------------------------------------------------------------- start
-requireAuth(async () => {
+// ---------------------------------------------------------------- lifecycle
+// The router calls init() after mounting the macros template and destroy()
+// before replacing it.
+async function init() {
+  const gen = ++mountGen;
+  dot = document.getElementById('dot');
+  statusText = document.getElementById('statusText');
+  listEl = document.getElementById('macroList');
+  meterEl = document.getElementById('blobMeter');
+  saveNoteEl = document.getElementById('saveNote');
+  editorEl = document.getElementById('editor');
+  editorTitleEl = document.getElementById('editorTitle');
+  nameEl = document.getElementById('editName');
+  stepsEl = document.getElementById('editSteps');
+  previewEl = document.getElementById('parsePreview');
+  saveEl = document.getElementById('editSave');
+  chipsEl = document.getElementById('chips');
+  runbar = document.getElementById('runbar');
+  runNameEl = document.getElementById('runName');
+  runCountEl = document.getElementById('runCount');
+  runStepEl = document.getElementById('runStep');
+  runFill = document.getElementById('runFill');
+  runStopEl = document.getElementById('runStop');
+
+  macros = [];
+  confirmDelete = null;
+  editorOpen = false;
+  editIndex = -1;
+  running = false;
+  runAbort = false;
+  runGen++;
+  runIndex = 0;
+  runTotal = 1;
+  runCharFrac = 0;
+
+  buildChips();
+  document.getElementById('macroAdd').addEventListener('click', () => openEditor(-1));
+  saveEl.addEventListener('click', saveEditor);
+  document.getElementById('editCancel').addEventListener('click', closeEditor);
+  stepsEl.addEventListener('input', updatePreview);
+  nameEl.addEventListener('input', updateMeter);
+  runStopEl.addEventListener('click', onRunStop);
+
+  window.addEventListener('pagehide', onPageHide);
+  window.addEventListener('beforeunload', onPageHide);
+  heartbeatTimer = setInterval(() => send(new Uint8Array([0x04])), 1000);
+
   setStatus('loading settings…', 'warn');
-  await loadSettings();      // also supplies any list left on the device
-  await loadMacros();        // may migrate that list, so it is awaited
+  await loadMacros();        // may migrate a list left on the device
+  if (gen !== mountGen) return;   // unmounted while the list was loading
   render();
   connect();
-});
+}
+
+function destroy() {
+  mountGen++;
+  runAbort = true;
+  runGen++;
+  running = false;
+
+  clearInterval(heartbeatTimer);
+  heartbeatTimer = null;
+  clearTimeout(reconnectTimer);
+  reconnectTimer = null;
+
+  // Release anything the device may still be holding before the socket goes.
+  send(new Uint8Array([0x05]));
+
+  if (ws) {
+    // As in pad.js: a deliberate close must not arm a reconnect after the view
+    // has been replaced.
+    ws.onopen = null;
+    ws.onclose = null;
+    ws.onerror = null;
+    try { ws.close(); } catch (_) {}
+    ws = null;
+  }
+  wsReady = false;
+  reconnectAttempts = 0;
+
+  window.removeEventListener('pagehide', onPageHide);
+  window.removeEventListener('beforeunload', onPageHide);
+  macros = [];
+  confirmDelete = null;
+}
+
+// The tests drive the real pages from the browser console, so the socket state
+// stays reachable through the view object.
+return {
+  init,
+  destroy,
+  get ws() { return ws; },
+  set ws(v) { ws = v; },
+  get wsReady() { return wsReady; },
+  set wsReady(v) { wsReady = v; },
+  get reconnectTimer() { return reconnectTimer; },
+  set reconnectTimer(v) { reconnectTimer = v; },
+};
+
+})();

@@ -32,9 +32,8 @@ const TYPES = {
 // The names the device accepts for upload, mirroring s_assets in
 // main/web_server.c. Anything else is refused, so no path can be invented.
 const UI_FILES = [
-  'index.html', 'style.css', 'common.js', 'pad.js',
-  'settings.html', 'settings.js', 'macros.html', 'macros.js', 'macro.js',
-  'ui.html', 'ui.js',
+  'index.html', 'style.css', 'common.js', 'router.js', 'pad.js',
+  'settings.js', 'macros.js', 'macro.js', 'ui.js',
 ];
 
 // Mirrors UI_UPLOAD_MAX in main/web_server.c.

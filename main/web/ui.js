@@ -4,16 +4,21 @@
 // The listing, the size cap and the whitelist all come from the device, so
 // this page cannot offer an upload the endpoint would refuse for a reason
 // other than size.
+//
+// The view is mounted and unmounted by router.js: refs belong to init().
 
-const dot = document.getElementById('dot');
-const statusText = document.getElementById('statusText');
-const fileList = document.getElementById('fileList');
-const fsNote = document.getElementById('fsNote');
-const uiNote = document.getElementById('uiNote');
+const UiView = (() => {
+
+let dot = null;
+let statusText = null;
+let fileList = null;
+let fsNote = null;
+let uiNote = null;
 
 let uiFiles = [];      // [{ name, stored, size, embedded }]
 let maxSize = 0;       // per-file cap the device reported
 let loaded = false;    // the tests wait on this
+let loadGen = 0;       // invalidates a listing that is still in flight
 
 function setStatus(text, cls) {
   statusText.textContent = text;
@@ -21,6 +26,7 @@ function setStatus(text, cls) {
 }
 
 function setNote(el, text, warn) {
+  if (!el) return;
   el.className = 'note' + (warn ? ' warn' : '');
   el.textContent = text || '';
 }
@@ -31,24 +37,29 @@ function fmtSize(n) {
 }
 
 async function loadFiles() {
+  if (!fileList) return;        // a listing that arrived after unmount
+  const gen = ++loadGen;
   fileList.textContent = 'loading…';
   try {
     const r = await apiFetch('/ui/files');
+    if (gen !== loadGen) return;   // unmounted, or a newer listing won
     if (!r.ok) {
       fileList.textContent = `Could not list the files (HTTP ${r.status}).`;
       setStatus('list failed', 'off');
       return;
     }
     const d = await r.json();
+    if (gen !== loadGen) return;
     uiFiles = Array.isArray(d.files) ? d.files : [];
     maxSize = Number(d.max_size) || 0;
     render(d);
     setStatus(d.mounted ? 'filesystem ready' : 'no filesystem', d.mounted ? 'on' : 'warn');
   } catch (_) {
+    if (gen !== loadGen) return;
     fileList.textContent = 'Could not reach the device.';
     setStatus('offline', 'off');
   } finally {
-    loaded = true;
+    if (gen === loadGen) loaded = true;
   }
 }
 
@@ -172,9 +183,39 @@ async function resetFile(name) {
   }
 }
 
-document.getElementById('uiRefresh').addEventListener('click', loadFiles);
+// ---------------------------------------------------------------- lifecycle
+async function init() {
+  dot = document.getElementById('dot');
+  statusText = document.getElementById('statusText');
+  fileList = document.getElementById('fileList');
+  fsNote = document.getElementById('fsNote');
+  uiNote = document.getElementById('uiNote');
 
-// ---------------------------------------------------------------- start
-requireAuth(async () => {
+  uiFiles = [];
+  maxSize = 0;
+  loaded = false;
+
+  document.getElementById('uiRefresh').addEventListener('click', loadFiles);
   await loadFiles();
-});
+}
+
+function destroy() {
+  loadGen++;
+  uiFiles = [];
+  maxSize = 0;
+  loaded = false;
+  dot = null;
+  statusText = null;
+  fileList = null;
+  fsNote = null;
+  uiNote = null;
+}
+
+return {
+  init,
+  destroy,
+  get loaded() { return loaded; },
+  get maxSize() { return maxSize; },
+};
+
+})();

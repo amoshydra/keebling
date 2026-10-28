@@ -180,3 +180,272 @@ textarea { font-family: ui-monospace, SFMono-Regular, monospace; resize: vertica
 }
 .gate-box button { width: 100%; }
 .gate-box .err { color: #ff6b6b; font-size: 13px; margin: 10px 0 0; min-height: 16px; }
+
+/* ---------------------------------------------------------------- shell */
+/* The shell owns the top bar and one <main>. The control view is a flex
+   column (pad, panels, controls), the others scroll their own .wrap. */
+#view { flex: 1 1 auto; min-height: 0; }
+#view[data-view="control"] { display: flex; flex-direction: column; overflow: hidden; }
+#view[data-view="settings"],
+#view[data-view="macros"],
+#view[data-view="ui"] { display: block; overflow-y: auto; }
+
+.nav { display: flex; gap: 12px; align-items: center; overflow-x: auto; }
+.nav a { color: var(--dim); }
+.nav a.active { color: var(--ink); }
+@media (max-width: 620px) {
+  .nav { gap: 8px; font-size: 12px; }
+}
+
+/* ---------------------------------------------------------------- control view */
+/* The pad is the whole middle of the screen. */
+#pad {
+  flex: 1 1 auto;
+  background: #181818;
+  touch-action: none;             /* we handle every gesture ourselves */
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  min-height: 0;                  /* let the pad give way before the panels do */
+}
+#pad.captured { background: #101018; cursor: none; }
+#hint {
+  color: #555;
+  font-size: 14px;
+  text-align: center;
+  padding: 0 24px;
+  line-height: 1.6;
+  pointer-events: none;
+}
+#pad.captured #hint { display: none; }
+/* While captured the hint is gone, and the only way out is a key the user has
+   to be told about - the browser's own bubble is easy to miss. */
+#escHint {
+  display: none;
+  position: absolute;
+  bottom: 10px;
+  left: 0; right: 0;
+  text-align: center;
+  color: #666;
+  font-size: 12px;
+  pointer-events: none;
+}
+#pad.captured #escHint { display: block; }
+#pad .flash {
+  position: absolute;
+  padding: 6px 12px;
+  border-radius: 20px;
+  background: rgba(25, 118, 210, .85);
+  font-size: 13px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .15s;
+}
+#pad .flash.show { opacity: 1; }
+
+/* One row on a desktop, two on the phone. Grid rather than flex-wrap so the
+   split is the same on every phone width instead of following the label
+   widths, and so a row can be given a minimum height worth hitting. */
+#controls {
+  padding: 8px;
+  padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+  background: var(--panel);
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: max-content;
+  gap: 6px;
+  align-items: center;
+  flex: 0 0 auto;
+}
+#controls a.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 9px 14px;
+  border-radius: 7px;
+  background: #333;
+  color: var(--ink);
+  text-decoration: none;
+  font-size: 14px;
+  -webkit-tap-highlight-color: transparent;
+}
+#controls a.btn:active { background: #555; }
+
+/* Phone: the panel toggles on top, the pointer buttons along the bottom edge
+   where a thumb reaches without a stretch. */
+@media (max-width: 620px) {
+  #controls {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-areas:
+      "kbd   media type macros"
+      "left  right mid  release";
+    grid-template-rows: auto auto;
+    grid-auto-flow: row;
+    padding: 6px;
+    padding-bottom: calc(6px + env(safe-area-inset-bottom, 0px));
+  }
+  #bLeft    { grid-area: left; }
+  #bRight   { grid-area: right; }
+  #bMid     { grid-area: mid; }
+  #bRelease { grid-area: release; }
+  #bKbd     { grid-area: kbd; }
+  #bMedia   { grid-area: media; }
+  #bType    { grid-area: type; }
+  #bMacros  { grid-area: macros; }
+  #controls button, #controls a.btn {
+    padding: 13px 4px;
+    font-size: 13px;
+    min-height: 46px;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+}
+
+/* virtual keyboard */
+#kbd {
+  display: none;
+  padding: 8px;
+  background: #151515;
+  /* The panel scrolls on small screens, but a press starting on a key must
+     not be claimed by the scroller: that fires pointercancel and the key
+     releases mid-hold. */
+  overflow-y: auto;
+  max-height: 45dvh;
+  touch-action: none;
+}
+#kbd.show { display: block; }
+.krow { display: flex; gap: 4px; margin-bottom: 4px; }
+.k {
+  flex: 1;
+  padding: 11px 2px;
+  text-align: center;
+  background: #2c2c2c;
+  border-radius: 4px;
+  font-size: 12px;
+  /* user-select alone is not enough on touch: without these a long press
+     opens the callout / context menu and cancels the pointer stream. */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.k.w2 { flex: 2; }
+.k.space { flex: 7; }
+.k.mod { background: #3a3a3a; }
+.k.active { background: var(--accent); }
+/* Latched is not the same as pressed: it persists after your finger leaves,
+   so it gets a ring to say "this will apply to the next key". */
+.k.latched { background: var(--accent); outline: 2px solid #fff; outline-offset: -2px; }
+.k.arrow { flex: 0 0 42px; }
+
+/* media keys */
+#media { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+.m {
+  padding: 14px 2px;
+  text-align: center;
+  background: #2c2c2c;
+  border-radius: 6px;
+  font-size: 19px;
+  line-height: 1;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.m small { display: block; font-size: 9px; color: #999; margin-top: 5px; }
+.m.active { background: var(--accent); }
+.m.active small { color: #ddd; }
+
+/* Phone: one panel at a time (pad.js closes the others), and each one short
+   enough that the pad, the panels and the controls all stay on screen. Two
+   panels plus the on-screen keyboard used to push the controls off the
+   bottom. */
+@media (max-width: 620px) {
+  .panel { max-height: 46dvh; }
+  #kbd { max-height: 42dvh; }
+  #hint { font-size: 13px; padding: 0 16px; }
+}
+
+/* ---------------------------------------------------------------- settings, macros, UI */
+/* Shared by the scrolling views. The control view has no .wrap. */
+.wrap { max-width: 640px; margin: 0 auto; padding: 14px 14px 40px; }
+/* Room at the bottom for the run bar, which is fixed so that Stop stays
+   under the thumb while a macro plays. */
+.wrap-macros { padding-bottom: 120px; }
+section { background: var(--panel-2); border-radius: 10px; padding: 14px; margin-bottom: 14px; }
+section h2 { font-size: 14px; color: #aaa; font-weight: 600; margin-bottom: 12px; }
+code { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; color: #bbb; }
+
+.savebar {
+  position: sticky; bottom: 0; padding: 12px 0;
+  background: linear-gradient(transparent, var(--bg) 30%);
+  display: flex; gap: 8px; align-items: center;
+}
+input[type=checkbox], input[type=radio] { width: 18px; height: 18px; }
+
+/* ---------------------------------------------------------------- macros view */
+.macro { background: #232323; border-radius: 10px; padding: 12px; margin-bottom: 10px; }
+.macro .head { display: flex; align-items: center; gap: 8px; }
+.macro .name { font-weight: 600; font-size: 14px; flex: 1; word-break: break-word; }
+.macro .meta { font-size: 12px; color: var(--dim); }
+.macro .acts { display: flex; gap: 6px; flex: 0 0 auto; }
+.macro .acts button { padding: 6px 10px; font-size: 12px; }
+.macro .src, .macro .bad {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 12px;
+  margin: 8px 0 10px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.macro .src { color: #bbb; }
+.macro .bad { color: #ff8a80; }
+.macro .run { width: 100%; padding: 15px; font-size: 16px; }
+
+#editor { display: none; }
+#editor.show { display: block; }
+.chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+.chips button {
+  padding: 8px 10px; font-size: 12px; background: #2f2f2f;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+#parsePreview div { font-size: 12px; line-height: 1.5; }
+#parsePreview .plan { color: #bbb; white-space: pre-wrap; font-family: ui-monospace, SFMono-Regular, monospace; }
+#parsePreview .err { color: #ff8a80; }
+#parsePreview .warn { color: var(--warn); }
+.tokens { margin-bottom: 10px; }
+.tokens > span { display: block; font-size: 12px; color: #999; margin-bottom: 4px; }
+.tokens code { color: #ccc; line-height: 1.7; }
+
+.runbar {
+  position: fixed; left: 0; right: 0; bottom: 0;
+  display: none; gap: 10px; align-items: center;
+  padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0px));
+  background: rgba(26, 26, 26, .97);
+  border-top: 1px solid var(--line);
+}
+.runbar.show { display: flex; }
+.runbar .info { flex: 1; min-width: 0; }
+.runbar .line { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
+.runbar .line > :first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.runbar .line .dim { color: var(--dim); flex: 0 0 auto; font-size: 12px; }
+.runbar .track { height: 5px; background: #333; border-radius: 3px; margin-top: 7px; overflow: hidden; }
+.runbar .fill { height: 100%; width: 0; background: var(--accent); transition: width .12s linear; }
+.runbar.error .fill { background: var(--danger); }
+.runbar button { padding: 12px 16px; }
+
+/* ---------------------------------------------------------------- UI files view */
+.file { background: #232323; border-radius: 10px; padding: 12px; margin-bottom: 10px; }
+.file .head { display: flex; align-items: baseline; gap: 8px; }
+.file .name {
+  font-weight: 600; font-size: 13px; flex: 1; word-break: break-all;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+.file .state { font-size: 12px; color: var(--dim); flex: 0 0 auto; }
+.file .state.stored { color: var(--warn); }
+.file .acts { display: flex; gap: 6px; margin-top: 10px; }
+.file .acts button { padding: 8px 12px; font-size: 13px; }

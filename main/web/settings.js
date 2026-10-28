@@ -1,10 +1,25 @@
 // Settings page: device settings, touchpad tuning, network, diagnostics.
+//
+// Mounted and unmounted by router.js: refs are assigned and listeners are
+// attached in init(), and destroy() flushes an edit that was still waiting for
+// its debounce. The handlers are registered through on() below so the wiring
+// can sit next to the function it calls without running before the template is
+// mounted.
 
-const dot = document.getElementById('dot');
-const statusText = document.getElementById('statusText');
-const saveNote = document.getElementById('saveNote');
+const SettingsView = (() => {
+
+let dot = null;
+let statusText = null;
+let saveNote = null;
+
+// [id, event, handler, options] attached to the mounted template in init().
+const wired = [];
+function on(id, type, handler, options) {
+  wired.push([id, type, handler, options]);
+}
 
 function setStatus(text, cls) {
+  if (!statusText || !dot) return;   // an answer that arrived after unmount
   statusText.textContent = text;
   dot.className = 'dot ' + cls;
 }
@@ -85,13 +100,16 @@ let saveTimer = null;
 async function doSave() {
   clearTimeout(saveTimer);
   saveTimer = null;
-  saveNote.textContent = 'saving…';
+  // The view can be unmounted while the request is in flight (the post still
+  // has to finish), so keep a local handle and never assume saveNote is live.
+  const note = saveNote;
+  if (note) note.textContent = 'saving…';
   try {
     const r = await saveSettingsToDevice();
-    saveNote.textContent = r.ok ? 'saved to device' : `save failed (HTTP ${r.status})`;
+    if (note) note.textContent = r.ok ? 'saved to device' : `save failed (HTTP ${r.status})`;
     return r.ok;
   } catch (_) {
-    saveNote.textContent = 'save failed — device unreachable';
+    if (note) note.textContent = 'save failed — device unreachable';
     return false;
   }
 }
@@ -102,9 +120,9 @@ function scheduleSave() {
   saveTimer = setTimeout(doSave, 700);
 }
 
-document.getElementById('save').addEventListener('click', doSave);
+on('save', 'click', doSave);
 
-document.getElementById('restart').addEventListener('click', async () => {
+on('restart', 'click', async () => {
   if (!confirm('Restart the device?\n\nSettings will be saved first. ' +
                'It will be unreachable for a few seconds.')) return;
   const ok = await doSave();
@@ -114,13 +132,13 @@ document.getElementById('restart').addEventListener('click', async () => {
   setTimeout(() => location.reload(), 6000);
 });
 
-document.getElementById('forgetCode').addEventListener('click', () => {
+on('forgetCode', 'click', () => {
   forgetCode();
   alert('Saved code forgotten. You will be asked for it again.');
 });
 
 // ---------------------------------------------------------------- network
-document.getElementById('wifiScan').addEventListener('click', async () => {
+on('wifiScan', 'click', async () => {
   const list = document.getElementById('wifiList');
   list.textContent = 'scanning…';
   try {
@@ -154,7 +172,7 @@ document.getElementById('wifiScan').addEventListener('click', async () => {
   }
 });
 
-document.getElementById('wifiSave').addEventListener('click', async () => {
+on('wifiSave', 'click', async () => {
   const ssid = document.getElementById('wifiSsid').value.trim();
   const pass = document.getElementById('wifiPass').value;
   if (!ssid) { alert('Enter a network name first.'); return; }
@@ -167,7 +185,7 @@ document.getElementById('wifiSave').addEventListener('click', async () => {
   setTimeout(() => location.reload(), 8000);
 });
 
-document.getElementById('wifiForget').addEventListener('click', async () => {
+on('wifiForget', 'click', async () => {
   if (!confirm('Forget the saved network?\n\nThe device restarts in access-point ' +
                'mode, so you will need to join "esp-remote" to reach it again.')) return;
   try { await apiPost('/forget'); } catch (_) {}
@@ -176,13 +194,13 @@ document.getElementById('wifiForget').addEventListener('click', async () => {
 });
 
 // ---------------------------------------------------------------- web UI files
-// The upload page handles individual files; this is the way back when the
-// uploaded page that would do the resetting is itself broken.
-document.getElementById('uiOpen').addEventListener('click', () => {
-  location.href = 'ui.html';
+// The upload view handles individual files; this button is the sledgehammer
+// for when a stored view script has broken the page that would reset it.
+on('uiOpen', 'click', () => {
+  location.hash = '#/ui';
 });
 
-document.getElementById('uiResetAll').addEventListener('click', async () => {
+on('uiResetAll', 'click', async () => {
   const note = document.getElementById('uiNote');
   if (!confirm('Delete every uploaded UI file and go back to the built-in copies?')) return;
   note.className = 'note';
@@ -334,6 +352,7 @@ function screenImageValid(bytes) {
 // bit-replicated to 8 bits. This is the browser's rendering of the bytes, not
 // the panel's rendition of them.
 function renderScreenImage(canvas, bytes) {
+  if (!canvas) return;
   const ctx = canvas.getContext('2d');
   const img = ctx.createImageData(SCREEN_IMAGE_W, SCREEN_IMAGE_H);
   if (bytes[0] === SCREEN_IMAGE_FORMAT_RGB565) {
@@ -384,12 +403,13 @@ async function imageFileToCanvas(file) {
   return canvas;
 }
 
-const screenImagePreview = document.getElementById('screenImagePreview');
-const screenImageNote = document.getElementById('screenImageNote');
+let screenImagePreview = null;
+let screenImageNote = null;
 let screenImageBytes = null;    // the packed file waiting to be sent, or last sent
 let screenImageSource = null;   // the scaled 160x80 original, to re-pack on a format change
 
 function setScreenImageNote(text, warn) {
+  if (!screenImageNote) return;
   screenImageNote.className = 'note' + (warn ? ' warn' : '');
   screenImageNote.textContent = text;
 }
@@ -417,8 +437,10 @@ function repackScreenImage() {
     'copy above is exactly what the device will draw.');
 }
 
-for (const el of document.querySelectorAll('input[name="screenImageFormat"]')) {
-  el.addEventListener('change', repackScreenImage);
+function wireScreenImageFormats() {
+  for (const el of document.querySelectorAll('input[name="screenImageFormat"]')) {
+    el.addEventListener('change', repackScreenImage);
+  }
 }
 
 // What the device holds, fetched rather than assumed: this is the only view of
@@ -426,6 +448,7 @@ for (const el of document.querySelectorAll('input[name="screenImageFormat"]')) {
 async function loadDeviceScreenImage() {
   try {
     const r = await apiFetch('/screen/image');
+    if (!screenImagePreview) return;   // unmounted while the request was in flight
     if (r.status === 404) {
       document.getElementById('screenImageClear').hidden = true;
       setScreenImageNote('No image on the device, so this screen stays out of ' +
@@ -437,6 +460,7 @@ async function loadDeviceScreenImage() {
       return;
     }
     const bytes = new Uint8Array(await r.arrayBuffer());
+    if (!screenImagePreview) return;
     if (!screenImageValid(bytes)) {
       // The device only serves a file it validated, so this should not happen;
       // saying so beats drawing something that may be wrong.
@@ -454,17 +478,18 @@ async function loadDeviceScreenImage() {
   }
 }
 
-document.getElementById('screenImagePick').addEventListener('click', () => {
+on('screenImagePick', 'click', () => {
   document.getElementById('screenImageFile').click();
 });
 
-document.getElementById('screenImageFile').addEventListener('change', async (e) => {
+on('screenImageFile', 'change', async (e) => {
   const file = e.target.files && e.target.files[0];
   e.target.value = '';          // so the same file can be chosen twice in a row
   if (!file) return;
 
   try {
     const canvas = await imageFileToCanvas(file);
+    if (!screenImagePreview) return;   // unmounted while the image decoded
     screenImageSource = canvas.getContext('2d')
       .getImageData(0, 0, SCREEN_IMAGE_W, SCREEN_IMAGE_H);
   } catch (_) {
@@ -478,9 +503,10 @@ document.getElementById('screenImageFile').addEventListener('change', async (e) 
   repackScreenImage();
 });
 
-document.getElementById('screenImageSend').addEventListener('click', async () => {
+on('screenImageSend', 'click', async () => {
   if (!screenImageBytes) return;
   const send = document.getElementById('screenImageSend');
+  if (!send) return;
   send.disabled = true;
   setScreenImageNote('sending…');
   try {
@@ -496,17 +522,18 @@ document.getElementById('screenImageSend').addEventListener('click', async () =>
         (why ? `: ${why}` : '') + '. Nothing changed.', true);
       return;
     }
-    document.getElementById('screenImageClear').hidden = false;
+    const clear = document.getElementById('screenImageClear');
+    if (clear) clear.hidden = false;
     setScreenImageNote('Stored on the device; it is now the fourth BOOT screen.');
   } catch (_) {
     setScreenImageNote('The upload was cut off — the previous image is still ' +
       'stored. Try again.', true);
   } finally {
-    send.disabled = false;
+    send.disabled = false;        // harmless if the element is detached
   }
 });
 
-document.getElementById('screenImageClear').addEventListener('click', async () => {
+on('screenImageClear', 'click', async () => {
   if (!confirm('Remove the stored image and take this screen out of the BOOT cycle?')) return;
   setScreenImageNote('removing…');
   try {
@@ -517,6 +544,7 @@ document.getElementById('screenImageClear').addEventListener('click', async () =
     }
     screenImageBytes = null;
     screenImageSource = null;
+    if (!screenImagePreview) return;   // unmounted while the request was in flight
     document.getElementById('screenImageSend').disabled = true;
     document.getElementById('screenImageClear').hidden = true;
     screenImagePreview.getContext('2d')
@@ -528,7 +556,7 @@ document.getElementById('screenImageClear').addEventListener('click', async () =
 });
 
 // ---------------------------------------------------------------- logs
-document.getElementById('logsLoad').addEventListener('click', async () => {
+on('logsLoad', 'click', async () => {
   const panel = document.getElementById('logs');
   const pre = document.getElementById('logText');
   panel.classList.toggle('show');
@@ -551,6 +579,7 @@ const MACRO_STORE_KEY = 'esp32remote.macros';
 
 function setBackupNote(text, warn) {
   const el = document.getElementById('backupNote');
+  if (!el) return;
   el.className = 'note' + (warn ? ' warn' : '');
   el.textContent = text || '';
 }
@@ -584,7 +613,7 @@ function backupSummary(b) {
   return `${n} device setting${n === 1 ? '' : 's'} and ${m} macro${m === 1 ? '' : 's'}`;
 }
 
-document.getElementById('backupSave').addEventListener('click', () => {
+on('backupSave', 'click', () => {
   const b = collectBackup();
   const blob = new Blob([JSON.stringify(b, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
@@ -596,11 +625,11 @@ document.getElementById('backupSave').addEventListener('click', () => {
   setBackupNote(`Downloaded ${backupSummary(b)}.`);
 });
 
-document.getElementById('backupLoad').addEventListener('click', () => {
+on('backupLoad', 'click', () => {
   document.getElementById('backupFile').click();
 });
 
-document.getElementById('backupFile').addEventListener('change', async (e) => {
+on('backupFile', 'change', async (e) => {
   const file = e.target.files && e.target.files[0];
   e.target.value = '';         // so the same file can be chosen twice in a row
   if (!file) return;
@@ -645,6 +674,7 @@ document.getElementById('backupFile').addEventListener('change', async (e) => {
     }
   }
 
+  if (!saveNote) return;         // unmounted while the file was being restored
   readIntoForm();
   const failed = !devicePart.startsWith('device settings restored');
   const reloadHint = (devicePart.startsWith('device settings restored') && macros.length)
@@ -768,7 +798,7 @@ function decodeReportDescriptor(bytes) {
   return out;
 }
 
-document.getElementById('hidLoad').addEventListener('click', async () => {
+on('hidLoad', 'click', async () => {
   const sum = document.getElementById('hidSummary');
   const dec = document.getElementById('hidDecoded');
   const raw = document.getElementById('hidRaw');
@@ -794,15 +824,64 @@ document.getElementById('hidLoad').addEventListener('click', async () => {
   }
 });
 
-// ---------------------------------------------------------------- start
-requireAuth(async () => {
-  setStatus('loading settings…', 'warn');
-  await loadSettings();
+// ---------------------------------------------------------------- lifecycle
+// The router calls init() after mounting the settings template and destroy()
+// before replacing it.
+async function init() {
+  dot = document.getElementById('dot');
+  statusText = document.getElementById('statusText');
+  saveNote = document.getElementById('saveNote');
+  screenImagePreview = document.getElementById('screenImagePreview');
+  screenImageNote = document.getElementById('screenImageNote');
+
+  for (const [id, type, handler, options] of wired) {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener(type, handler, options);
+  }
+  wireScreenImageFormats();
   wireForm();
   readIntoForm();
+  screenImageBytes = null;
+  screenImageSource = null;
+
+  setStatus('loading settings…', 'warn');
   await loadDeviceScreenImage();
+  if (!saveNote) return;          // unmounted while the device was answering
   saveNote.textContent = '';
 
   // Best-effort: the device's own view of the network, from its logs.
   setStatus('connected', 'on');
-});
+}
+
+function destroy() {
+  // An edit made just before leaving is still inside the debounce window.
+  // Flush it rather than cancelling it: the device may already be about to
+  // restart, and the next visit should not show a value that was never sent.
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+    doSave();
+  }
+
+  screenImageBytes = null;
+  screenImageSource = null;
+  dot = null;
+  statusText = null;
+  saveNote = null;
+  screenImagePreview = null;
+  screenImageNote = null;
+}
+
+return {
+  init,
+  destroy,
+  packScreenImage,
+  screenImageValid,
+  renderScreenImage,
+  crc32,
+  collectBackup,
+  BAYER4,
+  get screenImageBytes() { return screenImageBytes; },
+};
+
+})();

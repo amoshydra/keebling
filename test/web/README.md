@@ -35,11 +35,13 @@ The tests run **in the page**, against the real `pad.js` / `common.js` /
 `settings.js` / `macros.js`, with only the socket and the HTTP endpoints faked.
 So a test failure means the shipped code is wrong, not a reimplementation of it.
 
-Pages are visited at the size they are used at: the control and macro pages at a
-phone viewport, the settings page and a second control-page pass at a desktop
-one. The test groups are named `control`, `settings`, `macros`,
-`control-desktop`, `ui`, `ui-broken` and `control` (again, for the phone-layout
-assertions).
+Pages are visited at the size they are used at: the control and macro views at a
+phone viewport, the settings view and a second control pass at a desktop one.
+Every target is a hash on the single shell (`#/`, `#/settings`, `#/macros`,
+`#/ui`). The test groups are named `control`, `settings`, `macros`,
+`control-desktop`, `macros-migrate`, `ui`, `ui-broken`, `navigation`,
+`refresh` and `gate`. The phone-layout assertions live in the `control` group at
+the phone viewport.
 
 ## What is covered
 
@@ -103,13 +105,32 @@ assertions).
 - the `/ui/*` endpoints answer 403 without the access code
 - the settings page's reset-all reaches the device and restores the embedded
   file (checked server-side)
-- with a broken `index.html` stored, `ui.html` still loads from the firmware
-  and can reset it
+- with a broken `pad.js` stored, the shell and the upload view still load and
+  can reset it (a broken `index.html` is the shell and is not recoverable from
+  the UI, which is why the page says to keep a copy)
 
 The runner also checks the fallback rule itself, straight at the stub: a stored
 file is served in preference to the embedded one, and a **zero-length** stored
 file counts as absent, so an empty or interrupted upload cannot shadow a
 working page.
+
+**Access gate**
+- with no saved code the shell's gate appears; entering a code unlocks the view
+  the hash already names, hides the gate and saves the code
+
+**Navigation**
+- each hash mounts its own view and no other (only one set of the colliding
+  IDs exists at a time)
+- Back and Forward land on the view the hash names, and an unknown hash falls
+  back to the control view
+- a reload keeps the hash and lands on that view, with the saved access code
+  (the URL no longer has `?token=`)
+- leaving the pad sends a release report, clears held keys and closes its
+  socket; no reconnect fires after a wait longer than the retry interval
+- leaving the macros view closes its socket and stops its heartbeat, with no
+  reconnect afterwards
+- a window listener from the pad is gone after unmounting, and remounting
+  attaches exactly one (a duplicate would send two release reports)
 
 ## Keeping it honest
 
@@ -137,9 +158,11 @@ __webTests.push({
 });
 ```
 
-Helpers available in scope: `__capture()` swaps the socket for a recorder and
-returns the report array, `__pointer(type, id, pointerType, x, y)` dispatches a
-synthetic pointer event, `__resetInput()` clears the gesture state, and
-`__sleep(ms)` waits. For the macro page, `__macroCapture()` does the same swap
-there and `__playMacro(text)` returns `{ cap, parsed, result }` for one macro
-without a page or a socket at all.
+Helpers available in scope: `__capture()` swaps the pad's socket for a recorder
+and returns the report array, `__pointer(type, id, pointerType, x, y)`
+dispatches a synthetic pointer event, `__resetInput()` clears the gesture
+state, and `__sleep(ms)` waits. For the macro view, `__macroCapture()` does the
+same swap there and `__playMacro(text)` returns `{ cap, parsed, result }` for
+one macro without a page or a socket at all. The view internals the tests drive
+for real (`PadView`, `SettingsView`, `MacrosView`, `UiView`) are the same
+objects the router calls `init()`/`destroy()` on.
