@@ -14,6 +14,20 @@
   --warn: #ffb74d;
 }
 
+/* Nothing in this UI is meant to be selected, dragged or scrolled by the
+   browser: a drag that starts a text selection scrolls the page on touch, and a
+   pull from the top edge reloads it - both of which look like the app losing the
+   pointer. The pad locks itself down separately, but everything around it needs
+   this too. Text that is genuinely worth copying (logs, the HID descriptor) opts
+   back in below. */
+html, body {
+  overscroll-behavior: none;          /* no pull-to-refresh, no rubber band */
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;        /* no long-press callout on iOS */
+  -webkit-user-drag: none;            /* nothing is draggable */
+}
+
 body {
   font-family: system-ui, -apple-system, sans-serif;
   background: var(--bg);
@@ -22,6 +36,12 @@ body {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+/* Fields and copyable output stay selectable. */
+input, textarea, pre, code, #logText, #hidDecoded, #hidSummary {
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 /* ---------------------------------------------------------------- status bar */

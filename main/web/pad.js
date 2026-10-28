@@ -428,7 +428,8 @@ pad.addEventListener('pointermove', (e) => {
 
 window.addEventListener('mousedown', (e) => {
   if (!captured) return;
-  flushMove();       // so a click is not overtaken by movement queued before it
+  e.preventDefault();     // no middle-click autoscroll while driving a remote
+  flushMove();            // so a click is not overtaken by movement queued before it
   if (e.button === 0) buttons |= 1;
   if (e.button === 2) buttons |= 2;
   if (e.button === 1) buttons |= 4;
@@ -469,6 +470,10 @@ window.addEventListener('wheel', (e) => {
 }, { passive: false });
 
 window.addEventListener('contextmenu', (e) => { if (captured) e.preventDefault(); });
+
+// A drag that starts on the pad takes the pointer with it and the capture is
+// gone. Nothing here is draggable, so refusing all of them costs nothing.
+window.addEventListener('dragstart', (e) => e.preventDefault());
 
 // ---------------------------------------------------------------- on-screen buttons
 function bindButton(id, bit) {
