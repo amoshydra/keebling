@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ESP32 Remote — recover</title>
+<!--
+  Deliberately self-contained: no style.css, no common.js, nothing from the
+  filesystem. This page exists to repair a broken uploaded UI, so it must not be
+  breakable by one, and it must not depend on anything an upload can replace.
+-->
+<style>
+  body { font-family: system-ui, -apple-system, sans-serif; background: #111;
+         color: #eee; margin: 0; padding: 24px; line-height: 1.6; }
+  main { max-width: 480px; margin: 0 auto; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  p { font-size: 14px; color: #aaa; margin: 0 0 16px; }
+  input, button { font: inherit; font-size: 15px; padding: 10px 12px;
+                  border-radius: 7px; border: 1px solid #333; }
+  input { width: 100%; background: #1c1c1c; color: #eee;
+          font-family: ui-monospace, monospace; }
+  button { background: #b3261e; color: #fff; border: 0; cursor: pointer; }
+  button:disabled { background: #444; cursor: default; }
+  .row { display: flex; gap: 8px; margin-top: 12px; }
+  .note { font-size: 13px; color: #888; margin-top: 14px; min-height: 1.6em; }
+  a { color: #7ab7ff; }
+  code { font-family: ui-monospace, monospace; color: #ccc; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Recovery</h1>
+  <p>This page is built into the firmware, so it still works when the web UI
+     itself does not. Resetting deletes every uploaded UI file and returns to
+     the copies compiled in.</p>
+
+  <label for="code">Access code</label>
+  <input id="code" autocomplete="off" autocapitalize="none" spellcheck="false"
+         placeholder="printed on the device screen">
+
+  <div class="row">
+    <button id="reset">Reset all UI files</button>
+  </div>
+  <p class="note" id="note"></p>
+
+  <p>If you only need one file back, the normal UI can do it once it loads.
+     If nothing loads at all, this page is the way out.</p>
+  <p><a href="/">Try the main UI</a></p>
+</main>
+
+<script>
+  // The code may already be saved by a previous visit; it is the same string the
+  // device prints. Nothing here depends on common.js.
+  const KEY = 'esp32remote.token';
+  const code = document.getElementById('code');
+  const note = document.getElementById('note');
+  const btn = document.getElementById('reset');
+
+  try { code.value = localStorage.getItem(KEY) || ''; } catch (_) {}
+
+  btn.addEventListener('click', async () => {
+    const token = code.value.trim();
+    if (!token) {
+      note.textContent = 'Enter the access code first.';
+      return;
+    }
+    btn.disabled = true;
+    note.textContent = 'Resetting…';
+    try {
+      const r = await fetch(`/ui/reset?all=1&token=${encodeURIComponent(token)}`,
+                            { method: 'POST' });
+      if (!r.ok) {
+        note.textContent = `The device refused that code (HTTP ${r.status}).`;
+        return;
+      }
+      try { localStorage.setItem(KEY, token); } catch (_) {}
+      note.textContent = 'Reset. Reloading the main UI…';
+      setTimeout(() => { location.href = '/'; }, 700);
+    } catch (_) {
+      note.textContent = 'Could not reach the device.';
+    } finally {
+      btn.disabled = false;
+    }
+  });
+</script>
+</body>
+</html>

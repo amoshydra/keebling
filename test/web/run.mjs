@@ -226,6 +226,12 @@ try {
     // A fresh browser: no saved code, so the shell's gate has to appear and
     // the hash still chooses the view once the code is accepted.
     { page: 'gate', url: `${base}/#/settings`, metrics: PHONE, clearStorage: true },
+    // The failure the SPA made newly dangerous: the shell itself replaced by a
+    // broken upload. Nothing in the normal UI can load, so this firmware-served
+    // page has to be the way out.
+    { page: 'recover', url: `${base}/recover.html`, metrics: PHONE,
+      clearStorage: true,
+      storedUiFiles: { 'index.html': '<!doctype html><body>broken upload' } },
   ];
 
   let settingsSaves = [];

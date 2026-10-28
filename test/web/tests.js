@@ -2005,6 +2005,36 @@ __webTests.push({
 
 // The same page at a desktop width: the two-row phone layout must not follow
 // it there.
+// ---------------------------------------------------------------- recovery page
+__webTests.push({
+  page: 'recover',
+  name: 'the recovery page loads and repairs a broken uploaded shell',
+  fn: async () => {
+    // The shell is garbage, which is the one failure the UI cannot fix from
+    // inside - every other page needs it.
+    const broken = await fetch('/').then((r) => r.text());
+    __assert(broken.includes('broken upload'),
+      'the stub did not serve the broken shell, so this test proves nothing');
+
+    __assert(document.getElementById('reset'),
+      'the recovery page did not load with the shell broken');
+    __assert(!document.getElementById('gate'),
+      'the recovery page should not depend on the shell gate');
+
+    document.getElementById('code').value = window.__CODE;
+    document.getElementById('reset').click();
+    await __sleep(600);
+
+    const note = document.getElementById('note').textContent;
+    __assert(note.includes('Reset'), `the page said: ${note}`);
+
+    // And it actually repaired it: the real shell serves again.
+    const fixed = await fetch('/').then((r) => r.text());
+    __assert(fixed.includes('id="view"'),
+      `the shell is still broken after reset: ${fixed.slice(0, 60)}`);
+  },
+});
+
 // ---------------------------------------------------------------- control page, wide
 // The same page at a desktop width: the two-row phone layout must not follow
 // it there.

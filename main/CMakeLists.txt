@@ -19,6 +19,7 @@ idf_component_register(
         "web/style.css"
         "web/common.js"
         "web/router.js"
+        "web/recover.html"
         "web/pad.js"
         "web/settings.js"
         "web/macros.js"
