@@ -73,6 +73,9 @@ function connect() {
   };
   ws.onclose = () => {
     wsReady = false;
+    // The socket cannot carry a release, but the local state must not claim
+    // keys are held either - a reconnect sends a fresh report from nothing.
+    releaseAll();
     setStatus('disconnected', 'off');
     scheduleReconnect();
   };
@@ -343,8 +346,20 @@ function releaseWakeLock() {
 }
 
 function onVisibilityChange() {
+  if (document.hidden) {
+    // keyup will not arrive while the page is hidden, so anything held is
+    // stranded; release it here rather than let the host keep it down.
+    releaseAll();
+    return;
+  }
   // The browser drops the lock when the page is hidden, so re-take it.
-  if (!document.hidden && captured) holdWakeLock();
+  if (captured) holdWakeLock();
+}
+
+// Losing window focus is the same problem: the keyup for a physically held key
+// goes to whatever took focus, and the host would never hear it.
+function onWindowBlur() {
+  releaseAll();
 }
 
 // ---------------------------------------------------------------- mouse capture
@@ -392,9 +407,11 @@ function onPointerLockChange() {
   if (captured) {
     holdWakeLock();
   } else {
+    // Capture is gone: Esc, a tab switch, anything. Whatever was held was held
+    // in order to drive the remote, so let it go rather than leave the host with
+    // a key down and no way to lift it.
     releaseWakeLock();
-    buttons = 0;
-    sendMouse(0, 0, 0);
+    releaseAll();
   }
 }
 
@@ -837,6 +854,7 @@ function init() {
   document.addEventListener('pointerlockchange', onPointerLockChange);
   document.addEventListener('pointerlockerror', captureRefused);
 
+  window.addEventListener('blur', onWindowBlur);
   window.addEventListener('mousedown', onMouseDown);
   window.addEventListener('mouseup', onMouseUp);
   window.addEventListener('wheel', onWheel, { passive: false });
@@ -914,6 +932,7 @@ function destroy() {
   document.removeEventListener('pointerlockchange', onPointerLockChange);
   document.removeEventListener('pointerlockerror', captureRefused);
 
+  window.removeEventListener('blur', onWindowBlur);
   window.removeEventListener('mousedown', onMouseDown);
   window.removeEventListener('mouseup', onMouseUp);
   window.removeEventListener('wheel', onWheel);

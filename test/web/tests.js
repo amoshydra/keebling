@@ -511,6 +511,77 @@ __webTests.push({
   },
 });
 
+// Any of these can lose the input: the keyup then goes somewhere else and the
+// host is left holding a key nothing can lift.
+__webTests.push({
+  page: 'control',
+  name: 'losing window focus releases everything held',
+  fn: async () => {
+    __resetInput();
+    PadView.latched.clear();
+    const cap = __capture();
+    PadView.held.add('KeyW');
+    PadView.buttons = 1;
+
+    window.dispatchEvent(new Event('blur'));
+    await __sleep(20);
+
+    __assert(!PadView.held.size, `still holding ${[...PadView.held].join(',')}`);
+    __assert(PadView.buttons === 0, `button mask is ${PadView.buttons}`);
+    __assert(cap.some((r) => r[0] === 0x05), 'no release-all report was sent');
+  },
+});
+
+__webTests.push({
+  page: 'control',
+  name: 'hiding the page releases everything held',
+  fn: async () => {
+    __resetInput();
+    PadView.latched.clear();
+    const cap = __capture();
+    PadView.held.add('KeyA');
+    PadView.latched.add('ShiftLeft');
+    PadView.held.add('ShiftLeft');
+
+    Object.defineProperty(document, 'hidden', { value: true, configurable: true });
+    try {
+      document.dispatchEvent(new Event('visibilitychange'));
+      await __sleep(20);
+    } finally {
+      delete document.hidden;
+    }
+
+    __assert(!PadView.held.size, `still holding ${[...PadView.held].join(',')}`);
+    __assert(!PadView.latched.size, 'a latch survived the page being hidden');
+    __assert(cap.some((r) => r[0] === 0x05), 'no release-all report was sent');
+  },
+});
+
+__webTests.push({
+  page: 'control',
+  name: 'losing pointer lock releases everything held',
+  fn: async () => {
+    __resetInput();
+    PadView.latched.clear();
+    PadView.captured = true;
+    const cap = __capture();
+    PadView.held.add('KeyD');
+
+    Object.defineProperty(document, 'pointerLockElement', { value: null, configurable: true });
+    try {
+      document.dispatchEvent(new Event('pointerlockchange'));
+      await __sleep(20);
+    } finally {
+      delete document.pointerLockElement;
+      PadView.captured = false;
+    }
+
+    __assert(!PadView.held.size, `still holding ${[...PadView.held].join(',')}`);
+    __assert(cap.some((r) => r[0] === 0x05),
+      'no release-all report was sent when capture ended');
+  },
+});
+
 __webTests.push({
   page: 'control',
   name: 'media key sends a consumer report',
