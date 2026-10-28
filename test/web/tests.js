@@ -439,6 +439,75 @@ __webTests.push({
 
 __webTests.push({
   page: 'control',
+  name: 'a latched modifier forms a chord with one finger',
+  fn: async () => {
+    __resetInput();
+    latched.clear();
+    const cap = __capture();
+
+    const key = (c) => document.querySelector(`.k[data-code="${c}"]`);
+    const alt = key('AltLeft'), tab = key('Tab');
+    __assert(alt && tab, 'Alt or Tab missing from the virtual keyboard');
+    const tap = (el, id, up) => el.dispatchEvent(new PointerEvent(up ? 'pointerup' : 'pointerdown', {
+      pointerId: id, pointerType: 'touch', clientX: 5, clientY: 5, bubbles: true,
+    }));
+
+    // One tap latches Alt and reports it held.
+    tap(alt, 20);
+    tap(alt, 20, true);
+    await __sleep(20);
+    __assert(latched.has('AltLeft'), 'Alt did not latch');
+    __assert(alt.classList.contains('latched'), 'Alt is latched but not shown as such');
+
+    // The next key carries it: one finger, no chord.
+    tap(tab, 21);
+    await __sleep(20);
+    const press = cap.filter((r) => r[0] === 2).pop();
+    __assert(press && press[1] === 0x04,
+      `modifier byte ${press && press[1]}, expected 0x04 (Alt)`);
+    __assert(press[2] === 0x2B, `keycode ${press && press[2]}, expected 0x2B (Tab)`);
+
+    // A chord is one shot: releasing the key releases the latch with it, so the
+    // host never sees a modifier left held.
+    tap(tab, 21, true);
+    await __sleep(20);
+    const up = cap.filter((r) => r[0] === 2).pop();
+    __assert(up[1] === 0 && up[2] === 0,
+      `final report mod ${up[1]} key ${up[2]}, expected everything released`);
+    __assert(!latched.size, 'the latch survived the chord');
+    __assert(!alt.classList.contains('latched'), 'Alt still looks latched');
+  },
+});
+
+__webTests.push({
+  page: 'control',
+  name: 'tapping a latched modifier again cancels it',
+  fn: async () => {
+    __resetInput();
+    latched.clear();
+    const cap = __capture();
+    const alt = document.querySelector('.k[data-code="AltLeft"]');
+    const tap = (id) => {
+      alt.dispatchEvent(new PointerEvent('pointerdown', {
+        pointerId: id, pointerType: 'touch', clientX: 5, clientY: 5, bubbles: true }));
+      alt.dispatchEvent(new PointerEvent('pointerup', {
+        pointerId: id, pointerType: 'touch', clientX: 5, clientY: 5, bubbles: true }));
+    };
+
+    tap(30);
+    await __sleep(20);
+    __assert(latched.has('AltLeft'), 'first tap did not latch');
+
+    tap(31);
+    await __sleep(20);
+    __assert(!latched.has('AltLeft'), 'second tap did not cancel');
+    const last = cap.filter((r) => r[0] === 2).pop();
+    __assert(last[1] === 0, `modifier byte ${last[1]} after cancelling, expected 0`);
+  },
+});
+
+__webTests.push({
+  page: 'control',
   name: 'media key sends a consumer report',
   fn: async () => {
     __resetInput();

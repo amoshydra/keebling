@@ -136,6 +136,7 @@ function sendKeyboardExtra(code, shift) { send(buildKeyboardReport(code, shift))
 
 function releaseAll() {
   held.clear();
+  latched.clear();
   buttons = 0;
   document.querySelectorAll('.k.active').forEach((el) => el.classList.remove('active'));
   send(new Uint8Array([0x05]));
@@ -547,6 +548,12 @@ const KBD_ROWS = [
    ['ArrowRight','→','arrow']],
 ];
 
+// Modifiers tapped on the virtual keyboard latch instead of being held. A held
+// modifier needs a second finger, which is why Alt+Tab and Ctrl+C were
+// effectively unreachable on a phone. Tap Alt, then Tab, and the host sees
+// Alt+Tab; the latch releases with the key that used it.
+const latched = new Set();
+
 const kbd = document.getElementById('kbd');
 for (const row of KBD_ROWS) {
   const rowEl = document.createElement('div');
@@ -563,14 +570,44 @@ for (const row of KBD_ROWS) {
       // hand the gesture to the scroller, which cancels the pointer and
       // releases the key mid-hold.
       try { k.setPointerCapture(e.pointerId); } catch (_) {}
+
+      if (MOD[code]) {
+        // Second tap cancels. The modifier stays in `held` so every report
+        // carries it until a real key uses it.
+        if (latched.delete(code)) {
+          held.delete(code);
+          k.classList.remove('active', 'latched');
+        } else {
+          latched.add(code);
+          held.add(code);
+          k.classList.add('active', 'latched');
+        }
+        sendKeyboard();
+        return;
+      }
+
       k.classList.add('active');
       held.add(code);
       sendKeyboard();
     };
+
     const rel = (e) => {
       e.preventDefault();
+      if (MOD[code]) return;      // latched modifiers are released with their key
+
       k.classList.remove('active');
       held.delete(code);
+
+      // A chord is one shot: the latches go up together with the key that used
+      // them, in the same report, so the host never sees a stray modifier held.
+      if (latched.size) {
+        for (const m of latched) {
+          held.delete(m);
+          document.querySelectorAll(`.k[data-code="${m}"]`)
+            .forEach((el) => el.classList.remove('active', 'latched'));
+        }
+        latched.clear();
+      }
       sendKeyboard();
     };
 

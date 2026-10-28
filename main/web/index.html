@@ -145,6 +145,9 @@
   .k.space { flex: 7; }
   .k.mod { background: #3a3a3a; }
   .k.active { background: var(--accent); }
+  /* Latched is not the same as pressed: it persists after your finger leaves,
+     so it gets a ring to say "this will apply to the next key". */
+  .k.latched { background: var(--accent); outline: 2px solid #fff; outline-offset: -2px; }
   .k.arrow { flex: 0 0 42px; }
 
   /* media keys */
@@ -188,7 +191,7 @@
   <div id="hint">
     One finger moves · tap to click<br>
     Two fingers scroll · two-finger tap right-clicks<br>
-    Three fingers drag · click the pad to capture a mouse
+    Three fingers drag · tap Ctrl/Alt/Cmd then a key for a chord
   </div>
   <div id="escHint">Mouse captured — Esc releases it</div>
   <div class="flash" id="flash"></div>
