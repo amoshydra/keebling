@@ -58,6 +58,10 @@ let escHintEl = null;
 let pulseEl = null;
 let lostSubEl = null;
 let kbd = null;
+let kbSourceEl = null;
+let kbBuiltEl = null;
+let kbCaptureEl = null;
+let captureField = null;
 let mediaEl = null;
 let mediaPanel = null;
 let typePanel = null;
@@ -604,7 +608,148 @@ function togglePanel(el) {
     }
   }
   el.classList.toggle('show', show);
+  // Opening the slot in system mode should raise the keyboard, not make the
+  // user tap a second time. Still inside the click, so the IME will open.
+  if (show && el.id === 'kbd' && kbSource === 'system') focusCapture();
   syncPanelToggles();
+}
+
+// ---------------------------------------------------------------- system keyboard
+// A phone keyboard cannot be captured directly, and the split is measured, not
+// assumed (Android + Hacker's Keyboard):
+//
+//   printable characters  keydown with an empty code (keyCode 229), then
+//                         beforeinput carrying the text
+//   everything else       a real keydown/keyup with a code we can map
+//   Ctrl/Alt/Meta + key   a real keydown carrying the modifier flag
+//
+// So text comes from beforeinput and keys come from keydown, and the two must
+// never both fire for the same press or everything types twice.
+const KB_SOURCE_KEY = 'esp32remote.keyboardSource';
+
+// Usages that never produce text, so the IME will not deliver them as input.
+// A plain letter is deliberately absent: on a desktop with a real keyboard it
+// arrives as both a keydown and an insertText, and the text path wins.
+const NO_TEXT_USAGE = new Set([
+  0x28, 0x29, 0x2A, 0x2B, 0x39,                    // Enter Esc Backspace Tab Caps
+  0x3A, 0x3B, 0x3C, 0x3D, 0x3E, 0x3F,              // F1-F6
+  0x40, 0x41, 0x42, 0x43, 0x44, 0x45,              // F7-F12
+  0x46, 0x47, 0x48,                                // PrtSc ScrollLock Pause
+  0x49, 0x4A, 0x4B, 0x4C, 0x4D, 0x4E,              // Ins Home PgUp Del End PgDn
+  0x4F, 0x50, 0x51, 0x52,                          // arrows
+]);
+
+let kbSource = 'built';
+let captureComposing = false;
+
+function storedKeyboardSource() {
+  try {
+    return localStorage.getItem(KB_SOURCE_KEY) === 'system' ? 'system' : 'built';
+  } catch (_) {
+    return 'built';
+  }
+}
+
+function focusCapture() {
+  // Must run inside the user's gesture or Android will not raise the IME,
+  // which is why the switch calls this directly instead of waiting for a tap.
+  if (!captureField) return;
+  try { captureField.focus(); } catch (_) {}
+}
+
+function setKeyboardSource(src, focus) {
+  const next = src === 'system' ? 'system' : 'built';
+  if (next !== kbSource) releaseAll();      // a switch must not strand a held key
+  kbSource = next;
+  try { localStorage.setItem(KB_SOURCE_KEY, next); } catch (_) {}
+  if (kbBuiltEl) kbBuiltEl.hidden = next === 'system';
+  if (kbCaptureEl) kbCaptureEl.hidden = next !== 'system';
+  if (kbSourceEl) {
+    for (const btn of kbSourceEl.querySelectorAll('button')) {
+      const on = btn.dataset.src === next;
+      btn.classList.toggle('on', on);
+      btn.setAttribute('aria-selected', on ? 'true' : 'false');
+    }
+  }
+  if (next === 'system') {
+    if (focus) focusCapture();
+  } else if (captureField) {
+    captureField.blur();
+  }
+}
+
+function captureMods(e) {
+  let m = 0;
+  if (e.ctrlKey) m |= 0x01;
+  if (e.shiftKey) m |= 0x02;
+  if (e.altKey) m |= 0x04;
+  if (e.metaKey) m |= 0x08;
+  return m;
+}
+
+// A chord is self-contained: the modifiers from the event, one key, then a
+// report with nothing held. The IME does not keep Ctrl down between keys.
+function sendCaptureReport(usage, mods) {
+  const buf = new Uint8Array(8);
+  buf[0] = 0x02;
+  buf[1] = mods;
+  if (usage) buf[2] = usage;
+  send(buf);
+  markInput();
+}
+
+function onCaptureKeyDown(e) {
+  // An empty code is Android's "the IME consumed this" (keyCode 229); the text
+  // arrives as beforeinput, and sending anything here types it twice.
+  if (!e.code || e.isComposing) return;
+  const usage = KEY[e.code];
+  if (!usage) return;                       // a modifier, a media key, or unmapped
+  const mods = captureMods(e);
+  // No modifiers and no text to produce? Then beforeinput will type it.
+  if (!mods && !NO_TEXT_USAGE.has(usage)) return;
+  e.preventDefault();                       // Tab must not move focus, F5 must not reload
+  if (e.repeat) return;                     // the host repeats a held key by itself
+  sendCaptureReport(usage, mods);
+}
+
+function onCaptureKeyUp(e) {
+  if (!e.code || e.isComposing) return;
+  const usage = KEY[e.code];
+  if (!usage) return;
+  if (!captureMods(e) && !NO_TEXT_USAGE.has(usage)) return;
+  e.preventDefault();
+  // Release everything this chord pressed. The modifier was never held by us
+  // between keys, so there is nothing else to leave behind.
+  sendCaptureReport(0, 0);
+}
+
+function typeCapturedText(text) {
+  for (const ch of text) {
+    const entry = TYPE_MAP[ch];
+    if (!entry) continue;
+    sendKeyboardExtra(entry[0], entry[1]);   // press
+    sendKeyboardExtra(null, false);          // release
+  }
+}
+
+function onCaptureBeforeInput(e) {
+  // Enter and Backspace arrive here too - insertLineBreak and
+  // deleteContentBackward - after already arriving as keydowns. Honouring both
+  // would send every one of them twice.
+  if (e.inputType !== 'insertText' || !e.data) return;
+  e.preventDefault();                       // keep the field empty
+  typeCapturedText(e.data);
+}
+
+function onCaptureBlur() {
+  // Leaving the field takes the keyboard away, so nothing should stay held.
+  releaseAll();
+}
+
+function onSourceClick(e) {
+  const btn = e.target.closest ? e.target.closest('button[data-src]') : null;
+  if (!btn) return;
+  setKeyboardSource(btn.dataset.src, true);
 }
 
 // ---------------------------------------------------------------- physical keyboard
@@ -664,8 +809,10 @@ const KBD_ROWS = [
 const latched = new Set();
 
 function buildKeyboard() {
-  const kbd = document.getElementById('kbd');
-  for (const row of KBD_ROWS) addKeyboardRow(kbd, row);
+  // The keys go into their own container so the slot can swap them for the
+  // capture field without rebuilding anything on every switch.
+  const built = document.getElementById('kbBuilt');
+  for (const row of KBD_ROWS) addKeyboardRow(built, row);
 }
 
 function addKeyboardRow(kbd, row) {
@@ -975,6 +1122,30 @@ function init() {
   kbd = document.getElementById('kbd');
   kbd.addEventListener('contextmenu', preventContextMenu);
 
+  kbSourceEl = document.getElementById('kbSource');
+  kbBuiltEl = document.getElementById('kbBuilt');
+  kbCaptureEl = document.getElementById('kbCapture');
+  captureField = document.getElementById('kbCaptureField');
+  captureComposing = false;
+  setKeyboardSource(storedKeyboardSource(), false);
+  if (kbSourceEl) kbSourceEl.addEventListener('click', onSourceClick);
+  if (captureField) {
+    captureField.addEventListener('keydown', onCaptureKeyDown);
+    captureField.addEventListener('keyup', onCaptureKeyUp);
+    captureField.addEventListener('beforeinput', onCaptureBeforeInput);
+    captureField.addEventListener('blur', onCaptureBlur);
+    captureField.addEventListener('compositionstart', () => { captureComposing = true; });
+    captureField.addEventListener('compositionend', (e) => {
+      captureComposing = false;
+      if (e.data) typeCapturedText(e.data);
+    });
+    // Safety net for an IME that ignores preventDefault. Never during
+    // composition: clearing the field mid-composition breaks the IME's buffer.
+    captureField.addEventListener('input', () => {
+      if (!captureComposing && captureField.value) captureField.value = '';
+    });
+  }
+
   pad.addEventListener('pointerdown', onTouchPointerDown);
   pad.addEventListener('pointermove', onTouchPointerMove);
   pad.addEventListener('pointerup', onPointerEnd);
@@ -1113,6 +1284,11 @@ function destroy() {
   helpCloseBtn = null;
   helpOpenBtn = null;
   kbd = null;
+  kbSourceEl = null;
+  kbBuiltEl = null;
+  kbCaptureEl = null;
+  captureField = null;
+  captureComposing = false;
   mediaEl = null;
   mediaPanel = null;
   typePanel = null;
@@ -1149,6 +1325,10 @@ return {
   closeHelp,
   buildKeyboardReport,
   releaseAll,
+  setKeyboardSource,
+  get keyboardSource() { return kbSource; },
+  get captureField() { return captureField; },
+  NO_TEXT_USAGE,
   KEY,
   TYPE_MAP,
 };

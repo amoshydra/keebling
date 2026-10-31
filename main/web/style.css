@@ -494,6 +494,31 @@ textarea { font-family: ui-monospace, SFMono-Regular, monospace; resize: vertica
   touch-action: none;
 }
 #kbd.show { display: block; }
+
+/* Which keyboard owns the slot. Segmented, like an input-method switch, because
+   that is the thing it is. */
+#kbSource { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-bottom: 8px; }
+#kbSource button {
+  height: 40px;
+  border-radius: 9px;
+  background: #202020;
+  color: #8c8c8c;
+  font-size: 12.5px;
+}
+#kbSource button.on {
+  background: #23364d;
+  color: #dce9f7;
+  box-shadow: inset 0 0 0 1px #365b83;
+}
+/* The capture field is the whole keyboard when the system one is in use: it has
+   to be a real, focusable input or Android will not raise the IME. */
+#kbCapture { display: flex; flex-direction: column; gap: 8px; }
+#kbCapture[hidden] { display: none; }
+#kbCaptureField {
+  min-height: 84px;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 13px;
+}
 .krow { display: flex; gap: 4px; margin-bottom: 4px; }
 .k {
   flex: 1;

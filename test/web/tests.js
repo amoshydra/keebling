@@ -2507,6 +2507,127 @@ __webTests.push({
 
 __webTests.push({
   page: 'control',
+  name: 'the keyboard slot can hand over to the phone keyboard',
+  fn: async () => {
+    const built = document.getElementById('kbBuilt');
+    const capture = document.getElementById('kbCapture');
+    __assert(built && capture, 'the keyboard slot has no two halves');
+
+    // Normalise: a previous run of this test leaves the choice persisted.
+    document.querySelector('#kbSource button[data-src="built"]').click();
+    __assert(!built.hidden && capture.hidden, 'the slot did not start on the built-in keyboard');
+
+    const system = document.querySelector('#kbSource button[data-src="system"]');
+    system.click();
+    __assert(built.hidden && !capture.hidden, 'the switch did not swap the slot');
+    __assert(system.classList.contains('on'), 'the switch does not mark the chosen source');
+    __assert(localStorage.getItem('esp32remote.keyboardSource') === 'system',
+      'the choice was not remembered for next time');
+
+    document.querySelector('#kbSource button[data-src="built"]').click();
+    __assert(!built.hidden && capture.hidden, 'switching back did not restore the built-in keys');
+  },
+});
+
+__webTests.push({
+  page: 'control',
+  name: 'a phone keystroke reaches the host exactly once',
+  fn: async () => {
+    const field = PadView.captureField;
+    PadView.setKeyboardSource('system', false);
+    const sent = __capture();
+
+    // Printable characters: Android reports the press with no code at all
+    // (keyCode 229) and then delivers the text.
+    field.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Unidentified', code: '', keyCode: 229, bubbles: true, cancelable: true,
+    }));
+    __assert(sent.length === 0, `the IME-consumed keydown sent ${sent.length} reports`);
+
+    // The same trap on a desktop, where a plain letter has a real code and an
+    // input event: the key must be skipped or the text path doubles it.
+    field.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'a', code: 'KeyA', keyCode: 65, bubbles: true, cancelable: true,
+    }));
+    __assert(sent.length === 0, 'a plain letter keydown was sent, so its text would double');
+
+    // ...and the text must produce one press and one release.
+    field.dispatchEvent(new InputEvent('beforeinput', {
+      inputType: 'insertText', data: 'a', bubbles: true, cancelable: true,
+    }));
+    __assert(sent.length === 2, `one character produced ${sent.length} reports`);
+    __assert(sent[0][2] === 0x04, `the press report is ${sent[0]}`);
+    __assert(sent[1][1] === 0 && sent[1][2] === 0, `the release report is ${sent[1]}`);
+
+    PadView.setKeyboardSource('built', false);
+  },
+});
+
+__webTests.push({
+  page: 'control',
+  name: 'keys are not sent twice, and chords keep their modifier',
+  fn: async () => {
+    const field = PadView.captureField;
+    PadView.setKeyboardSource('system', false);
+    const sent = __capture();
+    const key = (type, init) => field.dispatchEvent(
+      new KeyboardEvent(type, Object.assign({ bubbles: true, cancelable: true }, init)));
+
+    const tab = new KeyboardEvent('keydown', {
+      key: 'Tab', code: 'Tab', keyCode: 9, bubbles: true, cancelable: true,
+    });
+    field.dispatchEvent(tab);
+    __assert(tab.defaultPrevented, 'Tab was not cancelled, so it would move focus');
+    __assert(sent.length === 1 && sent[0][2] === 0x2B, `Tab sent ${JSON.stringify(sent)}`);
+
+    // Enter arrives as a keydown and again as insertLineBreak. Sending both is
+    // the double-typing bug this test exists to prevent.
+    sent.length = 0;
+    key('keydown', { key: 'Enter', code: 'Enter', keyCode: 13 });
+    const afterKey = sent.length;
+    field.dispatchEvent(new InputEvent('beforeinput', {
+      inputType: 'insertLineBreak', bubbles: true, cancelable: true,
+    }));
+    __assert(sent.length === afterKey, 'the line break was sent a second time');
+
+    key('keyup', { key: 'Enter', code: 'Enter', keyCode: 13 });
+    __assert(sent[sent.length - 1][1] === 0 && sent[sent.length - 1][2] === 0,
+      'Enter was never released');
+
+    // Ctrl+C arrives as a real key with the flag, which is the whole reason a
+    // system keyboard can drive this device.
+    sent.length = 0;
+    key('keydown', { key: 'c', code: 'KeyC', keyCode: 67, ctrlKey: true });
+    __assert(sent.length === 1, `one chord produced ${sent.length} reports`);
+    __assert(sent[0][1] === 0x01 && sent[0][2] === 0x06,
+      `Ctrl+C sent ${JSON.stringify(sent[0])}`);
+
+    // Leaving the field must not strand a held key on the host.
+    PadView.held.add('KeyA');
+    sent.length = 0;
+    field.dispatchEvent(new FocusEvent('blur'));
+    __assert(sent.length > 0, 'blur sent nothing');
+    __assert(sent.every((r) => r.slice(1).every((v) => v === 0)),
+      `blur left something held: ${JSON.stringify(sent)}`);
+
+    PadView.setKeyboardSource('built', false);
+  },
+});
+
+__webTests.push({
+  page: 'control',
+  name: 'the page asks the browser to shrink for the keyboard',
+  fn: async () => {
+    // Without this the IME overlays the page and the bottom of the layout is
+    // simply hidden behind it.
+    const meta = document.querySelector('meta[name="viewport"]');
+    __assert(meta && /interactive-widget=resizes-content/.test(meta.content),
+      `viewport meta is: ${meta && meta.content}`);
+  },
+});
+
+__webTests.push({
+  page: 'control',
   name: 'phone: one panel at a time',
   fn: async () => {
     const kbd = document.getElementById('kbd');
