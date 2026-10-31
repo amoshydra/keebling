@@ -18,6 +18,7 @@
 #include "log_buffer.h"
 #include "settings.h"
 #include "screen_image.h"
+#include "qr_payload.h"
 #include "ui_fs.h"
 
 static const char *TAG = "main";
@@ -101,40 +102,9 @@ static const char *reset_reason_str(esp_reset_reason_t r) {
 }
 
 // Right-hand panel beside the QR. x = 80 leaves 13 characters.
-// What the QR carries depends on where the device can be reached.
-//
-// - On a network with an address, or with a client on its own access point: the
-//   URL for that address, so scanning opens the UI already authenticated.
-// - Otherwise the only way in is the access point itself, so the payload becomes
-//   the standard Wi-Fi join string, which a phone camera understands and which
-//   saves typing the twelve-character code.
-//
-// Gating on "a client is connected" alone was wrong: a device associated to a
-// network has a perfectly good address even with nobody on its AP.
-static void screen_qr_payload(char *out, size_t len) {
-    const char *sta_ip = wifi_mgr_ip();        // "" when not associated
-    const char *ap_ip = wifi_mgr_ap_ip();      // "" when the AP is down
-
-    if (sta_ip[0]) {
-        snprintf(out, len, "http://%s/?token=%s", sta_ip, security_code());
-        return;
-    }
-    if (wifi_mgr_client_count() > 0 && ap_ip[0]) {
-        snprintf(out, len, "http://%s/?token=%s", ap_ip, security_code());
-        return;
-    }
-
-    snprintf(out, len, "WIFI:T:WPA;S:%s;P:%s;;", AP_SSID, security_code());
-}
-
-// True when the QR above is a URL rather than a join payload, so the labels
-// beside it say what scanning will actually do.
-static bool qr_is_url(void) {
-    return wifi_mgr_ip()[0] || (wifi_mgr_client_count() > 0 && wifi_mgr_ap_ip()[0]);
-}
-
 static void draw_qr_panel(void) {
-    const bool url = qr_is_url();
+    const bool url = qr_payload_is_url(wifi_mgr_ip(), wifi_mgr_ap_ip(),
+                                       wifi_mgr_client_count());
 
     // Start past the code, whatever width it turned out to be. An IPv4 address
     // needs 15 cells; starting at a fixed x=80 left 13 and cut the last digit,
@@ -191,7 +161,10 @@ static void apply_display_mode(void) {
     switch (s_mode) {
     case DISP_QR: {
         char payload[96];
-        screen_qr_payload(payload, sizeof(payload));
+        qr_payload_build(payload, sizeof(payload),
+                         wifi_mgr_ip(),        // "" when not associated
+                         wifi_mgr_ap_ip(),     // "" when the AP is down
+                         wifi_mgr_client_count(), security_code());
         display_clear();
         if (!display_qr(payload)) {
             s_mode = DISP_STATUS;      // payload would not fit: fall back

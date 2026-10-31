@@ -11,6 +11,7 @@ idf_component_register(
         "log_buffer.c"
         "ui_fs.c"
         "screen_image.c"
+        "qr_payload.c"
         "bsp/esp_lcd_st7735.c"
         "qr/qrcodegen.c"
     INCLUDE_DIRS "."
