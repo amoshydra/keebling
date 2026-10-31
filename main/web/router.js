@@ -16,15 +16,30 @@
 const Router = (() => {
   const main = document.getElementById('view');
 
+  const control = () => (typeof PadView === 'undefined' ? null : PadView);
   const ROUTES = {
-    '/':         { view: () => (typeof PadView === 'undefined' ? null : PadView),
-                   template: 'view-control',  name: 'control' },
+    '/':       { view: control, template: 'view-control', name: 'control' },
+    // Keys is the same surface with the keyboard slot open. Two modes of one
+    // view rather than two copies of the pad.
+    '/keys':   { view: control, template: 'view-control', name: 'control' },
+    '/deck':   { view: () => (typeof MacrosView === 'undefined' ? null : MacrosView),
+                 template: 'view-macros',   name: 'macros' },
+    '/setup':  { view: () => (typeof SettingsView === 'undefined' ? null : SettingsView),
+                 template: 'view-settings', name: 'settings' },
+    // Kept so old links, bookmarks and the back stack still land somewhere.
+    '/macros': { view: () => (typeof MacrosView === 'undefined' ? null : MacrosView),
+                 template: 'view-macros',   name: 'macros' },
     '/settings': { view: () => (typeof SettingsView === 'undefined' ? null : SettingsView),
                    template: 'view-settings', name: 'settings' },
-    '/macros':   { view: () => (typeof MacrosView === 'undefined' ? null : MacrosView),
-                   template: 'view-macros',   name: 'macros' },
-    '/ui':       { view: () => (typeof UiView === 'undefined' ? null : UiView),
-                   template: 'view-ui',       name: 'ui' },
+    '/ui':     { view: () => (typeof UiView === 'undefined' ? null : UiView),
+                 template: 'view-ui',       name: 'ui' },
+  };
+
+  // Which tab a route belongs to. Several routes can share one tab.
+  const TAB_FOR = {
+    '/': 'remote', '/keys': 'keys',
+    '/deck': 'deck', '/macros': 'deck',
+    '/setup': 'setup', '/settings': 'setup', '/ui': 'setup',
   };
 
   let current = null;      // the route path currently mounted
@@ -40,8 +55,11 @@ const Router = (() => {
   }
 
   function markActive(path) {
-    for (const link of document.querySelectorAll('.nav a')) {
-      link.classList.toggle('active', link.getAttribute('href') === '#' + path);
+    const tab = TAB_FOR[path];
+    for (const link of document.querySelectorAll('.tabbar a')) {
+      link.classList.toggle('active', link.dataset.tab === tab);
+      if (link.dataset.tab === tab) link.setAttribute('aria-current', 'page');
+      else link.removeAttribute('aria-current');
     }
   }
 

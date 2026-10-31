@@ -205,22 +205,30 @@ textarea { font-family: ui-monospace, SFMono-Regular, monospace; resize: vertica
 #view[data-view="macros"],
 #view[data-view="ui"] { display: block; overflow-y: auto; }
 
-/* The four views, with the current one underlined. The nav used to scroll
-   (`overflow-x: auto`), which let the bar squeeze it instead of admitting it
-   did not fit: at 390px it came up 8px short and drew a scrollbar under the
-   labels, so "UI files" was clipped. It wraps on a phone now and never
-   scrolls. */
-.nav { display: flex; gap: 12px; align-items: center; flex: 0 0 auto; }
-.nav a { color: var(--dim); padding-bottom: 3px; border-bottom: 2px solid transparent; }
-.nav a.active { color: var(--ink); border-bottom-color: var(--accent); }
-@media (max-width: 620px) {
-  /* Two lines: the status keeps its row, the views get one of their own. That
-     is what buys them a 40px tap target and a legible size - one line never
-     fitted, and the scroller hid the evidence. */
-  .topbar { flex-wrap: wrap; padding-bottom: 0; }
-  .nav { width: 100%; justify-content: space-between; gap: 2px; font-size: 13px; }
-  .nav a { margin: 0; padding: 12px 8px 9px; }
+/* ---------------------------------------------------------------- tab bar */
+/* The four destinations, at the bottom because that is the thumb zone and
+   because this is the shape a phone app is expected to have. The current tab
+   is marked with an accent rule along its top edge. */
+.tabbar {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  background: var(--panel);
+  border-top: 1px solid #232323;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
 }
+.tabbar a {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 56px;
+  font-size: 12.5px;
+  color: var(--dim);
+  text-decoration: none;
+  border-top: 2px solid transparent;
+  margin-top: -1px;
+}
+.tabbar a.active { color: var(--ink); border-top-color: var(--accent); }
 
 /* ---------------------------------------------------------------- control view */
 /* The pad is the whole middle of the screen. */
@@ -457,8 +465,8 @@ textarea { font-family: ui-monospace, SFMono-Regular, monospace; resize: vertica
   #controls {
     grid-template-columns: repeat(4, minmax(0, 1fr));
     grid-template-areas:
-      "kbd   media type macros"
-      "left  right mid  release";
+      "kbd   media type  release"
+      "left  right mid   release";
     grid-template-rows: auto auto;
     grid-auto-flow: row;
     padding: 6px;
@@ -467,11 +475,12 @@ textarea { font-family: ui-monospace, SFMono-Regular, monospace; resize: vertica
   #bLeft    { grid-area: left; }
   #bRight   { grid-area: right; }
   #bMid     { grid-area: mid; }
-  #bRelease { grid-area: release; }
+  /* Spans both rows and fills them: a bigger target for the one button you
+     press when something is stuck. */
+  #bRelease { grid-area: release; align-self: stretch; }
   #bKbd     { grid-area: kbd; }
   #bMedia   { grid-area: media; }
   #bType    { grid-area: type; }
-  #bMacros  { grid-area: macros; }
   #controls button, #controls a.btn {
     padding: 13px 4px;
     font-size: 13px;

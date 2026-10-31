@@ -13,12 +13,6 @@
      are <template>s below and the router mounts exactly one at a time. -->
 <div class="topbar">
   <span><span class="dot off" id="dot"></span><span id="statusText">connecting…</span></span>
-  <nav class="nav">
-    <a href="#/">Control</a>
-    <a href="#/settings">Settings</a>
-    <a href="#/macros">Macros</a>
-    <a href="#/ui">UI files</a>
-  </nav>
 </div>
 
 <!-- One access gate for the whole shell. It stays hidden until requireAuth
@@ -39,6 +33,16 @@
      not exist until they are mounted - which is what keeps the four views'
      colliding IDs (dot, statusText, ...) out of each other's way. -->
 <main id="view"></main>
+
+<!-- The four destinations. Bottom tabs rather than links in the status bar:
+   this is the thumb zone, and it is the shape a phone app is expected to have.
+   Setup owns the pages that are not everyday: settings and the UI files. -->
+<nav class="tabbar">
+  <a href="#/" data-tab="remote">Remote</a>
+  <a href="#/keys" data-tab="keys">Keys</a>
+  <a href="#/deck" data-tab="deck">Deck</a>
+  <a href="#/setup" data-tab="setup">Setup</a>
+</nav>
 
 <template id="view-control">
   <div id="pad">
@@ -145,7 +149,6 @@
     <button id="bKbd">⌨ Keys</button>
     <button id="bMedia">🎵 Media</button>
     <button id="bType">📋 Type</button>
-    <a id="bMacros" class="btn" href="#/macros">⚡ Macros</a>
     <button id="bRelease" class="danger">Release</button>
   </div>
 </template>

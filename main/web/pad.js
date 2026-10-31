@@ -1173,6 +1173,11 @@ function init() {
   buildMedia();
   syncPanelToggles();
   kbd = document.getElementById('kbd');
+  // The Keys tab is this same view with the keyboard slot open, so arriving
+  // there does not need a second copy of the pad.
+  if (/^#\/keys/.test(location.hash)) {
+    if (!kbd.classList.contains('show')) togglePanel(kbd);
+  }
   kbd.addEventListener('contextmenu', preventContextMenu);
 
   kbSourceEl = document.getElementById('kbSource');

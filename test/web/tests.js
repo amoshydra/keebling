@@ -2400,31 +2400,40 @@ __webTests.push({
       `the controls overflow sideways (${bar.scrollWidth} > ${bar.clientWidth})`);
 
     const top = document.getElementById('bKbd').getBoundingClientRect().top;
-    for (const id of ['bLeft', 'bRight', 'bMid', 'bRelease']) {
+    // The pointer buttons sit under the panel toggles...
+    for (const id of ['bLeft', 'bRight', 'bMid']) {
       const b = document.getElementById(id).getBoundingClientRect();
       __assert(b.top > top, `${id} is not below the panel toggles`);
       __assert(b.height >= 42, `${id} is only ${Math.round(b.height)}px tall`);
-      __assert(b.bottom > window.innerHeight - 20, `${id} is not at the bottom of the screen`);
     }
+    // ...and Release spans both rows on the right, so it starts level with the
+    // toggles and reaches the bottom.
+    const rel = document.getElementById('bRelease').getBoundingClientRect();
+    __assert(rel.top <= top + 1, 'Release does not start level with the toggles');
+    const tabsTop = document.querySelector('.tabbar').getBoundingClientRect().top;
+    __assert(rel.bottom > tabsTop - 10, 'Release does not reach the tab bar');
+    __assert(rel.height > 90, `Release is only ${Math.round(rel.height)}px tall`);
   },
 });
 
 __webTests.push({
   page: 'control',
-  name: 'phone: the top bar keeps all four views on screen',
+  name: 'phone: four destinations, as tabs with a real target',
   fn: async () => {
-    const nav = document.querySelector('.nav');
-    // The nav used to be a horizontal scroller, which hid the fact that the
-    // four labels did not fit: it clipped the last one and drew a scrollbar
-    // under the others.
-    __assert(nav.scrollWidth <= nav.clientWidth + 1,
-      `the nav scrolls sideways (${nav.scrollWidth} > ${nav.clientWidth})`);
-    for (const a of nav.querySelectorAll('a')) {
+    const bar = document.querySelector('.tabbar');
+    __assert(bar, 'there is no tab bar');
+    const tabs = [...bar.querySelectorAll('a')];
+    __assert(tabs.length === 4, `${tabs.length} tabs, expected 4`);
+    __assert(bar.scrollWidth <= bar.clientWidth + 1,
+      `the tab bar scrolls sideways (${bar.scrollWidth} > ${bar.clientWidth})`);
+    for (const a of tabs) {
       const r = a.getBoundingClientRect();
       __assert(r.left >= -0.5 && r.right <= window.innerWidth + 0.5,
         `${a.textContent} is clipped (${Math.round(r.left)}..${Math.round(r.right)} of ${window.innerWidth})`);
-      __assert(r.height >= 40, `${a.textContent} is only ${Math.round(r.height)}px tall`);
+      __assert(r.height >= 44, `${a.textContent} is only ${Math.round(r.height)}px tall`);
     }
+    __assert(bar.getBoundingClientRect().bottom <= window.innerHeight + 1,
+      'the tab bar is below the fold');
   },
 });
 
