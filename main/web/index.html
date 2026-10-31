@@ -163,9 +163,13 @@
 </template>
 
 <template id="view-settings">
-  <div class="wrap">
+  <div class="wrap wrap-setup">
+    <!-- A list of sections rather than one long page: nine screens of settings
+         in a column is a scroll, not a menu. One section is open at a time. -->
+    <div id="setupList"></div>
+    <button id="setupBack" class="setupback" type="button" hidden>‹ All settings</button>
 
-    <section>
+    <section data-page="device">
       <h2>Device</h2>
       <div class="field">
         <span>Product name — the device name the host shows <small>(USB string 2)</small></span>
@@ -190,7 +194,7 @@
       </div>
     </section>
 
-    <section>
+    <section data-page="screen">
       <h2>Screen</h2>
       <div class="field">
         <span>Custom text <small>(the third BOOT screen)</small></span>
@@ -239,7 +243,7 @@
       </div>
     </section>
 
-    <section>
+    <section data-page="pointer">
       <h2>Touchpad</h2>
       <div class="field">
         <label>Pointer gain <input type="range" id="mouseGain" min="-200" max="90" step="1">
@@ -267,7 +271,7 @@
         scroll and tap to right-click · three fingers drag (press, move, release).</p>
     </section>
 
-    <section>
+    <section data-page="typing">
       <h2>Typing</h2>
       <div class="field">
         <label>Speed <input type="range" id="typeSpeed" min="2" max="60" step="1">
@@ -277,7 +281,7 @@
       </div>
     </section>
 
-    <section>
+    <section data-page="network">
       <h2>Network</h2>
       <div class="field">
         <span>Current</span>
@@ -305,7 +309,7 @@
         seconds also clears the saved network.</p>
     </section>
 
-    <section>
+    <section data-page="hid">
       <h2>HID descriptor</h2>
       <p class="note">Exactly what the device reports to the operating system:
         the report descriptor it hands over at enumeration, plus the interface
@@ -323,7 +327,7 @@
       </details>
     </section>
 
-    <section>
+    <section data-page="backup">
       <h2>Backup</h2>
       <p class="note">Everything you would otherwise have to re-enter: the device
         settings and the macros stored in <strong>this browser</strong>. It does
@@ -337,7 +341,7 @@
       <p class="note" id="backupNote"></p>
     </section>
 
-    <section>
+    <section data-page="ui">
       <h2>Web UI files</h2>
       <p class="note">The pages are built into the firmware, but files uploaded to
         the device's filesystem are served instead. Open the UI files page to
@@ -350,7 +354,7 @@
       <p class="note" id="uiNote"></p>
     </section>
 
-    <section>
+    <section data-page="diagnostics">
       <h2>Diagnostics</h2>
       <div class="row" style="margin-bottom:10px">
         <button id="logsLoad">Load logs</button>
@@ -365,7 +369,7 @@
          board) can drive the device directly, or whether it has to be
          translated through a capture field first. Remove it once the answer is
          recorded in the design notes. -->
-    <section>
+    <section data-page="diagnostics">
       <h2>Key event probe</h2>
       <p class="note">Records exactly what the browser delivers from a keyboard
         &mdash; the phone&rsquo;s own keyboard, a Bluetooth board, or this
@@ -435,6 +439,12 @@
           <button type="button" data-colour="red" aria-label="Red"></button>
           <button type="button" data-colour="green" aria-label="Green"></button>
         </div>
+      </div>
+      <div class="field">
+        <label style="font-size:13px;display:flex;gap:10px;align-items:center">
+          <input type="checkbox" id="editHold">
+          <span>Run while held, stop on release</span>
+        </label>
       </div>
       <div class="field">
         <span>Steps</span>

@@ -805,6 +805,32 @@ __webTests.push({
 
 __webTests.push({
   page: 'settings',
+  name: 'settings is a list of sections, one open at a time',
+  fn: async () => {
+    await __sleep(200);
+    const list = document.getElementById('setupList');
+    const rows = [...list.querySelectorAll('.setuprow')];
+    __assert(rows.length >= 8, `${rows.length} rows in the setup list`);
+    __assert(!list.hidden, 'the list is hidden on arrival');
+    const open = () => [...document.querySelectorAll('#view section[data-page]')]
+      .filter((sec) => !sec.hidden);
+    __assert(open().length === 0, 'sections are showing behind the list');
+
+    rows[0].click();
+    __assert(list.hidden, 'the list stayed visible after opening a section');
+    const shown = open();
+    __assert(shown.length === 1, `${shown.length} sections open at once`);
+    __assert(shown[0].dataset.page === rows[0].dataset.page,
+      `opened ${shown[0].dataset.page}, expected ${rows[0].dataset.page}`);
+
+    document.getElementById('setupBack').click();
+    __assert(!list.hidden, 'back did not return to the list');
+    __assert(open().length === 0, 'the section stayed open behind the list');
+  },
+});
+
+__webTests.push({
+  page: 'settings',
   name: 'the key probe records modifiers, codes and the usage it would send',
   fn: async () => {
     const field = document.getElementById('probeField');
@@ -1766,6 +1792,53 @@ __webTests.push({
 
 __webTests.push({
   page: 'macros',
+  name: 'DSL: a repeat block expands in place, and nests',
+  fn: async () => {
+    const flat = (text) => parseMacro(text).steps
+      .filter((st) => st.kind === 'key')
+      .map((st) => st.usage);
+
+    // {REPEAT:3}A{/REPEAT} is three presses of A, in order.
+    const three = flat('{REPEAT:3}{LEFT}{/REPEAT}');
+    __assert(three.length === 3 && three.every((u) => u === 0x50),
+      `repeat produced ${JSON.stringify(three)}`);
+
+    // 2 x (2 x DOWN, UP) = DOWN DOWN UP DOWN DOWN UP.
+    const nested = flat('{REPEAT:2}{REPEAT:2}{DOWN}{/REPEAT}{UP}{/REPEAT}');
+    __assert(nested.join(',') === [0x51, 0x51, 0x52, 0x51, 0x51, 0x52].join(','),
+      `nested repeat produced ${nested.map((u) => u.toString(16)).join(',')}`);
+
+    // {END} is the End key, not a block terminator.
+    const endKey = parseMacro('{END}');
+    __assert(!endKey.errors.length && endKey.steps[0].usage === 0x4D,
+      `{END} stopped being the End key: ${JSON.stringify(endKey.errors)}`);
+  },
+});
+
+__webTests.push({
+  page: 'macros',
+  name: 'DSL: broken repeat blocks are reported, not silently dropped',
+  fn: async () => {
+    const unclosed = parseMacro('{REPEAT:2}{LEFT}');
+    __assert(unclosed.errors.some((e) => /no \{\/REPEAT\}/.test(e.message)),
+      `unclosed: ${JSON.stringify(unclosed.errors)}`);
+
+    const stray = parseMacro('{LEFT}{/REPEAT}');
+    __assert(stray.errors.some((e) => /without a \{REPEAT/.test(e.message)),
+      `stray: ${JSON.stringify(stray.errors)}`);
+
+    const big = parseMacro('{REPEAT:101}{LEFT}{/REPEAT}');
+    __assert(big.errors.some((e) => /longest repeat/.test(e.message)),
+      `over-long: ${JSON.stringify(big.errors)}`);
+
+    const zero = parseMacro('{REPEAT:0}{LEFT}{/REPEAT}');
+    __assert(zero.errors.some((e) => /smallest repeat/.test(e.message)),
+      `zero: ${JSON.stringify(zero.errors)}`);
+  },
+});
+
+__webTests.push({
+  page: 'macros',
   name: 'DSL: delays',
   fn: async () => {
     const p = parseMacro('{WAIT:500}');
@@ -2107,6 +2180,52 @@ __webTests.push({
     __assert(document.querySelector('.macro.c-blue'),
       'the tile did not take the colour');
     document.getElementById('deckEdit').click();
+  },
+});
+
+__webTests.push({
+  page: 'macros',
+  name: 'a hold button starts on press and stops on release',
+  fn: async () => {
+    const original = localStorage.getItem('esp32remote.macros');
+    const list = JSON.parse(original || '[]');
+    list.push({ name: 'Hold volume', steps: '{REPEAT:40}{VOLUMEUP}{WAIT:60}{/REPEAT}', hold: true, page: 'Main' });
+    localStorage.setItem('esp32remote.macros', JSON.stringify(list));
+
+    // Remount so the view reads the store again.
+    location.hash = '#/settings';
+    await __waitView('settings');
+    location.hash = '#/macros';
+    await __waitView('macros');
+    await __sleep(300);
+
+    const tile = [...document.querySelectorAll('.macro')]
+      .find((c) => c.querySelector('.name').textContent === 'Hold volume');
+    __assert(tile, 'the hold button is not on the deck');
+    __assert(tile.classList.contains('hold'), 'the tile is not marked as a hold button');
+    __assert(tile.querySelector('.run').textContent === 'Run',
+      'the hold button kept its run label');
+
+    const cap = __macroCapture();
+    const run = tile.querySelector('.run');
+    run.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    await __sleep(250);
+    const during = cap.length;
+    run.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+    await __sleep(400);
+    const settled = cap.length;
+    await __sleep(300);
+
+    __assert(during > 0, 'pressing did not start the macro');
+    __assert(cap.length === settled,
+      'it was still sending after release');
+
+    localStorage.setItem('esp32remote.macros', original);
+    location.hash = '#/settings';
+    await __waitView('settings');
+    location.hash = '#/macros';
+    await __waitView('macros');
+    await __sleep(300);
   },
 });
 

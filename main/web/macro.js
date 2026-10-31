@@ -4,6 +4,7 @@
 //   {SEARCH}chrome{ENTER}    press the Search media key, type "chrome", Enter
 //   {CTRL+ALT+DEL}           a modifier combination
 //   {WAIT:500}               pause, in milliseconds
+//   {REPEAT:3} ... {/REPEAT} repeat the tokens between them
 //   {{  }}                   literal braces
 //
 // Text is typed through the same US QWERTY path as the Type panel: one
@@ -89,6 +90,20 @@ function parseMacroToken(raw, index) {
   if (!body) return { error: 'empty token', token, index };
 
   const upper = body.toUpperCase();
+
+  // {/REPEAT} closes a block. Written this way rather than {END} because END
+  // is also a key - {END}, {CTRL+END} must keep working.
+  if (upper === '/REPEAT') return { kind: 'repeatEnd', index, token };
+
+  if (upper.startsWith('REPEAT')) {
+    const m = /^REPEAT\s*:\s*(\d+)$/.exec(upper);
+    if (!m) return { error: 'a repeat is written {REPEAT:3}', token, index };
+    const n = Number(m[1]);
+    if (n < 1) return { error: '{REPEAT:1} is the smallest repeat', token, index };
+    if (n > 100) return { error: 'the longest repeat is {REPEAT:100}', token, index };
+    return { kind: 'repeatStart', count: n, index, token };
+  }
+
   if (upper.startsWith('WAIT')) {
     // Matched with an anchored pattern rather than split on ":" so a stray
     // colon in another token gets "not a key", not a confusing delay error.
@@ -196,7 +211,50 @@ function parseMacro(text) {
   }
   flush();
 
+  // Fold repeat blocks into a flat list. The runner stays a plain loop, which
+  // matters because it has to honour Stop at every boundary; duplicating here
+  // also means a nested block is expanded before its parent copies it.
+  const flat = [];
+  const open = [];
   for (const step of steps) {
+    if (step.kind === 'repeatStart') {
+      if (open.length >= 8) {
+        errors.push({ index: step.index, token: step.token,
+                      message: 'repeats nest at most eight deep' });
+        continue;
+      }
+      open.push({ step, at: flat.length });
+      continue;
+    }
+    if (step.kind === 'repeatEnd') {
+      const block = open.pop();
+      if (!block) {
+        errors.push({ index: step.index, token: step.token,
+                      message: '{/REPEAT} without a {REPEAT:n}' });
+        continue;
+      }
+      const body = flat.slice(block.at);
+      for (let n = 1; n < block.step.count; n++) flat.push(...body);
+      continue;
+    }
+    flat.push(step);
+  }
+  for (const { step } of open) {
+    errors.push({ index: step.index, token: step.token,
+                  message: '{REPEAT:n} has no {/REPEAT}' });
+  }
+
+  // A repeat can multiply into something no one meant to send.
+  const MAX_STEPS = 2000;
+  if (flat.length > MAX_STEPS) {
+    errors.push({ index: 0, token: flat[MAX_STEPS].token || '',
+                  message: `the expanded macro is over ${MAX_STEPS} steps` });
+    flat.length = MAX_STEPS;
+  }
+
+  const out = { steps: flat, errors, warnings };
+
+  for (const step of flat) {
     if (step.kind !== 'text') continue;
     for (const c of new Set([...step.text])) {
       // \r is a Windows line ending, dropped silently - the same call the Type
@@ -206,7 +264,7 @@ function parseMacro(text) {
     }
   }
 
-  return { steps, errors, warnings };
+  return out;
 }
 
 // Label for the progress line and the editor's preview.

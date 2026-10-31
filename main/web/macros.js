@@ -115,6 +115,7 @@ function sanitizeMacros(list) {
       // Anything unknown falls back to no colour rather than breaking the tile.
       colour: COLOURS.includes(m.colour) ? m.colour : '',
       page: String(m.page || DEFAULT_PAGE),
+      hold: !!m.hold,
     }))
     .filter((m) => m.name || m.steps);
   return { kept, dropped: raw.length - kept.length };
@@ -198,6 +199,7 @@ function pendingMacros() {
     steps: stepsEl.value,
     colour: editColour,
     page: editPage,
+    hold: editHold,
   };
   if (editIndex >= 0) next[editIndex] = entry;
   else next.push(entry);
@@ -332,10 +334,22 @@ function deckTile(m, i) {
   const run = el('button', 'run', 'Run');
   run.title = editMode ? `Edit ${macroTitle(m, i)}` : `Run ${macroTitle(m, i)}`;
   run.disabled = running && !editMode;
-  run.addEventListener('click', () => {
-    if (editMode) openEditor(i);
-    else runMacroAt(i);
-  });
+  if (m.hold && !editMode) {
+    // Hold to run, release to stop. The macro carries its own {REPEAT} when it
+    // is meant to loop, so there is no second loop here to get out of step.
+    tile.classList.add('hold');
+    const start = (e) => { e.preventDefault(); if (!running) runMacroAt(i); };
+    const stop = () => { if (running) onRunStop(); };
+    run.addEventListener('pointerdown', start);
+    for (const t of ['pointerup', 'pointerleave', 'pointercancel']) {
+      run.addEventListener(t, stop);
+    }
+  } else {
+    run.addEventListener('click', () => {
+      if (editMode) openEditor(i);
+      else runMacroAt(i);
+    });
+  }
 
   tile.appendChild(run);
   tile.appendChild(el('span', 'name', macroTitle(m, i)));
@@ -360,6 +374,7 @@ function deckTile(m, i) {
       actionButton('Delete', () => { confirmDelete = i; render(); }),
     );
   }
+  if (m.hold) tile.appendChild(el('span', 'holdtag', 'HOLD'));
   tile.appendChild(acts);
   // In edit mode the overlay is hidden, so the tile itself opens the editor -
   // the same thing the overlay does when it is visible.
@@ -401,6 +416,7 @@ let editMode = false;
 let editorOpen = false;
 let editIndex = -1;
 let editColour = '';
+let editHold = false;
 let editPage = DEFAULT_PAGE;
 let deckPages = [DEFAULT_PAGE];
 let activePage = DEFAULT_PAGE;
@@ -411,6 +427,9 @@ function openEditor(index) {
   const m = index >= 0 ? macros[index] : { name: '', steps: '' };
   nameEl.value = m.name;
   editColour = COLOURS.includes(m.colour) ? m.colour : '';
+  editHold = !!m.hold;
+  const holdBox = document.getElementById('editHold');
+  if (holdBox) holdBox.checked = editHold;
   editPage = index >= 0 ? (macros[index].page || DEFAULT_PAGE) : activePage;
   paintColourSwatches();
   stepsEl.value = m.steps;
@@ -447,6 +466,7 @@ async function saveEditor() {
     steps: stepsEl.value,
     colour: editColour,
     page: editPage,
+    hold: editHold,
   };
   if (editIndex >= 0) next[editIndex] = entry;
   else next.push(entry);
@@ -493,7 +513,9 @@ const CHIPS = [
   ['VOLUMEUP', '{VOLUMEUP}'], ['VOLUMEDOWN', '{VOLUMEDOWN}'], ['MUTE', '{MUTE}'],
   ['SEARCH', '{SEARCH}'], ['CALC', '{CALC}'], ['BROWSERHOME', '{BROWSERHOME}'],
   ['BROWSERBACK', '{BROWSERBACK}'], ['BROWSERFORWARD', '{BROWSERFORWARD}'],
-  ['WAIT:500', '{WAIT:500}'], ['{', '{{'], ['}', '}}'],
+  ['WAIT:500', '{WAIT:500}'],
+  ['REPEAT:3', '{REPEAT:3}'], ['/REPEAT', '{/REPEAT}'],
+  ['{', '{{'], ['}', '}}'],
 ];
 
 function buildChips() {
@@ -673,6 +695,8 @@ async function init() {
 
   buildChips();
   document.getElementById('macroAdd').addEventListener('click', () => openEditor(-1));
+  const holdBox = document.getElementById('editHold');
+  if (holdBox) holdBox.addEventListener('change', () => { editHold = holdBox.checked; });
   const colourRow = document.getElementById('editColours');
   if (colourRow) {
     colourRow.addEventListener('click', (e) => {

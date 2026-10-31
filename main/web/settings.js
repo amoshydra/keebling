@@ -992,6 +992,78 @@ on('hidLoad', 'click', async () => {
   }
 });
 
+// ---------------------------------------------------------------- setup index
+// The settings page is nine screens in a column. Showing one at a time makes it
+// a menu, and the list can carry the current value of each - which is the
+// question people actually open settings to answer.
+const SETUP_ROWS = [
+  { page: 'typing',  group: 'Everyday',    label: 'Keyboard',
+    value: () => 'US QWERTY' },
+  { page: 'pointer', group: 'Everyday',    label: 'Pointer & scroll',
+    // mouse_gain is already a multiplier, not a percentage.
+    value: () => `${(Number(appSettings.mouse_gain) || 1).toFixed(2)}×` },
+  { page: 'screen',  group: 'Everyday',    label: 'Screen',
+    value: () => (Number(appSettings.screen_timeout_s) ? `${appSettings.screen_timeout_s}s` : 'always on') },
+  { page: 'device',  group: 'Device',      label: 'USB identity',
+    value: () => appSettings.usb_product || 'ESP32 Remote' },
+  { page: 'network', group: 'Device',      label: 'Network',
+    value: () => '' },
+  { page: 'backup',  group: 'Maintenance', label: 'Backup & restore' },
+  { page: 'ui',      group: 'Maintenance', label: 'Web UI files',
+    value: () => '' },
+  { page: 'hid',     group: 'Maintenance', label: 'HID descriptor' },
+  { page: 'diagnostics', group: 'Maintenance', label: 'Diagnostics' },
+];
+
+let setupPage = '';
+
+function h(tag, cls, text) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text !== undefined) n.textContent = text;
+  return n;
+}
+
+function setupSections() {
+  const wrap = document.querySelector('#view .wrap-setup');
+  return wrap ? [...wrap.querySelectorAll('section[data-page]')] : [];
+}
+
+function showSetupPage(page) {
+  setupPage = page && SETUP_ROWS.some((r) => r.page === page) ? page : '';
+  for (const section of setupSections()) {
+    // With no page chosen every section is hidden and the list stands alone.
+    section.hidden = setupPage ? section.dataset.page !== setupPage : true;
+  }
+  const list = document.getElementById('setupList');
+  if (list) list.hidden = !!setupPage;
+  const back = document.getElementById('setupBack');
+  if (back) back.hidden = !setupPage;
+  window.scrollTo(0, 0);
+}
+
+function renderSetupList() {
+  const list = document.getElementById('setupList');
+  if (!list) return;
+  list.textContent = '';
+  let group = '';
+  for (const row of SETUP_ROWS) {
+    if (row.group !== group) {
+      group = row.group;
+      list.appendChild(h('p', 'grp', group));
+    }
+    const b = h('button', 'setuprow');
+    b.type = 'button';
+    b.dataset.page = row.page;
+    b.appendChild(h('span', 'lb', row.label));
+    const value = typeof row.value === 'function' ? row.value() : '';
+    if (value) b.appendChild(h('span', 'vl', value));
+    b.appendChild(h('span', 'ch', '\u203A'));
+    b.addEventListener('click', () => showSetupPage(row.page));
+    list.appendChild(b);
+  }
+}
+
 // ---------------------------------------------------------------- lifecycle
 // The router calls init() after mounting the settings template and destroy()
 // before replacing it.
@@ -1009,6 +1081,10 @@ async function init() {
   wireScreenImageFormats();
   wireForm();
   readIntoForm();
+  renderSetupList();
+  showSetupPage('');
+  const setupBack = document.getElementById('setupBack');
+  if (setupBack) setupBack.addEventListener('click', () => showSetupPage(''));
   probeAttach();
   screenImageBytes = null;
   screenImageSource = null;

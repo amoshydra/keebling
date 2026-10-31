@@ -627,6 +627,9 @@ function togglePanel(el) {
       kbSource === 'system' && kbPane === 'built') {
     focusCapture();
   }
+  // The gesture hint is for a pad with room to move in; with the keyboard up
+  // the pad is a strip and the hint is just in the way.
+  if (pad && kbd) pad.classList.toggle('slot-open', kbd.classList.contains('show'));
   setPane(kbPane);
 }
 
@@ -1192,7 +1195,9 @@ function init() {
   // The Keys tab is this same view with the keyboard slot open, so arriving
   // there does not need a second copy of the pad.
   if (/^#\/keys/.test(location.hash)) {
-    if (!kbd.classList.contains('show')) kbd.classList.add('show');
+    // Through togglePanel, so everything that follows from the slot being open
+    // happens here too - the pane state and the pad's own flag.
+    if (!kbd.classList.contains('show')) togglePanel(kbd);
     setPane('built');
   }
   kbd.addEventListener('contextmenu', preventContextMenu);
