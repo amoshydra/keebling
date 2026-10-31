@@ -2051,6 +2051,29 @@ __webTests.push({
 
 __webTests.push({
   page: 'macros',
+  name: 'a deck button keeps its colour',
+  fn: async () => {
+    document.getElementById('deckEdit').click();
+    const tile = [...document.querySelectorAll('.macro')]
+      .find((c) => c.querySelector('.name').textContent === 'Open Chrome');
+    tile.click();                       // in edit mode the tile opens the editor
+    await __sleep(50);
+
+    document.querySelector('#editColours [data-colour="blue"]').click();
+    document.getElementById('editSave').click();
+    await __sleep(400);
+
+    const stored = JSON.parse(localStorage.getItem('esp32remote.macros') || '[]');
+    const saved = stored.find((m) => m.name === 'Open Chrome');
+    __assert(saved && saved.colour === 'blue', `stored: ${JSON.stringify(saved)}`);
+    __assert(document.querySelector('.macro.c-blue'),
+      'the tile did not take the colour');
+    document.getElementById('deckEdit').click();
+  },
+});
+
+__webTests.push({
+  page: 'macros',
   name: 'macro page deletes on a second tap',
   fn: async () => {
     const find = (name) => [...document.querySelectorAll('.macro')]

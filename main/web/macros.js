@@ -16,6 +16,7 @@
 const MacrosView = (() => {
 
 const STORE_KEY = 'esp32remote.macros';
+const COLOURS = ['', 'blue', 'amber', 'red', 'green'];
 
 // Assigned by init(); nothing here reaches the document at load.
 let dot = null;
@@ -103,7 +104,12 @@ function sanitizeMacros(list) {
   const raw = Array.isArray(list) ? list : [];
   const kept = raw
     .filter((m) => m && typeof m === 'object')
-    .map((m) => ({ name: String(m.name || ''), steps: String(m.steps || '') }))
+    .map((m) => ({
+      name: String(m.name || ''),
+      steps: String(m.steps || ''),
+      // Anything unknown falls back to no colour rather than breaking the tile.
+      colour: COLOURS.includes(m.colour) ? m.colour : '',
+    }))
     .filter((m) => m.name || m.steps);
   return { kept, dropped: raw.length - kept.length };
 }
@@ -181,7 +187,7 @@ function macroTitle(m, i) {
 function pendingMacros() {
   if (!editorOpen) return macros;
   const next = macros.slice();
-  const entry = { name: nameEl.value.trim(), steps: stepsEl.value };
+  const entry = { name: nameEl.value.trim(), steps: stepsEl.value, colour: editColour };
   if (editIndex >= 0) next[editIndex] = entry;
   else next.push(entry);
   return next;
@@ -247,6 +253,7 @@ function deckTile(m, i) {
   const parsed = parseMacro(m.steps);
   const tile = el('div', 'macro');
   tile.dataset.index = String(i);
+  if (m.colour) tile.classList.add('c-' + m.colour);
   if (editMode) tile.classList.add('editing');
 
   const run = el('button', 'run', 'Run');
@@ -281,6 +288,14 @@ function deckTile(m, i) {
     );
   }
   tile.appendChild(acts);
+  // In edit mode the overlay is hidden, so the tile itself opens the editor -
+  // the same thing the overlay does when it is visible.
+  if (editMode) {
+    tile.addEventListener('click', (e) => {
+      if (e.target.closest && e.target.closest('.acts')) return;
+      openEditor(i);
+    });
+  }
   return tile;
 }
 
@@ -307,18 +322,29 @@ function render() {
 let editMode = false;
 let editorOpen = false;
 let editIndex = -1;
+let editColour = '';
 
 function openEditor(index) {
   editorOpen = true;
   editIndex = index;
   const m = index >= 0 ? macros[index] : { name: '', steps: '' };
   nameEl.value = m.name;
+  editColour = COLOURS.includes(m.colour) ? m.colour : '';
+  paintColourSwatches();
   stepsEl.value = m.steps;
   editorTitleEl.textContent = index >= 0 ? 'Edit macro' : 'New macro';
   editorEl.classList.add('show');
   showSaveNote('');
   updatePreview();
   editorEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+function paintColourSwatches() {
+  const row = document.getElementById('editColours');
+  if (!row) return;
+  for (const b of row.querySelectorAll('button[data-colour]')) {
+    b.classList.toggle('on', b.dataset.colour === editColour);
+  }
 }
 
 function closeEditor() {
@@ -334,7 +360,7 @@ async function saveEditor() {
     return;
   }
   const next = macros.slice();
-  const entry = { name: nameEl.value.trim(), steps: stepsEl.value };
+  const entry = { name: nameEl.value.trim(), steps: stepsEl.value, colour: editColour };
   if (editIndex >= 0) next[editIndex] = entry;
   else next.push(entry);
 
@@ -556,6 +582,15 @@ async function init() {
 
   buildChips();
   document.getElementById('macroAdd').addEventListener('click', () => openEditor(-1));
+  const colourRow = document.getElementById('editColours');
+  if (colourRow) {
+    colourRow.addEventListener('click', (e) => {
+      const b = e.target.closest ? e.target.closest('button[data-colour]') : null;
+      if (!b) return;
+      editColour = b.dataset.colour;
+      paintColourSwatches();
+    });
+  }
   document.getElementById('deckEdit').addEventListener('click', () => {
     editMode = !editMode;
     confirmDelete = null;
