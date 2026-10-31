@@ -566,8 +566,20 @@ function onDragStart(e) { e.preventDefault(); }
 // ---------------------------------------------------------------- on-screen buttons
 function bindButton(id, bit) {
   const el = document.getElementById(id);
-  const down = (e) => { e.preventDefault(); buttons |= bit; sendMouse(0, 0, 0); };
-  const up = (e) => { e.preventDefault(); buttons &= ~bit; sendMouse(0, 0, 0); };
+  // stopPropagation: the buttons sit on the pad, and a press must not also
+  // start a gesture underneath it.
+  const down = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    buttons |= bit;
+    sendMouse(0, 0, 0);
+  };
+  const up = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    buttons &= ~bit;
+    sendMouse(0, 0, 0);
+  };
   el.addEventListener('pointerdown', down);
   el.addEventListener('pointerup', up);
   el.addEventListener('pointerleave', up);
@@ -583,35 +595,39 @@ function bindButton(id, bit) {
 // The query has to match the phone breakpoint in index.html's stylesheet.
 const PHONE_QUERY = '(max-width: 620px)';
 
-// The three toggles and the panels they own. The link is kept here so the
-// button can show which panel is open: tapping "Keys" opened a keyboard with
-// no sign that the button had done anything, and tapping it again to close was
-// guesswork.
-const PANEL_TOGGLES = [['bKbd', 'kbd'], ['bMedia', 'mediaPanel'], ['bType', 'type']];
+// The Keys destination holds three panes and shows one: the on-screen
+// keyboard, the media keys, or the text box. They used to be sibling pages
+// reached from a row of buttons; the strip inside the slot replaces that.
+const PANES = ['built', 'media', 'text'];
+let kbPane = 'built';
+let kbModesEl = null;
 
-function syncPanelToggles() {
-  for (const [btnId, panelId] of PANEL_TOGGLES) {
-    const btn = document.getElementById(btnId);
-    const panel = document.getElementById(panelId);
-    if (!btn || !panel) continue;
-    const open = panel.classList.contains('show');
-    btn.classList.toggle('on', open);
-    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+function setPane(name) {
+  kbPane = PANES.includes(name) ? name : 'built';
+  if (typePanel) typePanel.classList.toggle('show', kbPane === 'text');
+  if (mediaPanel) mediaPanel.classList.toggle('show', kbPane === 'media');
+  const built = kbPane === 'built';
+  if (kbBuiltEl) kbBuiltEl.hidden = !built || kbSource === 'system';
+  if (kbCaptureEl) kbCaptureEl.hidden = !built || kbSource !== 'system';
+  if (kbSourceEl) kbSourceEl.hidden = !built;
+  if (kbModesEl) {
+    for (const btn of kbModesEl.querySelectorAll('button')) {
+      const on = btn.dataset.pane === kbPane;
+      btn.classList.toggle('on', on);
+      btn.setAttribute('aria-selected', on ? 'true' : 'false');
+    }
   }
 }
 
 function togglePanel(el) {
-  const show = !el.classList.contains('show');
-  if (show && window.matchMedia(PHONE_QUERY).matches) {
-    for (const other of document.querySelectorAll('#kbd.show, .panel.show')) {
-      if (other !== el) other.classList.remove('show');
-    }
-  }
-  el.classList.toggle('show', show);
+  el.classList.toggle('show', !el.classList.contains('show'));
   // Opening the slot in system mode should raise the keyboard, not make the
   // user tap a second time. Still inside the click, so the IME will open.
-
-  syncPanelToggles();
+  if (el.classList.contains('show') && el.id === 'kbd' &&
+      kbSource === 'system' && kbPane === 'built') {
+    focusCapture();
+  }
+  setPane(kbPane);
 }
 
 // ---------------------------------------------------------------- system keyboard
@@ -664,8 +680,6 @@ function setKeyboardSource(src) {
   if (next !== kbSource) releaseAll();      // a switch must not strand a held key
   kbSource = next;
   try { localStorage.setItem(KB_SOURCE_KEY, next); } catch (_) {}
-  if (kbBuiltEl) kbBuiltEl.hidden = next === 'system';
-  if (kbCaptureEl) kbCaptureEl.hidden = next !== 'system';
   if (kbSourceEl) {
     for (const btn of kbSourceEl.querySelectorAll('button')) {
       const on = btn.dataset.src === next;
@@ -674,6 +688,7 @@ function setKeyboardSource(src) {
     }
   }
   if (next !== 'system' && captureField) captureField.blur();
+  setPane(kbPane);
 }
 
 function captureMods(e) {
@@ -1171,12 +1186,14 @@ function init() {
 
   buildKeyboard();
   buildMedia();
-  syncPanelToggles();
+  kbModesEl = document.getElementById('kbModes');
   kbd = document.getElementById('kbd');
+  setPane('built');
   // The Keys tab is this same view with the keyboard slot open, so arriving
   // there does not need a second copy of the pad.
   if (/^#\/keys/.test(location.hash)) {
-    if (!kbd.classList.contains('show')) togglePanel(kbd);
+    if (!kbd.classList.contains('show')) kbd.classList.add('show');
+    setPane('built');
   }
   kbd.addEventListener('contextmenu', preventContextMenu);
 
@@ -1230,10 +1247,16 @@ function init() {
   bindButton('bRight', 2);
   bindButton('bMid', 4);
 
-  document.getElementById('bKbd').addEventListener('click', () => togglePanel(kbd));
-  document.getElementById('bRelease').addEventListener('click', releaseAll);
-  document.getElementById('bMedia').addEventListener('click', () => togglePanel(mediaPanel));
-  document.getElementById('bType').addEventListener('click', () => togglePanel(typePanel));
+  // Release lives in the shell's status bar, which outlives this view, so it is
+  // assigned rather than added: a listener per mount would stack up.
+  const releaseBtn = document.getElementById('bRelease');
+  if (releaseBtn) releaseBtn.onclick = releaseAll;
+  if (kbModesEl) {
+    kbModesEl.addEventListener('click', (e) => {
+      const btn = e.target.closest ? e.target.closest('button[data-pane]') : null;
+      if (btn) setPane(btn.dataset.pane);
+    });
+  }
   document.getElementById('typeClear').addEventListener('click', onTypeClear);
   document.getElementById('typeStop').addEventListener('click', onTypeStop);
   document.getElementById('typeGo').addEventListener('click', onTypeGo);

@@ -2332,29 +2332,15 @@ __webTests.push({
 // ---------------------------------------------------------------- control page, wide
 // The same page at a desktop width: the two-row phone layout must not follow
 // it there.
+
 __webTests.push({
   page: 'control-desktop',
-  name: 'desktop keeps the controls on one row and panels independent',
+  name: 'desktop: the tabs stay on one row',
   fn: async () => {
-    __assert(window.innerWidth > 620, `viewport is ${window.innerWidth}px, expected a desktop one`);
-    const bar = document.getElementById('controls');
-    const mids = [...bar.children].map((el) => {
-      const r = el.getBoundingClientRect();
-      return Math.round((r.top + r.bottom) / 2);
-    });
-    const geom = [...bar.children]
-      .map((el) => `${el.id}:${Math.round(el.getBoundingClientRect().top)}+${Math.round(el.getBoundingClientRect().height)}`)
-      .join(' ');
-    __assert(new Set(mids).size === 1, `the controls wrapped onto ${new Set(mids).size} rows: ${geom}`);
-    __assert(bar.getBoundingClientRect().height <= 60,
-      `the controls bar is ${Math.round(bar.getBoundingClientRect().height)}px tall`);
-
-    document.getElementById('bKbd').click();
-    __assert(document.getElementById('kbd').classList.contains('show'), 'the keyboard did not open');
-    document.getElementById('bMedia').click();
-    __assert(document.getElementById('kbd').classList.contains('show'),
-      'opening a panel closed the keyboard on a desktop');
-    __assert(document.getElementById('mediaPanel').classList.contains('show'), 'the media panel did not open');
+    const tabs = [...document.querySelectorAll('.tabbar a')];
+    __assert(tabs.length === 4, `${tabs.length} tabs`);
+    const tops = new Set(tabs.map((a) => Math.round(a.getBoundingClientRect().top)));
+    __assert(tops.size === 1, 'the tabs wrapped onto more than one row');
   },
 });
 
@@ -2388,33 +2374,6 @@ __webTests.push({
 });
 
 // ---------------------------------------------------------------- control page, phone
-__webTests.push({
-  page: 'control',
-  name: 'phone: the controls fit two rows, thumbs at the bottom',
-  fn: async () => {
-    __assert(window.innerWidth <= 620, `viewport is ${window.innerWidth}px, expected a phone one`);
-    const bar = document.getElementById('controls');
-    const rect = bar.getBoundingClientRect();
-    __assert(rect.height <= 130, `the controls bar is ${Math.round(rect.height)}px tall`);
-    __assert(bar.scrollWidth <= bar.clientWidth + 1,
-      `the controls overflow sideways (${bar.scrollWidth} > ${bar.clientWidth})`);
-
-    const top = document.getElementById('bKbd').getBoundingClientRect().top;
-    // The pointer buttons sit under the panel toggles...
-    for (const id of ['bLeft', 'bRight', 'bMid']) {
-      const b = document.getElementById(id).getBoundingClientRect();
-      __assert(b.top > top, `${id} is not below the panel toggles`);
-      __assert(b.height >= 42, `${id} is only ${Math.round(b.height)}px tall`);
-    }
-    // ...and Release spans both rows on the right, so it starts level with the
-    // toggles and reaches the bottom.
-    const rel = document.getElementById('bRelease').getBoundingClientRect();
-    __assert(rel.top <= top + 1, 'Release does not start level with the toggles');
-    const tabsTop = document.querySelector('.tabbar').getBoundingClientRect().top;
-    __assert(rel.bottom > tabsTop - 10, 'Release does not reach the tab bar');
-    __assert(rel.height > 90, `Release is only ${Math.round(rel.height)}px tall`);
-  },
-});
 
 __webTests.push({
   page: 'control',
@@ -2474,6 +2433,45 @@ __webTests.push({
 
 __webTests.push({
   page: 'control',
+  name: 'the pointer buttons float on the pad and are big enough',
+  fn: async () => {
+    const pad = document.getElementById('pad').getBoundingClientRect();
+    for (const id of ['bLeft', 'bMid', 'bRight']) {
+      const b = document.getElementById(id).getBoundingClientRect();
+      __assert(b.width >= 44 && b.height >= 44,
+        `${id} is ${Math.round(b.width)}x${Math.round(b.height)}`);
+      __assert(b.top >= pad.top && b.bottom <= pad.bottom + 1, `${id} is not on the pad`);
+    }
+  },
+});
+
+__webTests.push({
+  page: 'control',
+  name: 'the Keys destination shows one pane at a time',
+  fn: async () => {
+    const slot = document.getElementById('kbd');
+    slot.classList.add('show');
+    const type = document.getElementById('type');
+    const media = document.getElementById('mediaPanel');
+    const pick = (pane) => document.querySelector(`#kbModes [data-pane="${pane}"]`).click();
+
+    pick('media');
+    __assert(media.classList.contains('show'), 'the media pane did not open');
+    __assert(!type.classList.contains('show'), 'the text pane stayed open');
+
+    pick('text');
+    __assert(type.classList.contains('show'), 'the text pane did not open');
+    __assert(!media.classList.contains('show'), 'the media pane stayed open');
+
+    pick('built');
+    __assert(!type.classList.contains('show') && !media.classList.contains('show'),
+      'the keyboard pane did not come back');
+    slot.classList.remove('show');
+  },
+});
+
+__webTests.push({
+  page: 'control',
   name: 'every virtual key is labelled',
   fn: async () => {
     // The panel is built at init and only toggled, so this does not need to
@@ -2486,33 +2484,6 @@ __webTests.push({
   },
 });
 
-__webTests.push({
-  page: 'control',
-  name: 'the open panel lights its toggle',
-  fn: async () => {
-    const kbd = document.getElementById('bKbd');
-    const media = document.getElementById('bMedia');
-    try {
-      __assert(!kbd.classList.contains('on'), 'the keyboard toggle starts lit');
-      kbd.click();
-      __assert(kbd.classList.contains('on'), 'opening the keyboard left the toggle unlit');
-      __assert(kbd.getAttribute('aria-expanded') === 'true', 'aria-expanded was not set');
-
-      // On a phone only one panel is open at a time, and the light moves with it.
-      if (window.innerWidth <= 620) {
-        media.click();
-        __assert(media.classList.contains('on'), 'the media toggle did not light');
-        __assert(!kbd.classList.contains('on'), 'the keyboard toggle stayed lit behind media');
-      }
-    } finally {
-      // Close whatever is still open, and only that: an unconditional click
-      // would toggle a closed panel back open.
-      for (const b of [kbd, media]) if (b.classList.contains('on')) b.click();
-    }
-    __assert(!kbd.classList.contains('on') && !media.classList.contains('on'),
-      'a toggle was left lit after both panels closed');
-  },
-});
 
 __webTests.push({
   page: 'control',
@@ -2547,8 +2518,7 @@ __webTests.push({
     // The translator listens on the document and only acts while the field owns
     // the caret, so the panel has to be open for focus to be possible.
     const panel = document.getElementById('kbd');
-    const toggle = document.getElementById('bKbd');
-    if (!panel.classList.contains('show')) toggle.click();
+    if (!panel.classList.contains('show')) panel.classList.add('show');
     field.focus();
     __assert(document.activeElement === field, 'the capture field did not take focus');
 
@@ -2584,8 +2554,8 @@ __webTests.push({
     __assert(sent[0][2] === 0x04, `the press report is ${sent[0]}`);
     __assert(sent[1][1] === 0 && sent[1][2] === 0, `the release report is ${sent[1]}`);
 
-    PadView.setKeyboardSource('built', false);
-    if (panel.classList.contains('show')) toggle.click();
+    PadView.setKeyboardSource('built');
+    panel.classList.remove('show');
   },
 });
 
@@ -2596,8 +2566,7 @@ __webTests.push({
     const field = PadView.captureField;
     PadView.setKeyboardSource('system', false);
     const panel = document.getElementById('kbd');
-    const toggle = document.getElementById('bKbd');
-    if (!panel.classList.contains('show')) toggle.click();
+    if (!panel.classList.contains('show')) panel.classList.add('show');
     field.focus();
     __assert(document.activeElement === field, 'the capture field did not take focus');
     const sent = __capture();
@@ -2614,7 +2583,7 @@ __webTests.push({
     // An IME can move focus itself for its own Tab key even though the keydown
     // was cancelled. The caret has to come back, or the next key goes to a
     // button instead of the host.
-    document.getElementById('bMedia').focus();
+    document.querySelector('#kbModes [data-pane="media"]').focus();
     __assert(document.activeElement !== field, 'the field kept focus, so this proves nothing');
     await __sleep(30);
     __assert(document.activeElement === field,
@@ -2654,8 +2623,8 @@ __webTests.push({
     __assert(sent.every((r) => r.slice(1).every((v) => v === 0)),
       `blur left something held: ${JSON.stringify(sent)}`);
 
-    PadView.setKeyboardSource('built', false);
-    if (panel.classList.contains('show')) toggle.click();
+    PadView.setKeyboardSource('built');
+    panel.classList.remove('show');
   },
 });
 
@@ -2665,8 +2634,7 @@ __webTests.push({
   fn: async () => {
     PadView.setKeyboardSource('system');
     const panel = document.getElementById('kbd');
-    const toggle = document.getElementById('bKbd');
-    if (!panel.classList.contains('show')) toggle.click();
+    if (!panel.classList.contains('show')) panel.classList.add('show');
 
     const field = PadView.captureField;
     field.blur();
@@ -2677,7 +2645,7 @@ __webTests.push({
     __assert(document.activeElement === field, 'the button did not focus the field');
 
     PadView.setKeyboardSource('built');
-    if (panel.classList.contains('show')) toggle.click();
+    panel.classList.remove('show');
   },
 });
 
@@ -2709,29 +2677,6 @@ __webTests.push({
   },
 });
 
-__webTests.push({
-  page: 'control',
-  name: 'phone: one panel at a time',
-  fn: async () => {
-    const kbd = document.getElementById('kbd');
-    const media = document.getElementById('mediaPanel');
-
-    document.getElementById('bKbd').click();
-    __assert(kbd.classList.contains('show'), 'the keyboard did not open');
-
-    document.getElementById('bMedia').click();
-    __assert(media.classList.contains('show'), 'the media panel did not open');
-    __assert(!kbd.classList.contains('show'), 'the keyboard stayed open behind the media panel');
-
-    document.getElementById('bKbd').click();
-    __assert(kbd.classList.contains('show') && !media.classList.contains('show'),
-      'the media panel stayed open behind the keyboard');
-
-    // Leave the page as the other tests expect it.
-    document.getElementById('bKbd').click();
-    __assert(!kbd.classList.contains('show'), 'the keyboard did not close');
-  },
-});
 
 // ---------------------------------------------------------------- navigation
 // The four views are templates in one shell; changing the hash mounts one and

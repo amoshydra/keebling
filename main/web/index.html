@@ -13,6 +13,9 @@
      are <template>s below and the router mounts exactly one at a time. -->
 <div class="topbar">
   <span><span class="dot off" id="dot"></span><span id="statusText">connecting…</span></span>
+  <!-- Always reachable, never adjacent to a button you press in a hurry. It is
+       the one action you look for when something is stuck on the host. -->
+  <button id="bRelease" class="releasechip" type="button">Release</button>
 </div>
 
 <!-- One access gate for the whole shell. It stays hidden until requireAuth
@@ -64,6 +67,13 @@
     <!-- Low-key confirmation that the host is receiving input. Only visible
          while captured and connected. -->
     <div id="inputPulse" aria-hidden="true"></div>
+    <!-- Three buttons that need to be reachable without leaving the pad. They
+         float over it at the thumb rather than sitting in a row of their own. -->
+    <div id="mouseButtons">
+      <button id="bLeft" type="button">L</button>
+      <button id="bMid" type="button">M</button>
+      <button id="bRight" type="button">R</button>
+    </div>
     <button id="helpOpen" type="button" aria-label="Gesture help">?</button>
   </div>
 
@@ -97,6 +107,16 @@
     </div>
   </div>
 
+  <!-- The Keys destination owns every way of sending keys: the on-screen
+       keyboard, the phone's own keyboard, media keys and typed text. The strip
+       picks which, so they stop being sibling pages you navigate between. -->
+  <div id="kbd">
+    <div id="kbModes" role="tablist" aria-label="Key input">
+      <button type="button" role="tab" data-pane="built">⌨ Keyboard</button>
+      <button type="button" role="tab" data-pane="media">🎵 Media</button>
+      <button type="button" role="tab" data-pane="text">📋 Text</button>
+    </div>
+
   <div class="panel" id="type">
     <h2>Type text into the host</h2>
     <textarea id="typeText" placeholder="Paste or type text here — it will be typed into the host as real keystrokes."
@@ -114,7 +134,6 @@
        so the switch is the first thing in it rather than a setting buried in
        Setup: it describes the phone you are holding, not the device. The choice
        is remembered per browser. -->
-  <div id="kbd">
     <div id="kbSource" role="tablist" aria-label="Keyboard source">
       <button type="button" role="tab" data-src="built">⌨ Built-in</button>
       <button type="button" role="tab" data-src="system">⌨ Your keyboard</button>
@@ -131,25 +150,15 @@
              autocomplete="off" autocorrect="off" autocapitalize="none"
              aria-label="Type with your keyboard">
     </div>
-  </div>
 
-  <div class="panel" id="mediaPanel">
-    <h2>Media &amp; browser keys</h2>
-    <div id="media"></div>
-    <p class="note" id="mediaNote">These are Consumer Control usages. Whether
-      they do anything depends on the host — macOS and Windows handle the
-      transport and volume keys; some Linux desktops need the keybound to an
-      action first.</p>
-  </div>
-
-  <div id="controls">
-    <button id="bLeft">L</button>
-    <button id="bRight">R</button>
-    <button id="bMid">M</button>
-    <button id="bKbd">⌨ Keys</button>
-    <button id="bMedia">🎵 Media</button>
-    <button id="bType">📋 Type</button>
-    <button id="bRelease" class="danger">Release</button>
+    <div class="panel" id="mediaPanel">
+      <h2>Media &amp; browser keys</h2>
+      <div id="media"></div>
+      <p class="note" id="mediaNote">These are Consumer Control usages. Whether
+        they do anything depends on the host — macOS and Windows handle the
+        transport and volume keys; some Linux desktops need the keybound to an
+        action first.</p>
+    </div>
   </div>
 </template>
 
