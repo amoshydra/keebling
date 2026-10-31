@@ -326,6 +326,36 @@
       <div class="panel" id="logs" style="max-height:40dvh"><pre id="logText">—</pre></div>
     </section>
 
+    <!-- Temporary instrument. It exists to answer one question: what does the
+         browser actually deliver from the phone's own keyboard? That decides
+         whether a system keyboard (Hacker's Keyboard, an IME, a Bluetooth
+         board) can drive the device directly, or whether it has to be
+         translated through a capture field first. Remove it once the answer is
+         recorded in the design notes. -->
+    <section>
+      <h2>Key event probe</h2>
+      <p class="note">Records exactly what the browser delivers from a keyboard
+        &mdash; the phone&rsquo;s own keyboard, a Bluetooth board, or this
+        computer. Tap the box below, then press keys on whichever keyboard you
+        want to test.</p>
+      <p class="note">Try each one, because they can take different paths:
+        a letter, <strong>Shift</strong>+a letter, <strong>Ctrl</strong>+C,
+        Tab, Esc, F5, the four arrows, Backspace with text in the box and
+        without, Enter, and a chord your keyboard can make.</p>
+      <textarea id="probeField" rows="2" spellcheck="false"
+                autocorrect="off" autocapitalize="none" autocomplete="off"
+                placeholder="tap here, then press keys"></textarea>
+      <div class="row" style="margin:10px 0">
+        <button id="probeClear">Clear</button>
+        <button id="probeSelect">Select all</button>
+      </div>
+      <div class="note" id="probeStats">not listening</div>
+      <pre id="probeLog"></pre>
+      <p class="note">No copy button: this page is served over plain HTTP, where
+        the clipboard API is unavailable. Select all, then copy from the
+        selection menu.</p>
+    </section>
+
     <div class="savebar">
       <button id="save" class="primary">Save now</button>
       <span class="note" id="saveNote" style="margin:0">changes save automatically</span>

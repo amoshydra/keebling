@@ -805,6 +805,39 @@ __webTests.push({
 
 __webTests.push({
   page: 'settings',
+  name: 'the key probe records modifiers, codes and the usage it would send',
+  fn: async () => {
+    const field = document.getElementById('probeField');
+    const log = document.getElementById('probeLog');
+    __assert(field && log, 'the probe is not in the settings view');
+
+    field.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'c', code: 'KeyC', keyCode: 67, ctrlKey: true, bubbles: true,
+    }));
+    const after = log.textContent;
+    __assert(/down/.test(after), `nothing was recorded: ${after}`);
+    __assert(/code="KeyC"/.test(after), `the code was not recorded: ${after}`);
+    __assert(/kc=67/.test(after), `keyCode was not recorded: ${after}`);
+    __assert(/ctrl/.test(after), `the modifier was not recorded: ${after}`);
+    // 0x06 is KeyC on the Keyboard/Keypad page: the probe has to say what our
+    // translator would actually send, or it cannot answer the question it
+    // exists for.
+    __assert(/0x06/i.test(after), `no HID usage was resolved: ${after}`);
+
+    field.dispatchEvent(new InputEvent('input', {
+      inputType: 'insertText', data: 'c', bubbles: true,
+    }));
+    __assert(/insertText/.test(log.textContent), 'the input event was not recorded');
+
+    document.getElementById('probeClear').click();
+    __assert(log.textContent === '', `clear left text behind: ${log.textContent}`);
+    __assert(/0 keydown/.test(document.getElementById('probeStats').textContent),
+      'clear did not reset the counters');
+  },
+});
+
+__webTests.push({
+  page: 'settings',
   name: 'edits save to the device automatically',
   fn: async () => {
     document.getElementById('typeSpeed').value = '35';

@@ -638,6 +638,42 @@ input[type=checkbox], input[type=radio] { width: 18px; height: 18px; }
 .file .acts { display: flex; gap: 6px; margin-top: 10px; }
 .file .acts button { padding: 8px 12px; font-size: 13px; }
 
+/* ---------------------------------------------------------------- key probe */
+/* Diagnostics instrument: monospace, newest first, and selectable so the log
+   can be taken off a phone - the clipboard API needs a secure context and this
+   page is served over plain HTTP. */
+#probeField { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 13px; }
+#probeLog {
+  margin-top: 10px;
+  max-height: 40dvh;
+  overflow-y: auto;
+  padding: 8px;
+  border-radius: 8px;
+  background: #0e0e0e;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  color: #bbb;
+  user-select: text;
+  -webkit-user-select: text;
+}
+#probeLog:empty::before { content: "waiting for a key…"; color: #555; }
+.probe-line {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);   /* minmax: let the text shrink */
+  gap: 8px;
+  padding: 3px 0;
+  border-bottom: 1px solid #151515;
+  /* The parent is a <pre>, so white-space is inherited as pre and nothing
+     wraps. Put it back. */
+  white-space: pre-wrap;
+}
+.probe-line .h { color: #7d7d7d; white-space: nowrap; }
+.probe-line .h.probe-key { color: #9fc4ee; }
+.probe-line .h.probe-input { color: #ffb74d; }
+.probe-line .h.probe-comp { color: #a5d6a7; }
+.probe-line .d { color: #cfcfcf; min-width: 0; overflow-wrap: anywhere; }
+
 /* ---------------------------------------------------------------- pointer feedback */
 /* Hover is for a real pointer only. On a touch screen a :hover rule sticks
    after the tap, leaving a key or button looking pressed long after it was

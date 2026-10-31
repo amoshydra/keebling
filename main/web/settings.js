@@ -570,6 +570,174 @@ on('logsLoad', 'click', async () => {
   }
 });
 
+// ---------------------------------------------------------------- key probe
+// Deliberately dumb: it records what the browser delivers, not what we hope it
+// delivers. The answer differs by IME and by Android version, so this is worth
+// measuring on the actual phone rather than reasoning about.
+//
+// What each line means:
+//   key="c" code="KeyC" kc=67 ctrl loc=0   what the event claims
+//   →0x06                                  the HID usage our KEY map would
+//                                          send for that code, or absent when
+//                                          nothing maps
+const PROBE_MAX_LINES = 50;
+const PROBE_EVENTS = ['keydown', 'keyup', 'beforeinput', 'input',
+                      'compositionstart', 'compositionend'];
+
+let probeField = null;
+let probeLog = null;
+let probeStatsEl = null;
+let probeSeen = 0;
+let probeTally = { down: 0, up: 0, input: 0 };
+let probeStart = 0;
+
+const probeQuote = (v) => JSON.stringify(String(v));
+
+// Short labels, because the whole line has to survive a 390px phone. The
+// colour carries the type, so the word does not have to be long.
+// Namespaced class names: a bare `k` is the virtual-keyboard key elsewhere in
+// this stylesheet, and it cost an afternoon to find that out.
+const PROBE_LABELS = {
+  keydown: ['down', 'probe-key'],
+  keyup: ['up', 'probe-key'],
+  beforeinput: ['before', 'probe-input'],
+  input: ['input', 'probe-input'],
+  compositionstart: ['comp', 'probe-comp'],
+  compositionend: ['comp-end', 'probe-comp'],
+};
+
+// The usage the pad's translator would emit for a DOM code, if any. PadView is
+// a classic script loaded by the shell, so it exists here even though the
+// control view is not mounted.
+function probeUsage(code) {
+  if (typeof PadView === 'undefined' || !PadView.KEY) return '';
+  const usage = PadView.KEY[code];
+  if (usage === undefined) return '';
+  return '  →0x' + usage.toString(16).toUpperCase().padStart(2, '0');
+}
+
+function probeStats() {
+  if (!probeStatsEl) return;
+  const vv = window.visualViewport;
+  const inset = vv ? Math.max(0, Math.round(window.innerHeight - vv.height)) : 0;
+  probeStatsEl.textContent =
+    `${probeSeen} events · ${probeTally.down} keydown, ${probeTally.input} input` +
+    ` · keyboard inset ≈ ${inset}px (window ${window.innerHeight}` +
+    `, visual ${vv ? Math.round(vv.height) : '—'})`;
+}
+
+// Two columns rather than one line: the timestamp and the event type stay put
+// and the detail wraps underneath itself instead of running off the edge.
+function probeAdd(kind, detail) {
+  if (!probeLog) return;
+  const [label, cls] = PROBE_LABELS[kind] || [kind, 'x'];
+  const line = document.createElement('div');
+  line.className = 'probe-line';
+
+  const head = document.createElement('span');
+  head.className = 'h ' + cls;
+  head.textContent = `${label} +${Math.round(performance.now() - probeStart)}ms`;
+
+  const body = document.createElement('span');
+  body.className = 'd';
+  body.textContent = detail;
+
+  line.append(head, body);
+  // Newest first: on a phone, scrolling a growing log is worse than reading
+  // the last line at the top.
+  probeLog.prepend(line);
+  while (probeLog.childElementCount > PROBE_MAX_LINES) {
+    probeLog.lastElementChild.remove();
+  }
+  probeSeen++;
+  probeStats();
+}
+
+function probeRecord(e) {
+  const mods = [];
+  if (e.ctrlKey) mods.push('ctrl');
+  if (e.altKey) mods.push('alt');
+  if (e.shiftKey) mods.push('shift');
+  if (e.metaKey) mods.push('meta');
+
+  let detail;
+  if (e.type === 'keydown' || e.type === 'keyup') {
+    detail = `key=${probeQuote(e.key)} code=${probeQuote(e.code)} kc=${e.keyCode}` +
+      ` loc=${e.location}` +
+      (mods.length ? ' ' + mods.join('+') : '') +
+      (e.repeat ? ' repeat' : '') +
+      (e.isComposing ? ' composing' : '') +
+      probeUsage(e.code);
+    if (e.type === 'keydown') probeTally.down++;
+    else probeTally.up++;
+  } else {
+    detail = (e.inputType ? `type=${e.inputType} ` : '') +
+      (e.data === null || e.data === undefined
+        ? 'data=none'
+        : `data=${probeQuote(e.data)}`) +
+      (e.isComposing ? ' composing' : '');
+    if (e.type === 'input') probeTally.input++;
+  }
+  probeAdd(e.type, detail);
+}
+
+function probeViewport() {
+  probeStats();
+}
+
+function probeClear() {
+  if (probeLog) probeLog.textContent = '';
+  if (probeField) probeField.value = '';
+  probeSeen = 0;
+  probeTally = { down: 0, up: 0, input: 0 };
+  probeStart = performance.now();
+  probeStats();
+}
+
+function probeSelectAll() {
+  if (!probeLog) return;
+  const range = document.createRange();
+  range.selectNodeContents(probeLog);
+  const sel = window.getSelection();
+  if (!sel) return;
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
+function probeAttach() {
+  probeField = document.getElementById('probeField');
+  probeLog = document.getElementById('probeLog');
+  probeStatsEl = document.getElementById('probeStats');
+  if (!probeField || !probeLog) return;
+
+  // Capture phase: record the event as the browser delivered it, before
+  // anything else in the page can stop it.
+  for (const type of PROBE_EVENTS) {
+    probeField.addEventListener(type, probeRecord, true);
+  }
+  // The keyboard opening is the one thing that tells us how much room a docked
+  // strip would have, so the inset is measured, not guessed.
+  window.visualViewport?.addEventListener('resize', probeViewport);
+  window.visualViewport?.addEventListener('scroll', probeViewport);
+  probeClear();
+}
+
+function probeDetach() {
+  if (probeField) {
+    for (const type of PROBE_EVENTS) {
+      probeField.removeEventListener(type, probeRecord, true);
+    }
+  }
+  window.visualViewport?.removeEventListener('resize', probeViewport);
+  window.visualViewport?.removeEventListener('scroll', probeViewport);
+  probeField = null;
+  probeLog = null;
+  probeStatsEl = null;
+}
+
+on('probeClear', 'click', probeClear);
+on('probeSelect', 'click', probeSelectAll);
+
 // ---------------------------------------------------------------- backup
 // Two stores, one file. Settings live on the device; macros live in this
 // browser. A backup that covered only one of them would be a trap - the whole
@@ -841,6 +1009,7 @@ async function init() {
   wireScreenImageFormats();
   wireForm();
   readIntoForm();
+  probeAttach();
   screenImageBytes = null;
   screenImageSource = null;
 
@@ -863,6 +1032,7 @@ function destroy() {
     doSave();
   }
 
+  probeDetach();
   screenImageBytes = null;
   screenImageSource = null;
   dot = null;
