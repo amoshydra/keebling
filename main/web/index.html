@@ -117,12 +117,17 @@
     </div>
     <div id="kbBuilt"></div>
     <div id="kbCapture" hidden>
-      <textarea id="kbCaptureField" rows="2" spellcheck="false"
-                autocorrect="off" autocapitalize="none" autocomplete="off"
-                placeholder="tap here to type with your own keyboard"></textarea>
-      <p class="note">Characters are translated to keystrokes; Escape, Tab, the
-        arrows and F-keys come through as keys. Nothing is echoed here — watch
+      <button id="kbCaptureOpen" type="button" class="primary">⌨ Tap to type</button>
+      <p class="note">Characters become keystrokes. Nothing echoes here — watch
         the host.</p>
+      <!-- The focus target. Full-size and barely visible rather than 1px: both
+           earlier attempts rendered and took focus but the keyboard did not
+           open, and size is the one variable not yet varied. It takes no
+           pointer events, so taps belong to the page. If the keyboard still
+           refuses it, pad.js shows the field instead of doing nothing. -->
+      <input id="kbCaptureField" type="text" inputmode="text" spellcheck="false"
+             autocomplete="off" autocorrect="off" autocapitalize="none"
+             aria-label="Type with your keyboard">
     </div>
   </div>
 

@@ -24,6 +24,10 @@
    this too. Text that is genuinely worth copying (logs, the HID descriptor) opts
    back in below. */
 html, body {
+  /* Nothing scrolls the document. A page that can scroll will be scrolled for
+     you when a field takes focus with the keyboard open, which moves everything
+     out from under the finger. */
+  overflow: hidden;
   overscroll-behavior: none;          /* no pull-to-refresh, no rubber band */
   user-select: none;
   -webkit-user-select: none;
@@ -35,7 +39,9 @@ body {
   font-family: system-ui, -apple-system, sans-serif;
   background: var(--bg);
   color: var(--ink);
-  height: 100dvh;
+  /* Set from visualViewport by common.js. dvh alone is not enough: a keyboard
+     that overlays instead of resizing leaves the bottom of the app behind it. */
+  height: var(--app-height, 100dvh);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -514,10 +520,21 @@ textarea { font-family: ui-monospace, SFMono-Regular, monospace; resize: vertica
    to be a real, focusable input or Android will not raise the IME. */
 #kbCapture { display: flex; flex-direction: column; gap: 8px; }
 #kbCapture[hidden] { display: none; }
+/* The focus target: 1px at the top-left corner, fixed. Rendered and focusable,
+   but the caret is at (0,0) - above the keyboard and above everything else -
+   so focusing it can never scroll anything into view. pointer-events: none
+   keeps the corner belonging to the page. */
 #kbCaptureField {
-  min-height: 84px;
-  font-family: ui-monospace, SFMono-Regular, monospace;
-  font-size: 13px;
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+  font-size: 16px;            /* anything smaller makes iOS zoom on focus */
 }
 .krow { display: flex; gap: 4px; margin-bottom: 4px; }
 .k {

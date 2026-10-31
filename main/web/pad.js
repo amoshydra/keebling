@@ -610,7 +610,7 @@ function togglePanel(el) {
   el.classList.toggle('show', show);
   // Opening the slot in system mode should raise the keyboard, not make the
   // user tap a second time. Still inside the click, so the IME will open.
-  if (show && el.id === 'kbd' && kbSource === 'system') focusCapture();
+
   syncPanelToggles();
 }
 
@@ -641,6 +641,15 @@ const NO_TEXT_USAGE = new Set([
 
 let kbSource = 'built';
 let captureComposing = false;
+// When the last Tab was seen. Hacker's Keyboard moves focus for its own Tab
+// key, and an IME can do that even though the keydown was cancelled - so the
+// caret is put back, but only right after a Tab, so a deliberate tap survives.
+let tabGuardAt = 0;
+
+const KEY_LABELS = {
+  ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→',
+  Escape: 'Esc', Enter: '⏎', Backspace: '⌫', Tab: 'Tab', Delete: 'Del',
+};
 
 function storedKeyboardSource() {
   try {
@@ -650,14 +659,7 @@ function storedKeyboardSource() {
   }
 }
 
-function focusCapture() {
-  // Must run inside the user's gesture or Android will not raise the IME,
-  // which is why the switch calls this directly instead of waiting for a tap.
-  if (!captureField) return;
-  try { captureField.focus(); } catch (_) {}
-}
-
-function setKeyboardSource(src, focus) {
+function setKeyboardSource(src) {
   const next = src === 'system' ? 'system' : 'built';
   if (next !== kbSource) releaseAll();      // a switch must not strand a held key
   kbSource = next;
@@ -671,11 +673,7 @@ function setKeyboardSource(src, focus) {
       btn.setAttribute('aria-selected', on ? 'true' : 'false');
     }
   }
-  if (next === 'system') {
-    if (focus) focusCapture();
-  } else if (captureField) {
-    captureField.blur();
-  }
+  if (next !== 'system' && captureField) captureField.blur();
 }
 
 function captureMods(e) {
@@ -698,7 +696,12 @@ function sendCaptureReport(usage, mods) {
   markInput();
 }
 
+function captureActive() {
+  return kbSource === 'system' && captureField && document.activeElement === captureField;
+}
+
 function onCaptureKeyDown(e) {
+  if (!captureActive()) return;
   // An empty code is Android's "the IME consumed this" (keyCode 229); the text
   // arrives as beforeinput, and sending anything here types it twice.
   if (!e.code || e.isComposing) return;
@@ -707,12 +710,28 @@ function onCaptureKeyDown(e) {
   const mods = captureMods(e);
   // No modifiers and no text to produce? Then beforeinput will type it.
   if (!mods && !NO_TEXT_USAGE.has(usage)) return;
+  if (usage === 0x2B) tabGuardAt = performance.now();
   e.preventDefault();                       // Tab must not move focus, F5 must not reload
   if (e.repeat) return;                     // the host repeats a held key by itself
   sendCaptureReport(usage, mods);
+  flash(describeKey(e, mods));
+}
+
+// A short confirmation of what went out, because nothing echoes in this mode.
+function describeKey(e, mods) {
+  const modsText = [
+    mods & 0x01 ? 'Ctrl' : '',
+    mods & 0x02 ? 'Shift' : '',
+    mods & 0x04 ? 'Alt' : '',
+    mods & 0x08 ? 'Cmd' : '',
+  ].filter(Boolean).join('+');
+  const name = KEY_LABELS[e.key] ||
+    (e.key && e.key.length === 1 ? e.key.toUpperCase() : String(e.key || '?'));
+  return modsText ? `${modsText}+${name}` : name;
 }
 
 function onCaptureKeyUp(e) {
+  if (!captureActive()) return;
   if (!e.code || e.isComposing) return;
   const usage = KEY[e.code];
   if (!usage) return;
@@ -741,15 +760,38 @@ function onCaptureBeforeInput(e) {
   typeCapturedText(e.data);
 }
 
+// No fallback and no guesswork: focusing this inside the tap raises the phone's
+// keyboard, which is the whole mechanism. An earlier version watched the
+// viewport height to decide whether that had worked, and when the heuristic
+// disagreed with reality it showed a visible field over a working keyboard.
+function focusCapture() {
+  if (!captureField || kbSource !== 'system') return;
+  // Synchronously, inside the tap: Android only raises the keyboard for a
+  // focus that happens as part of a user gesture.
+  try { captureField.focus(); } catch (_) {}
+}
+
 function onCaptureBlur() {
   // Leaving the field takes the keyboard away, so nothing should stay held.
   releaseAll();
 }
 
+function onCaptureFocusOut() {
+  if (kbSource !== 'system') return;
+  if (performance.now() - tabGuardAt > 300) return;
+  // Deferred so the browser finishes moving focus first; if the caret landed
+  // somewhere else, take it back.
+  setTimeout(() => {
+    if (kbSource !== 'system' || !captureField) return;
+    if (document.activeElement === captureField) return;
+    try { captureField.focus(); } catch (_) {}
+  }, 0);
+}
+
 function onSourceClick(e) {
   const btn = e.target.closest ? e.target.closest('button[data-src]') : null;
   if (!btn) return;
-  setKeyboardSource(btn.dataset.src, true);
+  setKeyboardSource(btn.dataset.src);
 }
 
 // ---------------------------------------------------------------- physical keyboard
@@ -1127,13 +1169,27 @@ function init() {
   kbCaptureEl = document.getElementById('kbCapture');
   captureField = document.getElementById('kbCaptureField');
   captureComposing = false;
-  setKeyboardSource(storedKeyboardSource(), false);
-  if (kbSourceEl) kbSourceEl.addEventListener('click', onSourceClick);
+  setKeyboardSource(storedKeyboardSource());
+  if (kbSourceEl) {
+    // pointerdown fires before the keyboard dismissal can reshape the page
+    // under the finger, which is what swallowed the first tap.
+    kbSourceEl.addEventListener('pointerdown', onSourceClick);
+    kbSourceEl.addEventListener('click', onSourceClick);
+  }
+  const captureOpen = document.getElementById('kbCaptureOpen');
+  if (captureOpen) {
+    captureOpen.addEventListener('pointerdown', focusCapture);
+    captureOpen.addEventListener('click', focusCapture);
+  }
+  // On the document, in the capture phase: which element the IME aims a key at
+  // is not something the page controls, and captureActive() is what keeps this
+  // scoped to the field.
+  document.addEventListener('keydown', onCaptureKeyDown, true);
+  document.addEventListener('keyup', onCaptureKeyUp, true);
   if (captureField) {
-    captureField.addEventListener('keydown', onCaptureKeyDown);
-    captureField.addEventListener('keyup', onCaptureKeyUp);
     captureField.addEventListener('beforeinput', onCaptureBeforeInput);
     captureField.addEventListener('blur', onCaptureBlur);
+    captureField.addEventListener('focusout', onCaptureFocusOut);
     captureField.addEventListener('compositionstart', () => { captureComposing = true; });
     captureField.addEventListener('compositionend', (e) => {
       captureComposing = false;
@@ -1266,6 +1322,8 @@ function destroy() {
   window.removeEventListener('dragstart', onDragStart);
   window.removeEventListener('keydown', onKeyDown);
   window.removeEventListener('keyup', onKeyUp);
+  document.removeEventListener('keydown', onCaptureKeyDown, true);
+  document.removeEventListener('keyup', onCaptureKeyUp, true);
   window.removeEventListener('pagehide', releaseAll);
   window.removeEventListener('beforeunload', releaseAll);
 
@@ -1326,6 +1384,7 @@ return {
   buildKeyboardReport,
   releaseAll,
   setKeyboardSource,
+  focusCapture,
   get keyboardSource() { return kbSource; },
   get captureField() { return captureField; },
   NO_TEXT_USAGE,

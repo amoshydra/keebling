@@ -2535,6 +2535,22 @@ __webTests.push({
   fn: async () => {
     const field = PadView.captureField;
     PadView.setKeyboardSource('system', false);
+    // The translator listens on the document and only acts while the field owns
+    // the caret, so the panel has to be open for focus to be possible.
+    const panel = document.getElementById('kbd');
+    const toggle = document.getElementById('bKbd');
+    if (!panel.classList.contains('show')) toggle.click();
+    field.focus();
+    __assert(document.activeElement === field, 'the capture field did not take focus');
+
+    // Pinned at the origin, out of sight. Anything visible down here would be
+    // what the browser scrolls into view when the keyboard opens.
+    const cs = getComputedStyle(field);
+    const box = field.getBoundingClientRect();
+    __assert(cs.position === 'fixed', `the capture field is ${cs.position}`);
+    __assert(box.top === 0 && box.left === 0, `the capture field sits at ${box.top},${box.left}`);
+    __assert(Number(cs.opacity) === 0, 'the capture field is visible');
+
     const sent = __capture();
 
     // Printable characters: Android reports the press with no code at all
@@ -2560,6 +2576,7 @@ __webTests.push({
     __assert(sent[1][1] === 0 && sent[1][2] === 0, `the release report is ${sent[1]}`);
 
     PadView.setKeyboardSource('built', false);
+    if (panel.classList.contains('show')) toggle.click();
   },
 });
 
@@ -2569,6 +2586,11 @@ __webTests.push({
   fn: async () => {
     const field = PadView.captureField;
     PadView.setKeyboardSource('system', false);
+    const panel = document.getElementById('kbd');
+    const toggle = document.getElementById('bKbd');
+    if (!panel.classList.contains('show')) toggle.click();
+    field.focus();
+    __assert(document.activeElement === field, 'the capture field did not take focus');
     const sent = __capture();
     const key = (type, init) => field.dispatchEvent(
       new KeyboardEvent(type, Object.assign({ bubbles: true, cancelable: true }, init)));
@@ -2579,6 +2601,15 @@ __webTests.push({
     field.dispatchEvent(tab);
     __assert(tab.defaultPrevented, 'Tab was not cancelled, so it would move focus');
     __assert(sent.length === 1 && sent[0][2] === 0x2B, `Tab sent ${JSON.stringify(sent)}`);
+
+    // An IME can move focus itself for its own Tab key even though the keydown
+    // was cancelled. The caret has to come back, or the next key goes to a
+    // button instead of the host.
+    document.getElementById('bMedia').focus();
+    __assert(document.activeElement !== field, 'the field kept focus, so this proves nothing');
+    await __sleep(30);
+    __assert(document.activeElement === field,
+      'Tab moved the caret away and it was not put back');
 
     // Enter arrives as a keydown and again as insertLineBreak. Sending both is
     // the double-typing bug this test exists to prevent.
@@ -2601,6 +2632,10 @@ __webTests.push({
     __assert(sent.length === 1, `one chord produced ${sent.length} reports`);
     __assert(sent[0][1] === 0x01 && sent[0][2] === 0x06,
       `Ctrl+C sent ${JSON.stringify(sent[0])}`);
+    // Nothing echoes in this mode, so the flash is the only confirmation that
+    // a key reached the host - and it has to name the chord, not just the key.
+    __assert(document.getElementById('flash').textContent === 'Ctrl+C',
+      `the confirmation says: ${document.getElementById('flash').textContent}`);
 
     // Leaving the field must not strand a held key on the host.
     PadView.held.add('KeyA');
@@ -2611,6 +2646,45 @@ __webTests.push({
       `blur left something held: ${JSON.stringify(sent)}`);
 
     PadView.setKeyboardSource('built', false);
+    if (panel.classList.contains('show')) toggle.click();
+  },
+});
+
+__webTests.push({
+  page: 'control',
+  name: 'the type button focuses the hidden field',
+  fn: async () => {
+    PadView.setKeyboardSource('system');
+    const panel = document.getElementById('kbd');
+    const toggle = document.getElementById('bKbd');
+    if (!panel.classList.contains('show')) toggle.click();
+
+    const field = PadView.captureField;
+    field.blur();
+    __assert(document.activeElement !== field, 'the field was still focused');
+
+    document.getElementById('kbCaptureOpen').dispatchEvent(
+      new PointerEvent('pointerdown', { bubbles: true }));
+    __assert(document.activeElement === field, 'the button did not focus the field');
+
+    PadView.setKeyboardSource('built');
+    if (panel.classList.contains('show')) toggle.click();
+  },
+});
+
+__webTests.push({
+  page: 'control',
+  name: 'the switch acts on a tap, not only on a click',
+  fn: async () => {
+    // Android can swallow the click when the keyboard dismisses and the layout
+    // moves under the finger, so the switch has to act on pointerdown.
+    const system = document.querySelector('#kbSource button[data-src="system"]');
+    const built = document.querySelector('#kbSource button[data-src="built"]');
+    built.click();
+    system.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    __assert(PadView.keyboardSource === 'system', 'a tap did not switch the source');
+    built.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    __assert(PadView.keyboardSource === 'built', 'a tap did not switch back');
   },
 });
 

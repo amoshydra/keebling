@@ -201,3 +201,22 @@ function forgetCode() {
   clearStoredToken();
   token = '';
 }
+
+// ---------------------------------------------------------------- viewport
+// The on-screen keyboard can either resize the page or lay itself over it, and
+// which one you get depends on the browser and on the `interactive-widget`
+// hint. Sizing the app from the visual viewport covers both cases: if the
+// keyboard overlays, this shrinks the layout to the part still visible, and if
+// it resizes, the two agree and nothing moves.
+function syncAppHeight() {
+  const vv = window.visualViewport;
+  const h = Math.round(vv ? vv.height : window.innerHeight);
+  document.documentElement.style.setProperty('--app-height', h + 'px');
+}
+
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', syncAppHeight);
+  window.visualViewport.addEventListener('scroll', syncAppHeight);
+}
+window.addEventListener('orientationchange', syncAppHeight);
+syncAppHeight();
