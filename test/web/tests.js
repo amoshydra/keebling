@@ -1893,7 +1893,7 @@ __webTests.push({
     __assert(cards[0].querySelector('.run').textContent.includes('Run'), 'no Run button');
 
     const meter = document.getElementById('blobMeter').textContent;
-    __assert(/3 macros/.test(meter) && /bytes/.test(meter),
+    __assert(/3 buttons/.test(meter) && /bytes/.test(meter),
       `the size line says: ${meter}`);
     // The count is the only job this line has: where macros are stored is
     // stated above the list, and repeating it here was pure noise.
@@ -2061,6 +2061,12 @@ __webTests.push({
       b.click();
     };
 
+    // The per-tile actions only exist in edit mode, so the test has to enter it
+    // the way a person does.
+    document.getElementById('deckEdit').click();
+    __assert(document.getElementById('macroList').classList.contains('editing'),
+      'the Edit button did not switch the deck into edit mode');
+
     const before = document.querySelectorAll('.macro').length;
     tap(find('Test Macro'), 'Delete');
     await __sleep(30);
@@ -2071,6 +2077,7 @@ __webTests.push({
     tap(find('Test Macro'), 'Delete?');
     await __sleep(500);
     __assert(!find('Test Macro'), 'the second tap did not delete the macro');
+    document.getElementById('deckEdit').click();     // leave edit mode again
     __assert(document.getElementById('saveNote').textContent.includes('saved'),
       `note: ${document.getElementById('saveNote').textContent}`);
   },

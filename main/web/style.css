@@ -604,23 +604,64 @@ code { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; co
 }
 input[type=checkbox], input[type=radio] { width: 18px; height: 18px; }
 
-/* ---------------------------------------------------------------- macros view */
-.macro { background: #232323; border-radius: 10px; padding: 12px; margin-bottom: 10px; }
-.macro .head { display: flex; align-items: center; gap: 8px; }
-.macro .name { font-weight: 600; font-size: 14px; flex: 1; word-break: break-word; }
-.macro .meta { font-size: 12px; color: var(--dim); }
-.macro .acts { display: flex; gap: 6px; flex: 0 0 auto; }
-.macro .acts button { padding: 6px 10px; font-size: 12px; }
-.macro .src, .macro .bad {
-  font-family: ui-monospace, SFMono-Regular, monospace;
-  font-size: 12px;
-  margin: 8px 0 10px;
-  white-space: pre-wrap;
+/* ---------------------------------------------------------------- deck */
+/* A grid of buttons, not a list of records. Three across is the most that fits
+   a phone while keeping each tile a comfortable thumb target. */
+#macroList.deck {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-top: 14px;
+}
+#macroList.deck > .note { grid-column: 1 / -1; }
+.macro {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 3px;
+  min-height: 104px;
+  padding: 12px;
+  border-radius: 14px;
+  background: #232323;
+  border: 1px solid #303030;
+  overflow: hidden;
+}
+/* The whole tile runs the button; the label is only read out. */
+.macro .run {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  background: transparent;
+  color: transparent;
+  font-size: 0;
+  border: 0;
+}
+.macro .run:active { background: rgba(255, 255, 255, .06); }
+.macro .name {
+  font-weight: 600;
+  font-size: 13px;
+  line-height: 1.25;
+  color: var(--ink);
   word-break: break-word;
 }
-.macro .src { color: #bbb; }
-.macro .bad { color: #ff8a80; }
-.macro .run { width: 100%; padding: 15px; font-size: 16px; }
+.macro .src {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 10.5px;
+  color: #8f8f8f;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.macro .bad { color: #ff8a80; font-size: 10.5px; }
+/* Edit mode: the overlay stops running and the tile's own actions appear. */
+#macroList.editing .run { display: none; }
+#macroList.editing .macro { outline: 1px dashed #3d628a; }
+.macro .acts { display: none; gap: 6px; margin-top: 6px; }
+#macroList.editing .acts { display: flex; }
+.macro .acts button { padding: 6px 8px; font-size: 11.5px; }
 
 #editor { display: none; }
 #editor.show { display: block; }

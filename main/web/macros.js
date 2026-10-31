@@ -205,7 +205,7 @@ function updateMeter() {
   // The view already says where macros live, a paragraph above the list. This
   // line is the count, not a second copy of that paragraph.
   meterEl.textContent =
-    `${list.length} macro${list.length === 1 ? '' : 's'} · ${bytes} bytes`;
+    `${list.length} button${list.length === 1 ? '' : 's'} · ${bytes} bytes`;
 }
 
 // Writes to this browser only. It claims to have saved once the write has
@@ -240,16 +240,33 @@ function actionButton(text, fn, cls) {
   return b;
 }
 
-function macroCard(m, i) {
+// A deck button: the whole tile is the target, so a thumb does not have to find
+// a small "run". Editing is a mode rather than a long press, because a long
+// press cannot be discovered and cannot be done with a keyboard.
+function deckTile(m, i) {
   const parsed = parseMacro(m.steps);
+  const tile = el('div', 'macro');
+  tile.dataset.index = String(i);
+  if (editMode) tile.classList.add('editing');
 
-  const card = el('div', 'macro');
-  const head = el('div', 'head');
-  head.appendChild(el('span', 'name', macroTitle(m, i)));
-  head.appendChild(el('span', 'meta', stepLabel(parsed)));
+  const run = el('button', 'run', 'Run');
+  run.title = editMode ? `Edit ${macroTitle(m, i)}` : `Run ${macroTitle(m, i)}`;
+  run.disabled = running && !editMode;
+  run.addEventListener('click', () => {
+    if (editMode) openEditor(i);
+    else runMacroAt(i);
+  });
+
+  tile.appendChild(run);
+  tile.appendChild(el('span', 'name', macroTitle(m, i)));
+  tile.appendChild(el('span', 'src', m.steps || '(empty)'));
+  if (parsed.errors.length) {
+    tile.appendChild(el('div', 'bad',
+      parsed.errors.map((e) => `${e.token}: ${e.message}`).join(' · ')));
+  }
 
   // Deleting is two taps rather than a confirm() dialog: one of them lands
-  // under a thumb on a phone, and the list is small enough to keep this in
+  // under a thumb on a phone, and the deck is small enough to keep this in
   // place.
   const acts = el('div', 'acts');
   if (confirmDelete === i) {
@@ -263,33 +280,31 @@ function macroCard(m, i) {
       actionButton('Delete', () => { confirmDelete = i; render(); }),
     );
   }
-  head.appendChild(acts);
-  card.appendChild(head);
-
-  card.appendChild(el('div', 'src', m.steps || '(empty)'));
-  if (parsed.errors.length) {
-    card.appendChild(el('div', 'bad',
-      parsed.errors.map((e) => `${e.token}: ${e.message}`).join(' · ')));
-  }
-
-  const run = el('button', 'run primary', running ? 'Running…' : '\u25B6 Run');
-  run.disabled = running;
-  run.addEventListener('click', () => runMacroAt(i));
-  card.appendChild(run);
-  return card;
+  tile.appendChild(acts);
+  return tile;
 }
 
 function render() {
   listEl.textContent = '';
+  listEl.classList.add('deck');
+  listEl.classList.toggle('editing', editMode);
   if (!macros.length) {
-    listEl.appendChild(el('p', 'note', 'No macros stored yet.'));
+    listEl.appendChild(el('p', 'note', editMode
+      ? 'Nothing on this page yet.'
+      : 'Nothing on this page yet — tap New button to add one.'));
   } else {
-    macros.forEach((m, i) => listEl.appendChild(macroCard(m, i)));
+    macros.forEach((m, i) => listEl.appendChild(deckTile(m, i)));
+  }
+  const editBtn = document.getElementById('deckEdit');
+  if (editBtn) {
+    editBtn.textContent = editMode ? 'Done' : 'Edit';
+    editBtn.classList.toggle('on', editMode);
   }
   updateMeter();
 }
 
 // ---------------------------------------------------------------- editor
+let editMode = false;
 let editorOpen = false;
 let editIndex = -1;
 
@@ -529,6 +544,7 @@ async function init() {
 
   macros = [];
   confirmDelete = null;
+  editMode = false;
   editorOpen = false;
   editIndex = -1;
   running = false;
@@ -540,6 +556,11 @@ async function init() {
 
   buildChips();
   document.getElementById('macroAdd').addEventListener('click', () => openEditor(-1));
+  document.getElementById('deckEdit').addEventListener('click', () => {
+    editMode = !editMode;
+    confirmDelete = null;
+    render();
+  });
   saveEl.addEventListener('click', saveEditor);
   document.getElementById('editCancel').addEventListener('click', closeEditor);
   stepsEl.addEventListener('input', updatePreview);
