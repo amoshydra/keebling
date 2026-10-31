@@ -202,10 +202,10 @@ function updateMeter() {
   const list = pendingMacros();
   const bytes = byteLength(list);
   meterEl.className = 'note';
+  // The view already says where macros live, a paragraph above the list. This
+  // line is the count, not a second copy of that paragraph.
   meterEl.textContent =
-    `${list.length} macro${list.length === 1 ? '' : 's'} · ${bytes} bytes, stored in this ` +
-    'browser. They do not follow you to another device or browser, and clearing this ' +
-    "site's data removes them.";
+    `${list.length} macro${list.length === 1 ? '' : 's'} · ${bytes} bytes`;
 }
 
 // Writes to this browser only. It claims to have saved once the write has

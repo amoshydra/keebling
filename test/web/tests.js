@@ -1860,8 +1860,12 @@ __webTests.push({
     __assert(cards[0].querySelector('.run').textContent.includes('Run'), 'no Run button');
 
     const meter = document.getElementById('blobMeter').textContent;
-    __assert(/3 macros/.test(meter) && meter.includes('browser'),
+    __assert(/3 macros/.test(meter) && /bytes/.test(meter),
       `the size line says: ${meter}`);
+    // The count is the only job this line has: where macros are stored is
+    // stated above the list, and repeating it here was pure noise.
+    __assert(!/stored in this browser/.test(meter),
+      `the size line repeats the storage note: ${meter}`);
     __assert(!meter.includes('1023'),
       `the size line still quotes the device's old cap: ${meter}`);
   },
@@ -2369,6 +2373,102 @@ __webTests.push({
       __assert(b.height >= 42, `${id} is only ${Math.round(b.height)}px tall`);
       __assert(b.bottom > window.innerHeight - 20, `${id} is not at the bottom of the screen`);
     }
+  },
+});
+
+__webTests.push({
+  page: 'control',
+  name: 'phone: the top bar keeps all four views on screen',
+  fn: async () => {
+    const nav = document.querySelector('.nav');
+    // The nav used to be a horizontal scroller, which hid the fact that the
+    // four labels did not fit: it clipped the last one and drew a scrollbar
+    // under the others.
+    __assert(nav.scrollWidth <= nav.clientWidth + 1,
+      `the nav scrolls sideways (${nav.scrollWidth} > ${nav.clientWidth})`);
+    for (const a of nav.querySelectorAll('a')) {
+      const r = a.getBoundingClientRect();
+      __assert(r.left >= -0.5 && r.right <= window.innerWidth + 0.5,
+        `${a.textContent} is clipped (${Math.round(r.left)}..${Math.round(r.right)} of ${window.innerWidth})`);
+      __assert(r.height >= 40, `${a.textContent} is only ${Math.round(r.height)}px tall`);
+    }
+  },
+});
+
+// Legibility is a requirement, not a preference: these three carry the whole
+// teaching of the page, and the pad had them at 2.4:1 and 3.3:1.
+const __lum = (rgb) => {
+  const c = rgb.match(/[\d.]+/g).slice(0, 3).map(Number).map((v) => {
+    v /= 255;
+    return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  });
+  return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+};
+const __contrast = (a, b) => {
+  const l1 = __lum(a), l2 = __lum(b);
+  return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+};
+
+__webTests.push({
+  page: 'control',
+  name: 'the hints are readable against the pad',
+  fn: async () => {
+    const padBg = getComputedStyle(document.getElementById('pad')).backgroundColor;
+
+    const hint = getComputedStyle(document.getElementById('hint')).color;
+    __assert(__contrast(hint, padBg) >= 4.5,
+      `#hint is ${__contrast(hint, padBg).toFixed(2)}:1 on the pad`);
+
+    const esc = getComputedStyle(document.getElementById('escHint')).color;
+    __assert(__contrast(esc, padBg) >= 4.5,
+      `#escHint is ${__contrast(esc, padBg).toFixed(2)}:1 on the pad`);
+
+    // Every primary button in the app shares this pair.
+    const btn = getComputedStyle(document.getElementById('helpClose'));
+    __assert(__contrast(btn.color, btn.backgroundColor) >= 4.5,
+      `a primary button is ${__contrast(btn.color, btn.backgroundColor).toFixed(2)}:1`);
+  },
+});
+
+__webTests.push({
+  page: 'control',
+  name: 'every virtual key is labelled',
+  fn: async () => {
+    // The panel is built at init and only toggled, so this does not need to
+    // open it - which matters, because a failed assertion must not leave the
+    // keyboard covering the next test's page.
+    const keys = [...document.querySelectorAll('#kbd .k')];
+    __assert(keys.length > 60, `only ${keys.length} keys rendered`);
+    const blank = keys.filter((k) => !k.textContent.trim()).map((k) => k.dataset.code);
+    __assert(!blank.length, `unlabelled keys: ${blank.join(', ')}`);
+  },
+});
+
+__webTests.push({
+  page: 'control',
+  name: 'the open panel lights its toggle',
+  fn: async () => {
+    const kbd = document.getElementById('bKbd');
+    const media = document.getElementById('bMedia');
+    try {
+      __assert(!kbd.classList.contains('on'), 'the keyboard toggle starts lit');
+      kbd.click();
+      __assert(kbd.classList.contains('on'), 'opening the keyboard left the toggle unlit');
+      __assert(kbd.getAttribute('aria-expanded') === 'true', 'aria-expanded was not set');
+
+      // On a phone only one panel is open at a time, and the light moves with it.
+      if (window.innerWidth <= 620) {
+        media.click();
+        __assert(media.classList.contains('on'), 'the media toggle did not light');
+        __assert(!kbd.classList.contains('on'), 'the keyboard toggle stayed lit behind media');
+      }
+    } finally {
+      // Close whatever is still open, and only that: an unconditional click
+      // would toggle a closed panel back open.
+      for (const b of [kbd, media]) if (b.classList.contains('on')) b.click();
+    }
+    __assert(!kbd.classList.contains('on') && !media.classList.contains('on'),
+      'a toggle was left lit after both panels closed');
   },
 });
 

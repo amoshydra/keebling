@@ -9,7 +9,10 @@
   --ink: #eee;
   --dim: #888;
   --line: #333;
-  --accent: #1976d2;
+  /* #1976d2 puts --ink at 3.9:1 on a primary button, under the 4.5:1 that
+     14px white text needs. This shade clears it at 4.9:1 and still reads as
+     blue rather than navy. */
+  --accent: #1565c0;
   --danger: #b3261e;
   --warn: #ffb74d;
 }
@@ -56,11 +59,11 @@ input, textarea, pre, code, #logText, #hidDecoded, #hidSummary {
   gap: 8px;
   flex: 0 0 auto;
 }
-.topbar a { color: var(--ink); text-decoration: none; opacity: .8; }
-.topbar a:hover { opacity: 1; }
-/* On a phone the bar links are small text, so give them a hit area: the
-   negative margin keeps the bar the same height it has on a desktop. */
-@media (max-width: 620px), (pointer: coarse) {
+.topbar a { color: var(--ink); text-decoration: none; }
+.topbar a:hover { color: #fff; }
+/* On a coarse pointer the bar links are small text, so give them a hit area:
+   the negative margin keeps the bar the same height it has on a desktop. */
+@media (pointer: coarse) {
   .topbar a { padding: 6px 8px; margin: -6px -8px; }
 }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
@@ -99,6 +102,12 @@ textarea { font-family: ui-monospace, SFMono-Regular, monospace; resize: vertica
 /* ---------------------------------------------------------------- panels */
 .panel {
   display: none;
+  /* A capped, centred sheet on a wide screen. A phone is well under the cap,
+     so this only changes the desktop, where a 1280px-wide panel puts a text
+     field the width of the window. */
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
   padding: 12px;
   background: var(--panel-2);
   overflow-y: auto;
@@ -190,11 +199,21 @@ textarea { font-family: ui-monospace, SFMono-Regular, monospace; resize: vertica
 #view[data-view="macros"],
 #view[data-view="ui"] { display: block; overflow-y: auto; }
 
-.nav { display: flex; gap: 12px; align-items: center; overflow-x: auto; }
-.nav a { color: var(--dim); }
-.nav a.active { color: var(--ink); }
+/* The four views, with the current one underlined. The nav used to scroll
+   (`overflow-x: auto`), which let the bar squeeze it instead of admitting it
+   did not fit: at 390px it came up 8px short and drew a scrollbar under the
+   labels, so "UI files" was clipped. It wraps on a phone now and never
+   scrolls. */
+.nav { display: flex; gap: 12px; align-items: center; flex: 0 0 auto; }
+.nav a { color: var(--dim); padding-bottom: 3px; border-bottom: 2px solid transparent; }
+.nav a.active { color: var(--ink); border-bottom-color: var(--accent); }
 @media (max-width: 620px) {
-  .nav { gap: 8px; font-size: 12px; }
+  /* Two lines: the status keeps its row, the views get one of their own. That
+     is what buys them a 40px tap target and a legible size - one line never
+     fitted, and the scroller hid the evidence. */
+  .topbar { flex-wrap: wrap; padding-bottom: 0; }
+  .nav { width: 100%; justify-content: space-between; gap: 2px; font-size: 13px; }
+  .nav a { margin: 0; padding: 12px 8px 9px; }
 }
 
 /* ---------------------------------------------------------------- control view */
@@ -202,6 +221,10 @@ textarea { font-family: ui-monospace, SFMono-Regular, monospace; resize: vertica
 #pad {
   flex: 1 1 auto;
   background: #181818;
+  /* A hairline at each edge, dark against the bars: without it the pad, the
+     top bar and the controls are three panels of near-identical grey and the
+     touch surface reads as empty space rather than as the thing you touch. */
+  box-shadow: inset 0 1px 0 rgba(0, 0, 0, .55), inset 0 -1px 0 rgba(0, 0, 0, .55);
   touch-action: none;             /* we handle every gesture ourselves */
   position: relative;
   display: flex;
@@ -211,15 +234,18 @@ textarea { font-family: ui-monospace, SFMono-Regular, monospace; resize: vertica
   min-height: 0;                  /* let the pad give way before the panels do */
 }
 #pad.captured { background: #101018; cursor: none; }
+/* #555 was 2.4:1 on the pad and this is the only place the gestures are
+   taught, so the most useful text in the UI was the least legible. --dim is
+   5:1, still clearly secondary. */
 #hint {
-  color: #555;
+  color: var(--dim);
   font-size: 14px;
   text-align: center;
   padding: 0 24px;
   line-height: 1.6;
   pointer-events: none;
 }
-.hint-help { color: #777; font-weight: 600; }
+.hint-help { color: var(--ink); font-weight: 600; }
 #pad.captured #hint { display: none; }
 /* While captured the hint is gone, and the only way out is a key the user has
    to be told about - the browser's own bubble is easy to miss. */
@@ -229,7 +255,7 @@ textarea { font-family: ui-monospace, SFMono-Regular, monospace; resize: vertica
   bottom: 10px;
   left: 0; right: 0;
   text-align: center;
-  color: #666;
+  color: var(--dim);
   font-size: 12px;
   pointer-events: none;
 }
@@ -384,6 +410,11 @@ textarea { font-family: ui-monospace, SFMono-Regular, monospace; resize: vertica
    split is the same on every phone width instead of following the label
    widths, and so a row can be given a minimum height worth hitting. */
 #controls {
+  /* On a wide screen the row is a cluster of content-sized buttons rather than
+     a full-width bar; centring it reads as deliberate instead of as a row that
+     ran out of buttons halfway across the window. The phone layout replaces the
+     tracks with four 1fr columns, where centring has nothing to do. */
+  justify-content: center;
   padding: 8px;
   padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
   background: var(--panel);
@@ -407,6 +438,12 @@ textarea { font-family: ui-monospace, SFMono-Regular, monospace; resize: vertica
   -webkit-tap-highlight-color: transparent;
 }
 #controls a.btn:active { background: #555; }
+/* The toggle whose panel is open. Same colour family as hover, but ringed, so
+   it stays lit after the pointer leaves. */
+#controls button.on {
+  background: #23364d;
+  box-shadow: inset 0 0 0 1px rgba(120, 170, 230, .5);
+}
 
 /* Phone: the panel toggles on top, the pointer buttons along the bottom edge
    where a thumb reaches without a stretch. */
@@ -442,6 +479,11 @@ textarea { font-family: ui-monospace, SFMono-Regular, monospace; resize: vertica
 /* virtual keyboard */
 #kbd {
   display: none;
+  /* Same cap as the panels: without it a wide window stretches the keys to
+     ~95px each, which is not a keyboard anyone can type on. */
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
   padding: 8px;
   background: #151515;
   /* The panel scrolls on small screens, but a press starting on a key must
@@ -591,7 +633,7 @@ input[type=checkbox], input[type=radio] { width: 18px; height: 18px; }
   font-weight: 600; font-size: 13px; flex: 1; word-break: break-all;
   font-family: ui-monospace, SFMono-Regular, monospace;
 }
-.file .state { font-size: 12px; color: var(--dim); flex: 0 0 auto; }
+.file .state { font-size: 12px; color: #999; flex: 0 0 auto; }
 .file .state.stored { color: var(--warn); }
 .file .acts { display: flex; gap: 6px; margin-top: 10px; }
 .file .acts button { padding: 8px 12px; font-size: 13px; }

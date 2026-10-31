@@ -579,6 +579,23 @@ function bindButton(id, bit) {
 // The query has to match the phone breakpoint in index.html's stylesheet.
 const PHONE_QUERY = '(max-width: 620px)';
 
+// The three toggles and the panels they own. The link is kept here so the
+// button can show which panel is open: tapping "Keys" opened a keyboard with
+// no sign that the button had done anything, and tapping it again to close was
+// guesswork.
+const PANEL_TOGGLES = [['bKbd', 'kbd'], ['bMedia', 'mediaPanel'], ['bType', 'type']];
+
+function syncPanelToggles() {
+  for (const [btnId, panelId] of PANEL_TOGGLES) {
+    const btn = document.getElementById(btnId);
+    const panel = document.getElementById(panelId);
+    if (!btn || !panel) continue;
+    const open = panel.classList.contains('show');
+    btn.classList.toggle('on', open);
+    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+}
+
 function togglePanel(el) {
   const show = !el.classList.contains('show');
   if (show && window.matchMedia(PHONE_QUERY).matches) {
@@ -587,6 +604,7 @@ function togglePanel(el) {
     }
   }
   el.classList.toggle('show', show);
+  syncPanelToggles();
 }
 
 // ---------------------------------------------------------------- physical keyboard
@@ -657,7 +675,9 @@ function addKeyboardRow(kbd, row) {
     const k = document.createElement('div');
     k.className = 'k ' + (extra || '');
     k.dataset.code = code;
-    k.textContent = label;
+    // A row entry without a label falls back to its code, so a key can never
+    // render blank: the function row was twelve empty buttons for want of one.
+    k.textContent = label || code;
 
     const press = (e) => {
       e.preventDefault();
@@ -951,6 +971,7 @@ function init() {
 
   buildKeyboard();
   buildMedia();
+  syncPanelToggles();
   kbd = document.getElementById('kbd');
   kbd.addEventListener('contextmenu', preventContextMenu);
 
