@@ -118,13 +118,11 @@
     <div id="kbBuilt"></div>
     <div id="kbCapture" hidden>
       <button id="kbCaptureOpen" type="button" class="primary">⌨ Tap to type</button>
-      <p class="note">Characters become keystrokes. Nothing echoes here — watch
-        the host.</p>
-      <!-- The focus target. Full-size and barely visible rather than 1px: both
-           earlier attempts rendered and took focus but the keyboard did not
-           open, and size is the one variable not yet varied. It takes no
-           pointer events, so taps belong to the page. If the keyboard still
-           refuses it, pad.js shows the field instead of doing nothing. -->
+      <p class="note">Keys go to the host — nothing echoes here.</p>
+      <!-- The focus target: 1px at the viewport's top-left corner, invisible,
+           taking no pointer events. The caret sits at the origin, above the
+           keyboard and above everything else, so focusing it never scrolls
+           anything into view. -->
       <input id="kbCaptureField" type="text" inputmode="text" spellcheck="false"
              autocomplete="off" autocorrect="off" autocapitalize="none"
              aria-label="Type with your keyboard">

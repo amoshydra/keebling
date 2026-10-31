@@ -760,14 +760,17 @@ function onCaptureBeforeInput(e) {
   typeCapturedText(e.data);
 }
 
-// No fallback and no guesswork: focusing this inside the tap raises the phone's
-// keyboard, which is the whole mechanism. An earlier version watched the
-// viewport height to decide whether that had worked, and when the heuristic
-// disagreed with reality it showed a visible field over a working keyboard.
+let lastPointerDownAt = 0;
+
+// Focusing inside the tap is what raises the phone's keyboard: Android only
+// does it for a focus that happens as part of a gesture.
+//
+// Tried and discarded: an immediate call plus 0/60/200ms retries, and a single
+// 60ms delayed call with a cancel token. Neither behaved differently on the
+// device, so this stays the simple version rather than carrying machinery that
+// buys nothing.
 function focusCapture() {
   if (!captureField || kbSource !== 'system') return;
-  // Synchronously, inside the tap: Android only raises the keyboard for a
-  // focus that happens as part of a user gesture.
   try { captureField.focus(); } catch (_) {}
 }
 
@@ -779,6 +782,9 @@ function onCaptureBlur() {
 function onCaptureFocusOut() {
   if (kbSource !== 'system') return;
   if (performance.now() - tabGuardAt > 300) return;
+  // A tap after the Tab is deliberate: pulling the caret back would undo the
+  // user's choice. A tap before it says nothing.
+  if (lastPointerDownAt > tabGuardAt) return;
   // Deferred so the browser finishes moving focus first; if the caret landed
   // somewhere else, take it back.
   setTimeout(() => {
@@ -786,6 +792,11 @@ function onCaptureFocusOut() {
     if (document.activeElement === captureField) return;
     try { captureField.focus(); } catch (_) {}
   }, 0);
+}
+
+function onAnyPointerDown() {
+  // Only feeds the Tab guard: a tap after a Tab is deliberate.
+  lastPointerDownAt = performance.now();
 }
 
 function onSourceClick(e) {
@@ -1181,6 +1192,7 @@ function init() {
     captureOpen.addEventListener('pointerdown', focusCapture);
     captureOpen.addEventListener('click', focusCapture);
   }
+  document.addEventListener('pointerdown', onAnyPointerDown, true);
   // On the document, in the capture phase: which element the IME aims a key at
   // is not something the page controls, and captureActive() is what keeps this
   // scoped to the field.
@@ -1324,6 +1336,7 @@ function destroy() {
   window.removeEventListener('keyup', onKeyUp);
   document.removeEventListener('keydown', onCaptureKeyDown, true);
   document.removeEventListener('keyup', onCaptureKeyUp, true);
+  document.removeEventListener('pointerdown', onAnyPointerDown, true);
   window.removeEventListener('pagehide', releaseAll);
   window.removeEventListener('beforeunload', releaseAll);
 
