@@ -17,6 +17,11 @@ const MacrosView = (() => {
 
 const STORE_KEY = 'esp32remote.macros';
 const COLOURS = ['', 'blue', 'amber', 'red', 'green'];
+// Pages are a property of the deck, not of a button, so they have their own
+// list: that is what lets a page exist while it is still empty.
+const PAGES_KEY = 'esp32remote.deckPages';
+const PAGE_KEY = 'esp32remote.deckPage';
+const DEFAULT_PAGE = 'Main';
 
 // Assigned by init(); nothing here reaches the document at load.
 let dot = null;
@@ -109,6 +114,7 @@ function sanitizeMacros(list) {
       steps: String(m.steps || ''),
       // Anything unknown falls back to no colour rather than breaking the tile.
       colour: COLOURS.includes(m.colour) ? m.colour : '',
+      page: String(m.page || DEFAULT_PAGE),
     }))
     .filter((m) => m.name || m.steps);
   return { kept, dropped: raw.length - kept.length };
@@ -187,7 +193,12 @@ function macroTitle(m, i) {
 function pendingMacros() {
   if (!editorOpen) return macros;
   const next = macros.slice();
-  const entry = { name: nameEl.value.trim(), steps: stepsEl.value, colour: editColour };
+  const entry = {
+    name: nameEl.value.trim(),
+    steps: stepsEl.value,
+    colour: editColour,
+    page: editPage,
+  };
   if (editIndex >= 0) next[editIndex] = entry;
   else next.push(entry);
   return next;
@@ -246,6 +257,68 @@ function actionButton(text, fn, cls) {
   return b;
 }
 
+function readPages() {
+  let stored = [];
+  try {
+    const raw = JSON.parse(localStorage.getItem(PAGES_KEY) || '[]');
+    if (Array.isArray(raw)) stored = raw.map(String).filter(Boolean);
+  } catch (_) { /* an unreadable list falls back to the one page */ }
+  return stored;
+}
+
+function writePages() {
+  try { localStorage.setItem(PAGES_KEY, JSON.stringify(deckPages)); } catch (_) {}
+  try { localStorage.setItem(PAGE_KEY, activePage); } catch (_) {}
+}
+
+// The stored list plus anything a button refers to, so a restored backup with a
+// page the list has never seen still shows its buttons somewhere.
+function syncPages() {
+  for (const m of macros) {
+    if (!deckPages.includes(m.page)) deckPages.push(m.page);
+  }
+  if (!deckPages.length) deckPages = [DEFAULT_PAGE];
+  if (!deckPages.includes(activePage)) activePage = deckPages[0];
+}
+
+function nextPageName() {
+  for (let n = 2; ; n++) {
+    const name = `Page ${n}`;
+    if (!deckPages.includes(name)) return name;
+  }
+}
+
+function renderPages() {
+  const strip = document.getElementById('deckPages');
+  if (!strip) return;
+  strip.textContent = '';
+  for (const name of deckPages) {
+    const b = el('button', 'page' + (name === activePage ? ' on' : ''), name);
+    b.type = 'button';
+    b.setAttribute('role', 'tab');
+    b.setAttribute('aria-selected', name === activePage ? 'true' : 'false');
+    b.addEventListener('click', () => {
+      activePage = name;
+      confirmDelete = null;
+      writePages();
+      render();
+    });
+    strip.appendChild(b);
+  }
+  const add = el('button', 'page add', '+');
+  add.type = 'button';
+  add.title = 'Add a page';
+  add.setAttribute('aria-label', 'Add a page');
+  add.addEventListener('click', () => {
+    const name = nextPageName();
+    deckPages.push(name);
+    activePage = name;
+    writePages();
+    render();
+  });
+  strip.appendChild(add);
+}
+
 // A deck button: the whole tile is the target, so a thumb does not have to find
 // a small "run". Editing is a mode rather than a long press, because a long
 // press cannot be discovered and cannot be done with a keyboard.
@@ -300,15 +373,20 @@ function deckTile(m, i) {
 }
 
 function render() {
+  syncPages();
+  renderPages();
   listEl.textContent = '';
   listEl.classList.add('deck');
   listEl.classList.toggle('editing', editMode);
-  if (!macros.length) {
+  const here = macros
+    .map((m, i) => ({ m, i }))
+    .filter(({ m }) => m.page === activePage);
+  if (!here.length) {
     listEl.appendChild(el('p', 'note', editMode
       ? 'Nothing on this page yet.'
       : 'Nothing on this page yet — tap New button to add one.'));
   } else {
-    macros.forEach((m, i) => listEl.appendChild(deckTile(m, i)));
+    here.forEach(({ m, i }) => listEl.appendChild(deckTile(m, i)));
   }
   const editBtn = document.getElementById('deckEdit');
   if (editBtn) {
@@ -323,6 +401,9 @@ let editMode = false;
 let editorOpen = false;
 let editIndex = -1;
 let editColour = '';
+let editPage = DEFAULT_PAGE;
+let deckPages = [DEFAULT_PAGE];
+let activePage = DEFAULT_PAGE;
 
 function openEditor(index) {
   editorOpen = true;
@@ -330,6 +411,7 @@ function openEditor(index) {
   const m = index >= 0 ? macros[index] : { name: '', steps: '' };
   nameEl.value = m.name;
   editColour = COLOURS.includes(m.colour) ? m.colour : '';
+  editPage = index >= 0 ? (macros[index].page || DEFAULT_PAGE) : activePage;
   paintColourSwatches();
   stepsEl.value = m.steps;
   editorTitleEl.textContent = index >= 0 ? 'Edit macro' : 'New macro';
@@ -360,7 +442,12 @@ async function saveEditor() {
     return;
   }
   const next = macros.slice();
-  const entry = { name: nameEl.value.trim(), steps: stepsEl.value, colour: editColour };
+  const entry = {
+    name: nameEl.value.trim(),
+    steps: stepsEl.value,
+    colour: editColour,
+    page: editPage,
+  };
   if (editIndex >= 0) next[editIndex] = entry;
   else next.push(entry);
 
@@ -569,6 +656,10 @@ async function init() {
   runStopEl = document.getElementById('runStop');
 
   macros = [];
+  deckPages = readPages();
+  activePage = (() => {
+    try { return localStorage.getItem(PAGE_KEY) || DEFAULT_PAGE; } catch (_) { return DEFAULT_PAGE; }
+  })();
   confirmDelete = null;
   editMode = false;
   editorOpen = false;

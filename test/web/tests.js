@@ -2051,6 +2051,44 @@ __webTests.push({
 
 __webTests.push({
   page: 'macros',
+  name: 'a new button lands on the active page',
+  fn: async () => {
+    const strip = document.getElementById('deckPages');
+    __assert(strip, 'there is no page strip');
+    const pages = () => [...strip.querySelectorAll('.page:not(.add)')];
+    const before = pages().length;
+    __assert(before >= 1, 'the deck has no pages');
+
+    strip.querySelector('.page.add').click();
+    await __sleep(60);
+    __assert(pages().length === before + 1, 'the page was not added');
+    __assert(pages()[pages().length - 1].classList.contains('on'),
+      'the new page did not become active');
+    __assert(document.querySelectorAll('.macro').length === 0,
+      'the new page is not empty');
+
+    document.getElementById('macroAdd').click();
+    document.getElementById('editName').value = 'On page two';
+    document.getElementById('editSteps').value = '{ENTER}';
+    document.getElementById('editSave').click();
+    await __sleep(400);
+
+    const names = [...document.querySelectorAll('.macro .name')].map((n) => n.textContent);
+    __assert(names.includes('On page two'),
+      `the button did not land on the new page: ${names.join(', ')}`);
+    const stored = JSON.parse(localStorage.getItem('esp32remote.macros') || '[]');
+    const made = stored.find((m) => m.name === 'On page two');
+    __assert(made && made.page === pages()[pages().length - 1].textContent,
+      `stored page: ${made && made.page}`);
+
+    // Leave the deck on its first page: the tests after this one count tiles.
+    pages()[0].click();
+    await __sleep(60);
+  },
+});
+
+__webTests.push({
+  page: 'macros',
   name: 'a deck button keeps its colour',
   fn: async () => {
     document.getElementById('deckEdit').click();

@@ -605,6 +605,32 @@ code { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; co
 input[type=checkbox], input[type=radio] { width: 18px; height: 18px; }
 
 /* ---------------------------------------------------------------- deck */
+/* Pages: a strip of chips above the grid. Pages carry no state of their own, so
+   the names are their own list in storage and a page can be empty. */
+.pagestrip {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 2px 0 10px;
+  scrollbar-width: none;
+}
+.pagestrip::-webkit-scrollbar { display: none; }
+.pagestrip .page {
+  flex: 0 0 auto;
+  height: 44px;
+  padding: 0 16px;
+  border-radius: 999px;
+  background: #1e1e1e;
+  color: #9a9a9a;
+  font-size: 12.5px;
+  box-shadow: inset 0 0 0 1px #2a2a2a;
+}
+.pagestrip .page.on {
+  background: #23364d;
+  color: #dce9f7;
+  box-shadow: inset 0 0 0 1px #365b83;
+}
+.pagestrip .page.add { padding: 0 14px; font-size: 16px; }
 /* A grid of buttons, not a list of records. Three across is the most that fits
    a phone while keeping each tile a comfortable thumb target. */
 #macroList.deck {
