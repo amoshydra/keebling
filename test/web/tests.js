@@ -2433,6 +2433,23 @@ __webTests.push({
 
 __webTests.push({
   page: 'control',
+  name: 'the keyboard is not clipped by its own slot',
+  fn: async () => {
+    const slot = document.getElementById('kbd');
+    slot.classList.add('show');
+    // A stale dvh cap used to cut the bottom row in half at the tab bar.
+    __assert(slot.scrollHeight <= slot.clientHeight + 1,
+      `the keyboard overflows its slot (${slot.scrollHeight} > ${slot.clientHeight})`);
+    const last = document.querySelector('#kbBuilt .krow:last-child .k');
+    const box = last.getBoundingClientRect();
+    __assert(box.bottom <= slot.getBoundingClientRect().bottom + 1,
+      'the bottom key row is outside the slot');
+    slot.classList.remove('show');
+  },
+});
+
+__webTests.push({
+  page: 'control',
   name: 'the pointer buttons float on the pad and are big enough',
   fn: async () => {
     const pad = document.getElementById('pad').getBoundingClientRect();

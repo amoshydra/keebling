@@ -127,8 +127,10 @@ textarea { font-family: ui-monospace, SFMono-Regular, monospace; resize: vertica
   margin: 0 auto;
   padding: 12px;
   background: var(--panel-2);
+  /* The slot owns the scrolling now, so a pane does not cap itself and leave
+     its last line cut in half. */
   overflow-y: auto;
-  max-height: 55dvh;
+  max-height: none;
   flex: 0 0 auto;
   gap: 10px;
 }
@@ -465,11 +467,18 @@ textarea { font-family: ui-monospace, SFMono-Regular, monospace; resize: vertica
   margin: 0 auto;
   padding: 8px;
   background: #151515;
-  /* The panel scrolls on small screens, but a press starting on a key must
-     not be claimed by the scroller: that fires pointercancel and the key
-     releases mid-hold. */
+  /* The slot takes the height its content needs and the pad gives way; a fixed
+     cap clipped the keyboard's bottom row at the tab bar. It still shrinks and
+     scrolls when the content is taller than the screen.
+     A press starting on a key must not be claimed by the scroller: that fires
+     pointercancel and the key releases mid-hold. */
+  /* No shrink: the slot takes the height its content needs and the pad gives
+     way. Shrinking here clipped the keyboard's bottom row, because the slot's
+     content is larger than the pad's and it absorbed almost all the loss. */
+  flex: 0 0 auto;
+  min-height: 0;
+  max-height: 100vh;
   overflow-y: auto;
-  max-height: 45dvh;
   touch-action: none;
 }
 #kbd.show { display: block; }
@@ -571,13 +580,10 @@ textarea { font-family: ui-monospace, SFMono-Regular, monospace; resize: vertica
 .m.active { background: var(--accent); }
 .m.active small { color: #ddd; }
 
-/* Phone: one panel at a time (pad.js closes the others), and each one short
-   enough that the pad, the panels and the controls all stay on screen. Two
-   panels plus the on-screen keyboard used to push the controls off the
-   bottom. */
+/* Phone: the slot takes the height its content needs and the pad gives way.
+   These caps dated from when the keyboard sat above a row of controls and had
+   to leave room for them; they now only clipped the keyboard's last row. */
 @media (max-width: 620px) {
-  .panel { max-height: 46dvh; }
-  #kbd { max-height: 42dvh; }
   #hint { font-size: 13px; padding: 0 16px; }
 }
 
