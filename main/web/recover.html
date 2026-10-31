@@ -10,6 +10,9 @@
   breakable by one, and it must not depend on anything an upload can replace.
 -->
 <style>
+  /* This page loads nothing from the device, so it needs its own reset: without
+     border-box a 100%-wide input plus its padding is wider than the viewport. */
+  * { box-sizing: border-box; }
   body { font-family: system-ui, -apple-system, sans-serif; background: #111;
          color: #eee; margin: 0; padding: 24px; line-height: 1.6; }
   main { max-width: 480px; margin: 0 auto; }
@@ -23,6 +26,7 @@
   button:disabled { background: #444; cursor: default; }
   .row { display: flex; gap: 8px; margin-top: 12px; }
   .note { font-size: 13px; color: #888; margin-top: 14px; min-height: 1.6em; }
+  .hint { font-size: 12px; color: #777; margin: 6px 0 0; min-height: 1.4em; }
   a { color: #7ab7ff; }
   code { font-family: ui-monospace, monospace; color: #ccc; }
 </style>
@@ -37,6 +41,7 @@
   <label for="code">Access code</label>
   <input id="code" autocomplete="off" autocapitalize="none" spellcheck="false"
          placeholder="printed on the device screen">
+  <p class="hint" id="codeSource"></p>
 
   <div class="row">
     <button id="reset">Reset all UI files</button>
@@ -56,7 +61,20 @@
   const note = document.getElementById('note');
   const btn = document.getElementById('reset');
 
-  try { code.value = localStorage.getItem(KEY) || ''; } catch (_) {}
+  // Prefilled from the code this browser already saved - not from the firmware.
+  // Say so, because a filled-in field on a built-in page looks hardcoded.
+  const source = document.getElementById('codeSource');
+  try {
+    const saved = localStorage.getItem(KEY) || '';
+    if (saved) {
+      code.value = saved;
+      source.textContent = 'Prefilled from the code this browser saved. Clear it to type another.';
+    } else {
+      source.textContent = 'The code is on the device screen.';
+    }
+  } catch (_) {
+    source.textContent = 'The code is on the device screen.';
+  }
 
   btn.addEventListener('click', async () => {
     const token = code.value.trim();

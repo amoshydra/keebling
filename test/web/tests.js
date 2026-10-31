@@ -2092,6 +2092,12 @@ __webTests.push({
     __assert(!document.getElementById('gate'),
       'the recovery page should not depend on the shell gate');
 
+    // It loads no style.css, so it needs its own box-sizing reset; without one
+    // the full-width input pushes the page wider than the screen.
+    const d = document.documentElement;
+    __assert(d.scrollWidth <= d.clientWidth,
+      `the page overflows horizontally: ${d.scrollWidth} > ${d.clientWidth}`);
+
     document.getElementById('code').value = window.__CODE;
     document.getElementById('reset').click();
     await __sleep(600);
