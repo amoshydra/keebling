@@ -55,9 +55,17 @@ the phone viewport.
 - touch never requests pointer lock; a mouse does
 - a virtual key stays held for the duration of a long press
 - a media key emits a consumer report and a release
+- the first visit shows the gesture help, dismissing it remembers that in
+  localStorage and leaves nothing over the pad, and the ? button reopens it
+- a latched modifier's colour and outline differ from a held key's pressed
+  state
 - at phone width the controls are two rows with the pointer buttons along the
   bottom edge, and only one panel opens at a time; at desktop width the row
-  does not wrap and panels stay independent
+  does not wrap, panels stay independent, and hover rules exist inside a
+  pointer-fine media query
+- a captured pad degrades visibly when the socket closes and returns to its
+  normal captured look when the socket reopens; input while captured pulses a
+  low-key indicator that fades when input stops
 
 **Settings page**
 - the form binds to the device's stored values

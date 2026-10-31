@@ -95,6 +95,63 @@ __webTests.push({
 
 __webTests.push({
   page: 'control',
+  name: 'the captured state is wired to the socket the pad opens',
+  fn: async () => {
+    // The state test below calls the handlers directly; this proves the socket
+    // the view actually opened is using those same handlers.
+    const ws = PadView.ws;
+    __assert(ws, 'the pad never opened a socket');
+    __assert(ws.onopen === PadView.onSocketOpen,
+      'the socket open handler is not the one the view updates from');
+    __assert(ws.onclose === PadView.onSocketClose,
+      'the socket close handler is not the one the view updates from');
+  },
+});
+
+__webTests.push({
+  page: 'control',
+  name: 'gesture help opens on the first visit and is remembered',
+  fn: async () => {
+    const help = document.getElementById('help');
+    __assert(help && !help.hidden, 'the gesture help was not shown on the first visit');
+    __assert(document.getElementById('hint'), 'the fallback hint is missing');
+
+    // Thumb-reachable: the close button has to sit in the bottom half of the
+    // sheet, not off the top of a tall phone.
+    const sheet = help.querySelector('.help-sheet').getBoundingClientRect();
+    const close = document.getElementById('helpClose').getBoundingClientRect();
+    __assert(close.top >= sheet.top && close.top > window.innerHeight / 2,
+      `the close button is at ${Math.round(close.top)}px on a ${window.innerHeight}px screen`);
+
+    document.getElementById('helpClose').click();
+    __assert(help.hidden, 'the help did not close');
+    await __sleep(20);
+    __assert(getComputedStyle(help).display === 'none', 'the sheet still covers the pad');
+    __assert(localStorage.getItem('esp32remote.helpSeen') === '1',
+      'dismissing the help was not remembered');
+  },
+});
+
+__webTests.push({
+  page: 'control',
+  name: 'gesture help reopens from the pad and closes on a backdrop tap',
+  fn: async () => {
+    const help = document.getElementById('help');
+    document.getElementById('helpOpen').click();
+    __assert(!help.hidden, 'the help did not reopen from the ? button');
+
+    // The sheet itself keeps the tap (reading should not dismiss it); the
+    // backdrop around it is the dismiss target.
+    help.querySelector('.help-sheet').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    __assert(!help.hidden, 'a tap on the sheet dismissed the instructions');
+
+    help.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    __assert(help.hidden, 'tapping the backdrop did not dismiss the help');
+  },
+});
+
+__webTests.push({
+  page: 'control',
   name: 'keyboard report keeps held keys when typing',
   fn: async () => {
     __resetInput();
@@ -411,6 +468,129 @@ __webTests.push({
   },
 });
 
+
+__webTests.push({
+  page: 'control',
+  name: 'a dropped link degrades the captured pad and reconnecting clears it',
+  fn: async () => {
+    __resetInput();
+    __capture();
+
+    Object.defineProperty(document, 'pointerLockElement', {
+      value: PadView.pad, configurable: true,
+    });
+    try {
+      document.dispatchEvent(new Event('pointerlockchange'));
+      await __sleep(20);
+
+      const pad = PadView.pad;
+      const lost = document.getElementById('linkLost');
+      __assert(pad.classList.contains('captured'),
+        'pointer lock did not put the pad into its captured state');
+      __assert(!pad.classList.contains('link-down'),
+        'the captured pad is degraded while the link is up');
+      __assert(getComputedStyle(lost).display === 'none',
+        'the lost-link message is visible while connected');
+
+      // Block the retry so the test is not racing a real socket.
+      clearTimeout(PadView.reconnectTimer);
+      PadView.reconnectTimer = 1;
+      PadView.onSocketClose();
+      await __sleep(20);
+
+      __assert(pad.classList.contains('link-down'),
+        'a dropped socket left the captured pad looking healthy');
+      __assert(getComputedStyle(lost).display !== 'none',
+        'the captured pad did not show the lost-link message');
+      const esc = document.getElementById('escHint').textContent;
+      __assert(/lost/i.test(esc), `the capture hint still says: ${esc}`);
+
+      PadView.onSocketOpen();
+      await __sleep(20);
+
+      __assert(!pad.classList.contains('link-down'),
+        'the pad stayed degraded after the link came back');
+      __assert(getComputedStyle(lost).display === 'none',
+        'the lost-link message stayed on screen after reconnecting');
+      __assert(/Esc releases it/.test(document.getElementById('escHint').textContent),
+        'the capture hint did not return to its normal wording');
+    } finally {
+      delete document.pointerLockElement;
+      document.dispatchEvent(new Event('pointerlockchange'));
+      clearTimeout(PadView.reconnectTimer);
+      PadView.reconnectTimer = null;
+      PadView.wsReady = false;
+      PadView.captured = false;
+    }
+  },
+});
+
+__webTests.push({
+  page: 'control',
+  name: 'captured input pulses a subtle indicator and then fades',
+  fn: async () => {
+    __resetInput();
+    __capture();
+    const pulse = document.getElementById('inputPulse');
+    PadView.captured = true;
+    try {
+      window.dispatchEvent(new MouseEvent('mousedown', { button: 0 }));
+      await __sleep(10);
+      __assert(pulse.classList.contains('tick'),
+        'a click while captured did not acknowledge the input');
+
+      window.dispatchEvent(new MouseEvent('mouseup', { button: 0 }));
+      await __sleep(400);
+      __assert(!pulse.classList.contains('tick'),
+        'the input indicator stayed lit after input stopped');
+    } finally {
+      PadView.captured = false;
+      PadView.buttons = 0;
+    }
+  },
+});
+
+__webTests.push({
+  page: 'control',
+  name: 'a latched modifier looks different from a pressed key',
+  fn: async () => {
+    __resetInput();
+    PadView.latched.clear();
+    __capture();
+
+    const alt = document.querySelector('.k[data-code="AltLeft"]');
+    // A plain held key is the state a latch must not be confused with.
+    const plain = document.querySelector('.k[data-code="KeyA"]');
+    __assert(alt && plain, 'the virtual keyboard is missing Alt or A');
+
+    const tap = (el, id) => {
+      el.dispatchEvent(new PointerEvent('pointerdown', {
+        pointerId: id, pointerType: 'touch', clientX: 5, clientY: 5, bubbles: true }));
+      el.dispatchEvent(new PointerEvent('pointerup', {
+        pointerId: id, pointerType: 'touch', clientX: 5, clientY: 5, bubbles: true }));
+    };
+    tap(alt, 40);
+    await __sleep(20);
+    // Press A and leave it down: the active class is the pressed state being
+    // compared against.
+    plain.dispatchEvent(new PointerEvent('pointerdown', {
+      pointerId: 41, pointerType: 'touch', clientX: 5, clientY: 5, bubbles: true }));
+    await __sleep(20);
+
+    const latchedStyle = getComputedStyle(alt);
+    const plainStyle = getComputedStyle(plain);
+    __assert(alt.classList.contains('latched'), 'Alt did not latch');
+    __assert(latchedStyle.backgroundColor !== plainStyle.backgroundColor,
+      `latched and pressed share the background ${latchedStyle.backgroundColor}`);
+    __assert(latchedStyle.outlineStyle !== 'none',
+      'a latched key has no outline');
+
+    plain.dispatchEvent(new PointerEvent('pointerup', {
+      pointerId: 41, pointerType: 'touch', clientX: 5, clientY: 5, bubbles: true }));
+    PadView.latched.clear();
+    PadView.held.clear();
+  },
+});
 
 __webTests.push({
   page: 'control',
@@ -2141,6 +2321,35 @@ __webTests.push({
   },
 });
 
+__webTests.push({
+  page: 'control-desktop',
+  name: 'hover feedback exists for fine pointers, not coarse ones',
+  fn: async () => {
+    // :hover cannot be triggered synthetically, so the contract is checked
+    // where it is defined: inside the media query a mouse matches. Keeping it
+    // there is what stops a touch tap leaving a button stuck highlighted.
+    const found = [];
+    const walk = (rules, fine) => {
+      for (const r of rules) {
+        const media = r.media ? (r.conditionText || r.media.mediaText || '') : '';
+        const inFine = fine || (/hover:\s*hover/.test(media) && /pointer:\s*fine/.test(media));
+        if (r.selectorText && inFine && r.selectorText.includes(':hover')) {
+          found.push(r.selectorText);
+        }
+        if (r.cssRules) walk(r.cssRules, inFine);
+      }
+    };
+    for (const sheet of document.styleSheets) {
+      try { walk(sheet.cssRules, false); } catch (_) { /* cross-origin, not ours */ }
+    }
+
+    __assert(found.some((s) => s.includes('button')),
+      `no button hover rule inside the pointer-fine query: ${found.join(' | ')}`);
+    __assert(found.some((s) => s.includes('.k')),
+      'the virtual keys have no hover state');
+  },
+});
+
 // ---------------------------------------------------------------- control page, phone
 __webTests.push({
   page: 'control',
@@ -2334,6 +2543,10 @@ __webTests.push({
   name: 'window listeners belong to the mounted view only',
   fn: async () => {
     await __goView('control', '#/');
+    // This browser had its storage cleared earlier, so the first-visit help is
+    // open. It is modal on purpose; dismiss it before typing.
+    const help = document.getElementById('help');
+    if (help && !help.hidden) document.getElementById('helpClose').click();
 
     // Leave the pad, then give its module a recorder and press a key. If its
     // window listener survived the unmount, this produces a report.

@@ -43,12 +43,54 @@
 <template id="view-control">
   <div id="pad">
     <div id="hint">
-      One finger moves · tap to click<br>
-      Two fingers scroll · two-finger tap right-clicks<br>
-      Three fingers drag · tap Ctrl/Alt/Cmd then a key for a chord
+      One finger moves · two scroll · three drag<br>
+      Tap to click · <span class="hint-help">?</span> button shows all gestures
     </div>
     <div id="escHint">Mouse captured — Esc releases it</div>
     <div class="flash" id="flash"></div>
+    <!-- A captured pad has no text the user is looking at, so the whole
+         surface changes when the link drops: red hatch and border, not just
+         the status dot in the far corner. -->
+    <div id="linkLost" role="alert">
+      <span class="lost-mark" aria-hidden="true">!</span>
+      <span class="lost-title">Connection lost</span>
+      <span class="lost-sub" id="linkLostSub">Input is not reaching the host — reconnecting…</span>
+      <span class="lost-sub">Esc releases the mouse.</span>
+    </div>
+    <!-- Low-key confirmation that the host is receiving input. Only visible
+         while captured and connected. -->
+    <div id="inputPulse" aria-hidden="true"></div>
+    <button id="helpOpen" type="button" aria-label="Gesture help">?</button>
+  </div>
+
+  <!-- First-visit gesture help. Fixed above the pad, so dismissing it leaves
+       the pad untouched; it is reopened by the ? button in the pad corner. -->
+  <div id="help" class="help" hidden>
+    <div class="help-sheet" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
+      <h2 id="helpTitle">Gestures</h2>
+      <ul class="help-list">
+        <li>
+          <span class="fingers" aria-hidden="true"><i></i></span>
+          <span><strong>One finger</strong><small>Move the pointer · tap for a left click</small></span>
+        </li>
+        <li>
+          <span class="fingers" aria-hidden="true"><i></i><i></i></span>
+          <span><strong>Two fingers</strong><small>Scroll · tap for a right click</small></span>
+        </li>
+        <li>
+          <span class="fingers" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span><strong>Three fingers</strong><small>Drag: press, move, release · tap for a middle click</small></span>
+        </li>
+        <li>
+          <span class="keycap" aria-hidden="true">Ctrl</span>
+          <span><strong>Chord</strong><small>Tap Ctrl, Alt or Cmd on the keyboard, then the next key</small></span>
+        </li>
+      </ul>
+      <p class="help-note">On a computer, click the pad to capture the mouse and
+        press Esc to release it. While captured, the small dot in the pad corner
+        lights when input is going out.</p>
+      <button id="helpClose" class="primary" type="button">Got it</button>
+    </div>
   </div>
 
   <div class="panel" id="type">

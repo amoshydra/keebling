@@ -54,6 +54,9 @@ let pad = null;
 let dot = null;
 let statusText = null;
 let flashEl = null;
+let escHintEl = null;
+let pulseEl = null;
+let lostSubEl = null;
 let kbd = null;
 let mediaEl = null;
 let mediaPanel = null;
@@ -61,25 +64,44 @@ let typePanel = null;
 let typeTextEl = null;
 let typeNote = null;
 let heartbeatTimer = null;
+let helpEl = null;
+let helpCloseBtn = null;
+let helpOpenBtn = null;
+
+const LOST_SUB = 'Input is not reaching the host — reconnecting…';
+const HELP_KEY = 'esp32remote.helpSeen';
 
 // ---------------------------------------------------------------- transport
 function connect() {
   ws = new WebSocket(`ws://${location.host}/ws?token=${encodeURIComponent(token)}`);
-  ws.onopen = () => {
-    wsReady = true;
-    reconnectAttempts = 0;
-    setStatus('connected', 'on');
-    sendKeyboard();               // resync held state
-  };
-  ws.onclose = () => {
+  ws.onopen = onSocketOpen;
+  ws.onclose = onSocketClose;
+  ws.onerror = () => {
     wsReady = false;
-    // The socket cannot carry a release, but the local state must not claim
-    // keys are held either - a reconnect sends a fresh report from nothing.
-    releaseAll();
-    setStatus('disconnected', 'off');
-    scheduleReconnect();
+    refreshCaptureUi();
   };
-  ws.onerror = () => { wsReady = false; };
+}
+
+// The handlers are named because the tests drive them directly: a real socket
+// drop cannot be staged headlessly, and the state transition is the thing that
+// has to be proven.
+function onSocketOpen() {
+  wsReady = true;
+  reconnectAttempts = 0;
+  if (lostSubEl) lostSubEl.textContent = LOST_SUB;
+  setStatus('connected', 'on');
+  refreshCaptureUi();
+  sendKeyboard();               // resync held state
+}
+
+function onSocketClose() {
+  wsReady = false;
+  // The socket cannot carry a release, but the local state must not claim
+  // keys are held either - a reconnect sends a fresh report from nothing.
+  releaseAll();
+  setStatus('disconnected', 'off');
+  refreshCaptureUi();
+  scheduleReconnect();
 }
 
 function scheduleReconnect() {
@@ -89,6 +111,7 @@ function scheduleReconnect() {
     // Retrying forever against an address that no longer answers is how a
     // moved DHCP lease hides itself.
     setStatus('disconnected - reload this page', 'off');
+    if (lostSubEl) lostSubEl.textContent = 'Input is not reaching the host — reload this page.';
   }
   reconnectTimer = setTimeout(() => { reconnectTimer = null; connect(); }, 1500);
 }
@@ -96,6 +119,34 @@ function scheduleReconnect() {
 function setStatus(text, cls) {
   statusText.textContent = text;
   dot.className = 'dot ' + cls;
+}
+
+// The captured view is the product of two states: pointer lock and a live
+// socket. Keeping them in one place means a reconnect, a capture or an Escape
+// all land on the same answer.
+function refreshCaptureUi() {
+  if (!pad) return;
+  pad.classList.toggle('captured', captured);
+  pad.classList.toggle('link-down', captured && !wsReady);
+  if (escHintEl) {
+    escHintEl.textContent = wsReady
+      ? 'Mouse captured — Esc releases it'
+      : 'Link lost — Esc releases the mouse';
+  }
+}
+
+// Input acknowledgement. Called from the senders rather than send(), because
+// the heartbeat would otherwise keep the dot lit while nothing is happening.
+let pulseTimer = null;
+
+function markInput() {
+  if (!captured || !pulseEl) return;
+  pulseEl.classList.add('tick');
+  clearTimeout(pulseTimer);
+  pulseTimer = setTimeout(() => {
+    pulseTimer = null;
+    pulseEl.classList.remove('tick');
+  }, 220);
 }
 
 function send(bytes) {
@@ -109,6 +160,7 @@ function sendMouse(dx, dy, wheel) {
   send(new Uint8Array([0x01,
                        clamp8(dx) & 0xFF, clamp8(dy) & 0xFF,
                        buttons & 0xFF, clamp8(wheel) & 0xFF]));
+  markInput();
 }
 
 // A report carries signed 8-bit deltas, so anything larger has to go as several
@@ -146,10 +198,16 @@ function buildKeyboardReport(extraCode, extraShift) {
   return buf;
 }
 
-function sendKeyboard() { send(buildKeyboardReport(null, false)); }
+function sendKeyboard() {
+  send(buildKeyboardReport(null, false));
+  markInput();
+}
 
 // Press/release one key without disturbing anything else held.
-function sendKeyboardExtra(code, shift) { send(buildKeyboardReport(code, shift)); }
+function sendKeyboardExtra(code, shift) {
+  send(buildKeyboardReport(code, shift));
+  markInput();
+}
 
 function releaseAll() {
   held.clear();
@@ -403,7 +461,7 @@ function onMousePointerDown(e) {
 
 function onPointerLockChange() {
   captured = document.pointerLockElement === pad;
-  pad.classList.toggle('captured', captured);
+  refreshCaptureUi();
   if (captured) {
     holdWakeLock();
   } else {
@@ -532,7 +590,17 @@ function togglePanel(el) {
 }
 
 // ---------------------------------------------------------------- physical keyboard
+// The help sheet is modal: nothing typed while it is open should reach the
+// host, and Escape dismisses it rather than going to the device.
+function helpVisible() {
+  return !!helpEl && !helpEl.hidden;
+}
+
 function onKeyDown(e) {
+  if (helpVisible()) {
+    if (e.key === 'Escape') { e.preventDefault(); closeHelp(); }
+    return;
+  }
   if (e.key === 'Escape' && captured) return;    // let the browser exit capture
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
   e.preventDefault();
@@ -542,6 +610,7 @@ function onKeyDown(e) {
 }
 
 function onKeyUp(e) {
+  if (helpVisible()) return;
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
   e.preventDefault();
   held.delete(e.code);
@@ -670,6 +739,7 @@ const MEDIA_KEYS = [
 
 function sendConsumer(usage) {
   send(new Uint8Array([0x03, usage & 0xFF, (usage >> 8) & 0xFF]));
+  markInput();
 }
 
 function buildMedia() {
@@ -802,6 +872,50 @@ async function onTypeGo() {
   }
 }
 
+// ---------------------------------------------------------------- gesture help
+// A three-finger drag has no visible affordance, and the hint is the only place
+// it was ever mentioned. The sheet is shown once per browser, then kept
+// available behind the ? button; dismissing it never leaves anything over the
+// pad.
+// The in-memory flag covers a browser that refuses localStorage writes: the
+// sheet is dismissed for this session even if it cannot be remembered longer.
+let helpSeenNow = false;
+
+function helpAlreadySeen() {
+  if (helpSeenNow) return true;
+  try { return localStorage.getItem(HELP_KEY) === '1'; } catch (_) { return false; }
+}
+
+function rememberHelpSeen() {
+  helpSeenNow = true;
+  try { localStorage.setItem(HELP_KEY, '1'); } catch (_) {}
+}
+
+function openHelp() {
+  if (!helpEl) return;
+  // The sheet swallows keyup while it is open, so anything already held would
+  // be stranded on the host. Let it go before taking over the screen.
+  releaseAll();
+  helpEl.hidden = false;
+}
+
+function closeHelp() {
+  if (!helpEl || helpEl.hidden) return;
+  helpEl.hidden = true;
+  rememberHelpSeen();
+}
+
+// The ? sits inside the pad so it is in reach of a thumb, but the pad's gesture
+// handlers are underneath: without stopping these a tap on help would also be
+// read as a click on the host.
+function swallowPointer(e) { e.stopPropagation(); }
+
+function onHelpBackdrop(e) {
+  // Only the backdrop dismisses. A tap on the sheet while reading should not
+  // throw the instructions away.
+  if (e.target === helpEl) closeHelp();
+}
+
 // ---------------------------------------------------------------- lifecycle
 // The router calls init() after mounting the control template and destroy()
 // before replacing it. Everything attached to window or document is removed
@@ -811,6 +925,12 @@ function init() {
   dot = document.getElementById('dot');
   statusText = document.getElementById('statusText');
   flashEl = document.getElementById('flash');
+  escHintEl = document.getElementById('escHint');
+  pulseEl = document.getElementById('inputPulse');
+  lostSubEl = document.getElementById('linkLostSub');
+  helpEl = document.getElementById('help');
+  helpCloseBtn = document.getElementById('helpClose');
+  helpOpenBtn = document.getElementById('helpOpen');
   typePanel = document.getElementById('type');
   typeTextEl = document.getElementById('typeText');
   typeNote = document.getElementById('typeNote');
@@ -822,9 +942,12 @@ function init() {
   mode = null;
   dragHeld = false;
   captured = false;
+  wsReady = false;
   typing = false;
   typeAbort = false;
   resetGestureState();
+  if (lostSubEl) lostSubEl.textContent = LOST_SUB;
+  refreshCaptureUi();
 
   buildKeyboard();
   buildMedia();
@@ -849,6 +972,15 @@ function init() {
   document.getElementById('typeClear').addEventListener('click', onTypeClear);
   document.getElementById('typeStop').addEventListener('click', onTypeStop);
   document.getElementById('typeGo').addEventListener('click', onTypeGo);
+
+  helpOpenBtn.addEventListener('pointerdown', swallowPointer);
+  helpOpenBtn.addEventListener('pointermove', swallowPointer);
+  helpOpenBtn.addEventListener('pointerup', swallowPointer);
+  helpOpenBtn.addEventListener('pointercancel', swallowPointer);
+  helpOpenBtn.addEventListener('click', openHelp);
+  helpCloseBtn.addEventListener('click', closeHelp);
+  helpEl.addEventListener('click', onHelpBackdrop);
+  if (!helpAlreadySeen()) openHelp();
 
   document.addEventListener('visibilitychange', onVisibilityChange);
   document.addEventListener('pointerlockchange', onPointerLockChange);
@@ -894,6 +1026,8 @@ function destroy() {
   typing = false;
   clearTimeout(flashTimer);
   flashTimer = null;
+  clearTimeout(pulseTimer);
+  pulseTimer = null;
 
   clearInterval(heartbeatTimer);
   heartbeatTimer = null;
@@ -951,6 +1085,12 @@ function destroy() {
   dot = null;
   statusText = null;
   flashEl = null;
+  escHintEl = null;
+  pulseEl = null;
+  lostSubEl = null;
+  helpEl = null;
+  helpCloseBtn = null;
+  helpOpenBtn = null;
   kbd = null;
   mediaEl = null;
   mediaPanel = null;
@@ -971,7 +1111,7 @@ return {
   get ws() { return ws; },
   set ws(v) { ws = v; },
   get wsReady() { return wsReady; },
-  set wsReady(v) { wsReady = v; },
+  set wsReady(v) { wsReady = v; refreshCaptureUi(); },
   get reconnectTimer() { return reconnectTimer; },
   set reconnectTimer(v) { reconnectTimer = v; },
   get buttons() { return buttons; },
@@ -981,7 +1121,11 @@ return {
   get dragHeld() { return dragHeld; },
   set dragHeld(v) { dragHeld = v; },
   get captured() { return captured; },
-  set captured(v) { captured = v; },
+  set captured(v) { captured = v; refreshCaptureUi(); },
+  onSocketOpen,
+  onSocketClose,
+  openHelp,
+  closeHelp,
   buildKeyboardReport,
   releaseAll,
   KEY,
