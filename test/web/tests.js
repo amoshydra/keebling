@@ -819,9 +819,19 @@ __webTests.push({
     rows[0].click();
     __assert(list.hidden, 'the list stayed visible after opening a section');
     const shown = open();
-    __assert(shown.length === 1, `${shown.length} sections open at once`);
-    __assert(shown[0].dataset.page === rows[0].dataset.page,
-      `opened ${shown[0].dataset.page}, expected ${rows[0].dataset.page}`);
+    // A page can own more than one section (Diagnostics owns the probe), so the
+    // contract is per page rather than per section.
+    __assert(shown.every((sec) => sec.dataset.page === rows[0].dataset.page),
+      `opened ${shown.map((sec) => sec.dataset.page).join(',')}, expected ${rows[0].dataset.page}`);
+
+    // Every row has to open something, or the list has a dead entry.
+    for (const row of rows) {
+      row.click();
+      const opened = open();
+      __assert(opened.length > 0, `${row.dataset.page} opened nothing`);
+      __assert(opened.every((sec) => sec.dataset.page === row.dataset.page),
+        `${row.dataset.page} opened ${opened.map((sec) => sec.dataset.page).join(',')}`);
+    }
 
     document.getElementById('setupBack').click();
     __assert(!list.hidden, 'back did not return to the list');
@@ -1834,6 +1844,14 @@ __webTests.push({
     const zero = parseMacro('{REPEAT:0}{LEFT}{/REPEAT}');
     __assert(zero.errors.some((e) => /smallest repeat/.test(e.message)),
       `zero: ${JSON.stringify(zero.errors)}`);
+
+    // A repeat multiplies: 100 x 100 is 10,000 presses. That has to be refused
+    // rather than sent at the host.
+    const huge = parseMacro('{REPEAT:100}{REPEAT:100}{LEFT}{/REPEAT}{/REPEAT}');
+    __assert(huge.errors.some((e) => /over 2000 steps/.test(e.message)),
+      `huge: ${JSON.stringify(huge.errors)}`);
+    __assert(huge.steps.length === 2000,
+      `the expansion was not capped: ${huge.steps.length} steps`);
   },
 });
 
