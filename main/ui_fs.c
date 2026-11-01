@@ -151,6 +151,41 @@ esp_err_t ui_fs_remove(const char *name) {
     return ESP_OK;
 }
 
+esp_err_t ui_fs_prune(const char *const *keep, size_t count) {
+    if (!s_mounted) return ESP_ERR_INVALID_STATE;
+
+    DIR *d = opendir(UI_FS_MOUNT);
+    if (!d) return ESP_FAIL;
+
+    size_t removed = 0;
+    struct dirent *e;
+    while ((e = readdir(d)) != NULL) {
+        if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0) continue;
+
+        bool wanted = false;
+        for (size_t i = 0; i < count && !wanted; i++) {
+            wanted = strcmp(e->d_name, keep[i]) == 0;
+        }
+        if (wanted) continue;
+
+        char path[UI_FS_PATH_MAX];
+        snprintf(path, sizeof(path), UI_FS_MOUNT "/%s", e->d_name);
+
+        struct stat st;
+        if (stat(path, &st) != 0 || !S_ISREG(st.st_mode)) continue;
+        if (unlink(path) == 0) {
+            removed++;
+            ESP_LOGW(TAG, "removed '%s': not part of this build", e->d_name);
+        }
+    }
+    closedir(d);
+
+    if (removed) {
+        ESP_LOGI(TAG, "%u stale file(s) removed from the UI partition", (unsigned)removed);
+    }
+    return ESP_OK;
+}
+
 esp_err_t ui_fs_usage(size_t *total, size_t *used) {
     if (!s_mounted) return ESP_ERR_INVALID_STATE;
     return esp_littlefs_info(UI_FS_PARTITION, total, used);

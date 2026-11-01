@@ -1198,6 +1198,17 @@ static esp_err_t ws_handler(httpd_req_t *req) {
 // ---------------------------------------------------------------------------
 
 esp_err_t web_server_start(void) {
+    // A file uploaded by an older build is no longer reachable through the
+    // asset table, so it is only taking room. Keep the screen image: it is
+    // stored here too but is not a web file.
+    if (ui_fs_mounted()) {
+        const char *keep[ASSET_COUNT + 1];
+        size_t n = 0;
+        for (size_t i = 0; i < ASSET_COUNT; i++) keep[n++] = s_assets[i].file;
+        keep[n++] = SCREEN_IMAGE_NAME;
+        ui_fs_prune(keep, n);
+    }
+
     // Not ESP_ERROR_CHECK: a WiFi failure should leave the SoftAP-less device
     // able to report the problem, not abort into a boot loop.
     esp_err_t err = wifi_mgr_start();

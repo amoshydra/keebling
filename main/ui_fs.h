@@ -40,5 +40,11 @@ void ui_fs_discard(const char *name, FILE *f);
 // there was nothing stored.
 esp_err_t ui_fs_remove(const char *name);
 
+// Deletes every stored file whose name is not in `keep`. The firmware decides
+// which names exist, so a file left behind by an older build is dead weight -
+// and on a 320 KB partition, dead weight is what stops the next upload fitting.
+// Names still come from the caller's table, never from the directory.
+esp_err_t ui_fs_prune(const char *const *keep, size_t count);
+
 // Partition usage, for the upload page. Fails when not mounted.
 esp_err_t ui_fs_usage(size_t *total, size_t *used);
