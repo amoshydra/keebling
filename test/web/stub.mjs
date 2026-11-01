@@ -28,12 +28,29 @@ const DESCRIPTOR_HEX =
 const TYPES = {
   '.html': 'text/html',
   '.js': 'application/javascript',
+  '.mjs': 'application/javascript',
   '.css': 'text/css',
+  '.json': 'application/json',
+  '.map': 'application/json',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.ico': 'image/x-icon',
+  '.woff2': 'font/woff2',
+  '.txt': 'text/plain',
 };
 
-// The names the device accepts for upload, mirroring s_assets in
-// main/web_server.c. Anything else is refused, so no path can be invented.
+// The built-in files, which are also what the firmware embeds.
 const UI_FILES = ['index.html', 'style.css', 'app.js'];
+
+// Mirrors safe_file_name() in main/web_server.c: a flat name, so a separator
+// cannot be spelled; two names reserved.
+function safeName(name) {
+  if (!name || name.length >= 64) return false;
+  if (name.startsWith('.')) return false;
+  if (name === 'recover.html') return false;
+  if (name.endsWith('.tmp')) return false;
+  return /^[A-Za-z0-9._-]+$/.test(name);
+}
 
 // Mirrors UI_ARCHIVE_MAX in main/web_server.c: the cap on a whole archive.
 const UI_MAX = 192 * 1024;
@@ -63,7 +80,7 @@ function readStoredZip(buf) {
 
     const nameAt = at + 30;
     const name = buf.toString('utf8', nameAt, nameAt + nameLen);
-    if (!UI_FILES.includes(name)) throw err(400, 'unknown file in archive');
+    if (!safeName(name)) throw err(400, 'bad file name');
     if (out.some((e) => e.name === name)) throw err(400, 'duplicate entry');
 
     const bodyAt = nameAt + nameLen + extraLen;
@@ -221,16 +238,22 @@ export function startStub(port = 0) {
           max_size: UI_MAX,
           total: 320 * 1024,
           used: [...device.uiFiles.values()].reduce((n, b) => n + b.length, 0),
-          files: UI_FILES.map((name) => {
-            const stored = device.uiFiles.get(name);
-            const size = stored && stored.length ? stored.length : 0;
-            return {
+          files: [
+            ...[...device.uiFiles].map(([name, body]) => ({
               name,
-              stored: size > 0,
-              size,
-              embedded: fs.statSync(path.join(WEB, name)).size,
-            };
-          }),
+              stored: body.length > 0,
+              size: body.length,
+              embedded: UI_FILES.includes(name) ? fs.statSync(path.join(WEB, name)).size : 0,
+            })),
+            ...UI_FILES
+              .filter((name) => !device.uiFiles.has(name))
+              .map((name) => ({
+                name,
+                stored: false,
+                size: 0,
+                embedded: fs.statSync(path.join(WEB, name)).size,
+              })),
+          ],
         });
 
       case '/ui/upload': {
@@ -260,7 +283,11 @@ export function startStub(port = 0) {
             return;
           }
           if (!entries.length) { res.writeHead(400); res.end('no files'); return; }
-          // All or nothing: the firmware renames only once every entry is in.
+          // All or nothing: the firmware renames only once every entry is in,
+          // then drops whatever the archive did not carry.
+          for (const [name] of device.uiFiles) {
+            if (!entries.some((e) => e.name === name)) device.uiFiles.delete(name);
+          }
           for (const e of entries) device.uiFiles.set(e.name, Buffer.from(e.body));
           res.writeHead(200); res.end(`${entries.length} files stored`);
         });
@@ -274,7 +301,7 @@ export function startStub(port = 0) {
           device.uiFiles.clear();
         } else {
           const name = url.searchParams.get('name') || '';
-          if (!UI_FILES.includes(name)) { res.writeHead(400); res.end('unknown file'); return; }
+          if (!safeName(name)) { res.writeHead(400); res.end('unknown file'); return; }
           device.uiFiles.delete(name);
         }
         device.uiResets++;
@@ -339,19 +366,21 @@ export function startStub(port = 0) {
     }
 
     const file = p === '/' ? 'index.html' : p.slice(1);
-    const full = path.join(WEB, file);
-    if (!full.startsWith(WEB) || !fs.existsSync(full) || !fs.statSync(full).isFile()) {
-      res.writeHead(404); res.end('not found'); return;
-    }
-    // The firmware serves a stored file in preference to the embedded one, but
-    // only when it is non-empty: an empty or interrupted upload must fall back
-    // to the copy in the binary rather than shadow a working page.
+    const builtIn = path.join(WEB, file);
+    const hasBuiltIn = builtIn.startsWith(WEB) && fs.existsSync(builtIn) &&
+      fs.statSync(builtIn).isFile();
+
+    // A stored file wins, and is not limited to the built-in names: the device
+    // serves any flat name in its partition, which is what lets a user's own
+    // bundler ship whatever it emits.
     const stored = device.uiFiles.get(file);
-    const body = stored && stored.length ? stored : fs.readFileSync(full);
+    const body = stored && stored.length ? stored : (hasBuiltIn ? fs.readFileSync(builtIn) : null);
+    if (!body) { res.writeHead(404); res.end('not found'); return; }
+
     // Mirrors the firmware: these are never cached, so an upload cannot look
     // like it did nothing.
     res.writeHead(200, {
-      'Content-Type': TYPES[path.extname(full)] || 'application/octet-stream',
+      'Content-Type': TYPES[path.extname(file)] || 'application/octet-stream',
       'Cache-Control': 'no-store',
     });
     res.end(body);

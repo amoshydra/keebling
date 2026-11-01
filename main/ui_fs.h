@@ -48,3 +48,9 @@ esp_err_t ui_fs_prune(const char *const *keep, size_t count);
 
 // Partition usage, for the upload page. Fails when not mounted.
 esp_err_t ui_fs_usage(size_t *total, size_t *used);
+
+// Visits every stored file with its size, for the listing. The name handed to
+// the callback is the one on disk; deciding whether it is servable is the
+// caller's job, since only the caller knows the naming rule.
+typedef void (*ui_fs_visit_fn)(const char *name, size_t size, void *ctx);
+void ui_fs_list(ui_fs_visit_fn fn, void *ctx);

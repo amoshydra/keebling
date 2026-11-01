@@ -2511,7 +2511,10 @@ __webTests.push({
   name: 'an archive naming a file that is not part of the UI is refused whole',
   fn: async () => {
     const before = await (await fetch('/style.css')).text();
-    for (const bad of ['../evil.js', 'evil.txt', 'recover.html', 'pad.js']) {
+    // A flat name is fine now, whoever emitted it - that is the point. What is
+    // refused is anything that could be a path, the recovery page, hidden
+    // files and the temp suffix the writer owns.
+    for (const bad of ['../evil.js', 'a/b.js', 'recover.html', '.hidden', 'x.tmp']) {
       const zip = __zip([
         { name: 'style.css', body: 'body{color:red}' },
         { name: bad, body: 'x' },
@@ -2525,6 +2528,42 @@ __webTests.push({
       'a refused archive changed what is served');
     __assert(__state('style.css').startsWith('built-in'),
       `style.css became "${__state('style.css')}"`);
+  },
+});
+
+__webTests.push({
+  page: 'ui',
+  name: 'a file the firmware never heard of is served like any other',
+  fn: async () => {
+    // The point of dropping the asset-table whitelist: a user's own build can
+    // ship as many files as it likes.
+    __pickArchive(__zip([
+      { name: 'chunk-4f2a.js', body: 'export const x = 1;' },
+      { name: 'logo.svg', body: '<svg xmlns="http://www.w3.org/2000/svg"></svg>' },
+    ]));
+    await __waitState('chunk-4f2a.js', 'uploaded');
+
+    const js = await fetch('/chunk-4f2a.js');
+    __assert(js.status === 200, `the chunk answered HTTP ${js.status}`);
+    __assert(js.headers.get('content-type').includes('javascript'),
+      `the chunk was served as ${js.headers.get('content-type')}`);
+    __assert((await js.text()) === 'export const x = 1;', 'the chunk came back changed');
+
+    const svg = await fetch('/logo.svg');
+    __assert(svg.status === 200, `the svg answered HTTP ${svg.status}`);
+    __assert(svg.headers.get('content-type').includes('svg'),
+      `the svg was served as ${svg.headers.get('content-type')}`);
+
+    // The archive is the whole UI, so the files it did not carry are gone.
+    __assert(!document.querySelector('.file[data-file="style.css"] .state')
+      || __state('style.css').startsWith('built-in'),
+      `style.css survived the archive: ${__state('style.css')}`);
+
+    window.confirm = () => true;
+    document.getElementById('uiArchiveReset').click();
+    await __sleep(400);
+    const gone = await fetch('/chunk-4f2a.js');
+    __assert(gone.status === 404, `the chunk survived the reset: HTTP ${gone.status}`);
   },
 });
 

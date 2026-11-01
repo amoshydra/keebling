@@ -199,6 +199,12 @@ entry is written to `<name>.tmp` and renamed only after the whole archive has
 arrived, so an interrupted upload leaves the previous UI serving, and a
 zero-length file is never served: the built-in copy is the floor.
 
+An upload is not limited to the firmware's own file names: any flat name
+(`[A-Za-z0-9._-]`, no directories) is stored and served, with a content type
+taken from its extension, so a UI built by any bundler can be uploaded as long
+as it emits flat files. Two names are reserved: `recover.html`, which must come
+from the firmware, and the `.tmp` suffix the writer owns.
+
 An upload replaces the built-in copy until it is reset, so a bad *build* can
 break the UI — but not permanently: `/recover.html` is served by the firmware
 itself and deletes the stored copies. Uploads are token-gated, names are
@@ -403,7 +409,7 @@ are snapshots of current state, so this maps 1:1 onto the hardware with no queue
 | `GET /ws?token=` | token | control channel |
 | `POST /bootloader?token=` | token | reboot into USB download mode |
 | `GET /ui/files?token=` | token | each UI file: stored on the device or still embedded |
-| `POST /ui/upload?token=` | token | store a whole UI (stored zip body, 192 KB cap, 96 KB per entry) |
+| `POST /ui/upload?token=` | token | store a whole UI (stored zip, 192 KB, 96 KB per entry, 24 entries, flat names) |
 | `POST /ui/reset?token=&name=` (or `&all=1`) | token | delete stored copies, restoring the embedded ones |
 | `GET /screen/image?token=` | token | the stored screen image, header and CRC included (404 when there is none) |
 | `POST /screen/image?token=` | token | store the packed screen image (raw body, exactly 6,408 bytes) |

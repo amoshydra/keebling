@@ -73,6 +73,79 @@ static const static_asset_t s_assets[] = {
 };
 #define ASSET_COUNT (sizeof(s_assets) / sizeof(s_assets[0]))
 
+// Long enough for a bundler's hashed chunk name.
+#define UI_NAME_MAX 64
+
+static const static_asset_t *asset_by_file(const char *name) {
+    for (size_t i = 0; i < ASSET_COUNT; i++) {
+        if (strcmp(s_assets[i].file, name) == 0) return &s_assets[i];
+    }
+    return NULL;
+}
+
+// Which names the device will store and serve.
+//
+// A name is a flat file name: letters, digits, dot, dash and underscore. That
+// set cannot spell a path separator, so an upload cannot walk out of the
+// partition and a request cannot ask for one, whatever the archive claims. It
+// is deliberately NOT the asset table: the built-in UI is one build, and a
+// user's own bundler may emit as many files as it likes.
+//
+// Two names are reserved. "recover.html" repairs a broken upload, so it must
+// come from the firmware and never from a request; the ".tmp" suffix belongs to
+// the writer below and must not be uploadable.
+static bool safe_file_name(const char *name) {
+    const size_t n = strlen(name);
+    if (n == 0 || n >= UI_NAME_MAX) return false;
+    if (name[0] == '.') return false;
+    if (strcmp(name, "recover.html") == 0) return false;
+    if (n > 4 && strcmp(name + n - 4, ".tmp") == 0) return false;
+
+    for (size_t i = 0; i < n; i++) {
+        const char c = name[i];
+        const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                        (c >= '0' && c <= '9') || c == '.' || c == '-' || c == '_';
+        if (!ok) return false;
+    }
+    return true;
+}
+
+// A bundler emits more than scripts: fonts, images, source maps. Guessing by
+// extension is less wrong than calling everything octet-stream.
+static const char *type_for_name(const char *name) {
+    const char *dot = strrchr(name, '.');
+    if (!dot) return "application/octet-stream";
+    if (!strcmp(dot, ".html")) return "text/html";
+    if (!strcmp(dot, ".css")) return "text/css";
+    if (!strcmp(dot, ".js") || !strcmp(dot, ".mjs")) return "application/javascript";
+    if (!strcmp(dot, ".json") || !strcmp(dot, ".map")) return "application/json";
+    if (!strcmp(dot, ".svg")) return "image/svg+xml";
+    if (!strcmp(dot, ".png")) return "image/png";
+    if (!strcmp(dot, ".jpg") || !strcmp(dot, ".jpeg")) return "image/jpeg";
+    if (!strcmp(dot, ".gif")) return "image/gif";
+    if (!strcmp(dot, ".ico")) return "image/x-icon";
+    if (!strcmp(dot, ".woff2")) return "font/woff2";
+    if (!strcmp(dot, ".woff")) return "font/woff";
+    if (!strcmp(dot, ".ttf")) return "font/ttf";
+    if (!strcmp(dot, ".txt")) return "text/plain";
+    return "application/octet-stream";
+}
+
+#define UI_LIST_MAX 32
+
+typedef struct { char name[UI_NAME_MAX]; size_t size; } stored_entry_t;
+typedef struct { stored_entry_t *items; size_t count; size_t cap; } stored_list_t;
+
+static void collect_stored(const char *name, size_t size, void *ctx) {
+    stored_list_t *l = ctx;
+    if (l->count == l->cap) return;
+    if (!safe_file_name(name)) return;   // never offer what would not be served
+    snprintf(l->items[l->count].name, UI_NAME_MAX, "%s", name);
+    l->items[l->count].size = size;
+    l->count++;
+}
+
+
 static httpd_handle_t s_server = NULL;
 
 // ---------------------------------------------------------------------------
@@ -548,6 +621,23 @@ static esp_err_t static_handler(httpd_req_t *req) {
         return httpd_resp_send(req, (const char *)s_assets[i].start,
                                s_assets[i].end - s_assets[i].start);
     }
+    // Not one of the built-in paths: any stored file, by its own flat name.
+    // The same rule the upload applied is applied here, so a request for
+    // "../nvs" or "/etc/passwd" is a 404 rather than a path.
+    const char *path = req->uri[0] == '/' ? req->uri + 1 : req->uri;
+    const size_t len = strcspn(path, "?");
+    if (len > 0 && len < UI_NAME_MAX) {
+        char name[UI_NAME_MAX];
+        memcpy(name, path, len);
+        name[len] = '\0';
+
+        if (safe_file_name(name)) {
+            httpd_resp_set_type(req, type_for_name(name));
+            httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+            if (serve_stored(req, name) == ESP_OK) return ESP_OK;
+        }
+    }
+
     httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "not found");
     return ESP_FAIL;
 }
@@ -560,18 +650,6 @@ static esp_err_t static_handler(httpd_req_t *req) {
 // copies. Deleting one brings the built-in copy back, so the worst an upload
 // can do is need a reset - never a reflash.
 // ---------------------------------------------------------------------------
-
-// Longest name in the asset table is "index.html".
-#define UI_NAME_MAX 32
-
-// The asset table is the whitelist. A name that is not one of the UI's own
-// files has no entry, so there is nothing to build a path from.
-static const static_asset_t *asset_by_file(const char *name) {
-    for (size_t i = 0; i < ASSET_COUNT; i++) {
-        if (strcmp(s_assets[i].file, name) == 0) return &s_assets[i];
-    }
-    return NULL;
-}
 
 // What the upload page needs to show: every file, whether the device is
 // serving a stored copy, and how much room is left.
@@ -598,6 +676,26 @@ static esp_err_t ui_files_handler(httpd_req_t *req) {
         cJSON_AddNumberToObject(root, "used", (double)used);
     }
 
+    // The partition's files first, then the built-in ones that are not stored.
+    // The listing follows the filesystem rather than the asset table, because a
+    // user's own build may contain files this firmware has never heard of.
+    static stored_entry_t stored[UI_LIST_MAX];
+    stored_list_t list = { stored, 0, UI_LIST_MAX };
+    ui_fs_list(collect_stored, &list);
+
+    for (size_t i = 0; i < list.count; i++) {
+        const static_asset_t *asset = asset_by_file(stored[i].name);
+        cJSON *o = cJSON_CreateObject();
+        if (!o) continue;
+        cJSON_AddStringToObject(o, "name", stored[i].name);
+        // A zero-length file is never served, so it is not "stored" either.
+        cJSON_AddBoolToObject(o, "stored", stored[i].size > 0);
+        cJSON_AddNumberToObject(o, "size", (double)stored[i].size);
+        cJSON_AddNumberToObject(o, "embedded",
+                                asset ? (double)(asset->end - asset->start) : 0);
+        cJSON_AddItemToArray(arr, o);
+    }
+
     for (size_t i = 0; i < ASSET_COUNT; i++) {
         bool listed = false;
         for (size_t j = 0; j < i && !listed; j++) {
@@ -605,12 +703,17 @@ static esp_err_t ui_files_handler(httpd_req_t *req) {
         }
         if (listed) continue;   // "/" and "/index.html" are one file
 
-        const size_t stored = ui_fs_size(s_assets[i].file);
+        bool already = false;
+        for (size_t j = 0; j < list.count && !already; j++) {
+            already = strcmp(stored[j].name, s_assets[i].file) == 0;
+        }
+        if (already) continue;
+
         cJSON *o = cJSON_CreateObject();
         if (!o) continue;
         cJSON_AddStringToObject(o, "name", s_assets[i].file);
-        cJSON_AddBoolToObject(o, "stored", stored > 0);
-        cJSON_AddNumberToObject(o, "size", (double)stored);
+        cJSON_AddBoolToObject(o, "stored", false);
+        cJSON_AddNumberToObject(o, "size", 0);
         cJSON_AddNumberToObject(o, "embedded",
                                 (double)(s_assets[i].end - s_assets[i].start));
         cJSON_AddItemToArray(arr, o);
@@ -670,7 +773,7 @@ static uint32_t le32(const uint8_t *p) {
 }
 
 typedef struct {
-    const char *name;   // a pointer into the asset table, never into the request
+    char name[UI_NAME_MAX];   // validated by safe_file_name() on arrival
     FILE *f;
 } zip_entry_t;
 
@@ -758,19 +861,18 @@ static esp_err_t ui_upload_handler(httpd_req_t *req) {
             left = (uint16_t)(left - take);
         }
 
-        const static_asset_t *asset = asset_by_file(name);
-        if (!asset) {
-            ESP_LOGW(TAG, "archive entry '%s' refused: not a UI file", name);
-            why = "unknown file in archive";
+        if (!safe_file_name(name)) {
+            ESP_LOGW(TAG, "archive entry '%s' refused: not a flat file name", name);
+            why = "bad file name";
             break;
         }
         if (count == UI_ENTRY_COUNT) { why = "too many files"; break; }
 
         bool dup = false;
-        for (size_t i = 0; i < count; i++) dup = dup || entries[i].name == asset->file;
+        for (size_t i = 0; i < count; i++) dup = dup || strcmp(entries[i].name, name) == 0;
         if (dup) { why = "duplicate entry"; break; }
 
-        FILE *f = ui_fs_open_temp(asset->file);
+        FILE *f = ui_fs_open_temp(name);
         if (!f) { why = "cannot write"; code = 500; break; }
 
         uint32_t left = size;
@@ -782,9 +884,9 @@ static esp_err_t ui_upload_handler(httpd_req_t *req) {
             if (fwrite(buf, 1, take, f) != take) { why = "cannot write"; code = 500; wrote = false; break; }
             left -= (uint32_t)take;
         }
-        if (!wrote) { ui_fs_discard(asset->file, f); break; }
+        if (!wrote) { ui_fs_discard(name, f); break; }
 
-        entries[count].name = asset->file;
+        snprintf(entries[count].name, sizeof(entries[count].name), "%s", name);
         entries[count].f = f;
         count++;
     }
@@ -808,6 +910,14 @@ static esp_err_t ui_upload_handler(httpd_req_t *req) {
             return upload_refuse(req, "500 Internal Server Error", 500, "cannot store");
         }
     }
+
+    // The archive is the whole UI, so anything it did not carry is from an
+    // older build and only takes room. The screen image shares this partition
+    // and is not a web file: it stays.
+    const char *keep[UI_ENTRY_COUNT + 1];
+    for (size_t i = 0; i < count; i++) keep[i] = entries[i].name;
+    keep[count] = SCREEN_IMAGE_NAME;
+    ui_fs_prune(keep, count + 1);
 
     drain_body(req, UI_ARCHIVE_MAX);   // the central directory, so the answer lands
     display_request_refresh();
@@ -841,8 +951,13 @@ static esp_err_t ui_reset_handler(httpd_req_t *req) {
 
     char all[4];
     if (httpd_query_key_value(query, "all", all, sizeof(all)) == ESP_OK) {
-        for (size_t i = 0; i < ASSET_COUNT; i++) {
-            if (ui_fs_remove(s_assets[i].file) != ESP_OK) {
+        // Everything except the screen image, which is not a web file.
+        static stored_entry_t stored[UI_LIST_MAX];
+        stored_list_t list = { stored, 0, UI_LIST_MAX };
+        ui_fs_list(collect_stored, &list);
+        for (size_t i = 0; i < list.count; i++) {
+            if (strcmp(stored[i].name, SCREEN_IMAGE_NAME) == 0) continue;
+            if (ui_fs_remove(stored[i].name) != ESP_OK) {
                 httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "cannot remove");
                 return ESP_FAIL;
             }
@@ -854,7 +969,7 @@ static esp_err_t ui_reset_handler(httpd_req_t *req) {
 
     char name[UI_NAME_MAX];
     if (httpd_query_key_value(query, "name", name, sizeof(name)) != ESP_OK ||
-        !asset_by_file(name)) {
+        !safe_file_name(name)) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "unknown file");
         return ESP_FAIL;
     }
@@ -1198,17 +1313,6 @@ static esp_err_t ws_handler(httpd_req_t *req) {
 // ---------------------------------------------------------------------------
 
 esp_err_t web_server_start(void) {
-    // A file uploaded by an older build is no longer reachable through the
-    // asset table, so it is only taking room. Keep the screen image: it is
-    // stored here too but is not a web file.
-    if (ui_fs_mounted()) {
-        const char *keep[ASSET_COUNT + 1];
-        size_t n = 0;
-        for (size_t i = 0; i < ASSET_COUNT; i++) keep[n++] = s_assets[i].file;
-        keep[n++] = SCREEN_IMAGE_NAME;
-        ui_fs_prune(keep, n);
-    }
-
     // Not ESP_ERROR_CHECK: a WiFi failure should leave the SoftAP-less device
     // able to report the problem, not abort into a boot loop.
     esp_err_t err = wifi_mgr_start();
@@ -1220,6 +1324,9 @@ esp_err_t web_server_start(void) {
 
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.max_open_sockets = 7;
+    // The upload handler holds the archive's entry table and a chunk buffer on
+    // this task's stack, and the listing builds JSON on it.
+    cfg.stack_size = 8192;
     cfg.lru_purge_enable = true;
     // The default is 8 and we register more than that; at 15 the 9th
     // registration returned ESP_ERR_HTTPD_HANDLERS_FULL and, through

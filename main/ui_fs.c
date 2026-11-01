@@ -151,6 +151,26 @@ esp_err_t ui_fs_remove(const char *name) {
     return ESP_OK;
 }
 
+void ui_fs_list(ui_fs_visit_fn fn, void *ctx) {
+    if (!s_mounted || !fn) return;
+
+    DIR *d = opendir(UI_FS_MOUNT);
+    if (!d) return;
+
+    struct dirent *e;
+    while ((e = readdir(d)) != NULL) {
+        if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0) continue;
+
+        char path[UI_FS_PATH_MAX];
+        snprintf(path, sizeof(path), UI_FS_MOUNT "/%s", e->d_name);
+
+        struct stat st;
+        if (stat(path, &st) != 0 || !S_ISREG(st.st_mode)) continue;
+        fn(e->d_name, (size_t)st.st_size, ctx);
+    }
+    closedir(d);
+}
+
 esp_err_t ui_fs_prune(const char *const *keep, size_t count) {
     if (!s_mounted) return ESP_ERR_INVALID_STATE;
 
