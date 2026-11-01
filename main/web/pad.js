@@ -487,6 +487,17 @@ function requestCapture() {
 
 function onMousePointerDown(e) {
   if (e.pointerType !== 'mouse' || captured) return;
+  if (pointerMode === 'abs') {
+    const [x, y] = absoluteFor(e.clientX, e.clientY);
+    buttons |= 1;
+    sendPointerAt(x, y);
+    return;
+  }
+
+  // Absolute mode is a map, not a trackpad: the position comes from where the
+  // pointer is, so there is nothing for pointer lock to add. Pressing goes
+  // where the pointer already is.
+
   // Locked on *mouse* pointerdown only. Doing this from the click event caught
   // taps as well, so every touch grabbed pointer lock and the pad appeared to
   // freeze (mouse moves are filtered to pointerType === 'mouse').
@@ -542,8 +553,44 @@ function queueMove(dx, dy) {
   if (moveTimer === null) moveTimer = setTimeout(flushMove, wait);
 }
 
+// A captured mouse has no absolute position to report - pointer lock only ever
+// gives movement - so in absolute mode the movement is accumulated into one.
+// The pointer then behaves like a trackpad mapped onto the screen, which is
+// also the only way to exercise the host's absolute handling from a desktop.
+// Hovering generates a position per pointer event; one per animation frame's
+// worth is plenty, so the same interval the delta path uses coalesces them.
+let absPending = null;      // {x, y} in client coordinates
+let absTimer = null;
+
+function queueAbsAt(clientX, clientY) {
+  absPending = { x: clientX, y: clientY };
+  const wait = MOVE_INTERVAL_MS - (performance.now() - lastMoveAt);
+  if (wait <= 0) { flushAbs(); return; }
+  if (absTimer === null) {
+    absTimer = setTimeout(() => { absTimer = null; flushAbs(); }, wait);
+  }
+}
+
+function flushAbs() {
+  if (!absPending) return;
+  const [x, y] = absoluteFor(absPending.x, absPending.y);
+  absPending = null;
+  lastMoveAt = performance.now();
+  sendPointerAt(x, y);
+}
+
 function onMousePointerMove(e) {
-  if (!captured || e.pointerType !== 'mouse') return;
+  if (e.pointerType !== 'mouse') return;
+
+  // Absolute: follow the pointer across the pad, no lock and no accumulation.
+  // This is what a graphics tablet does - the position is reported while the
+  // pointer is merely hovering, and a click presses there.
+  if (pointerMode === 'abs') {
+    queueAbsAt(e.clientX, e.clientY);
+    return;
+  }
+
+  if (!captured) return;
   const gain = Number(appSettings.mouse_gain) || 1;
   queueMove(e.movementX * gain, e.movementY * gain);
 }
@@ -552,6 +599,7 @@ function onMouseDown(e) {
   if (!captured) return;
   e.preventDefault();     // no middle-click autoscroll while driving a remote
   flushMove();            // so a click is not overtaken by movement queued before it
+  if (pointerMode === 'abs') flushAbs();
   if (e.button === 0) buttons |= 1;
   if (e.button === 2) buttons |= 2;
   if (e.button === 1) buttons |= 4;
@@ -559,6 +607,13 @@ function onMouseDown(e) {
 }
 
 function onMouseUp(e) {
+  if (pointerMode === 'abs') {
+    if (e.button === 0) buttons &= ~1;
+    if (e.button === 2) buttons &= ~2;
+    if (e.button === 1) buttons &= ~4;
+    sendPointerAt(lastAbs[0], lastAbs[1]);
+    return;
+  }
   if (!captured) return;
   flushMove();
   if (e.button === 0) buttons &= ~1;
@@ -713,6 +768,8 @@ function storedPointerMode() {
 
 function setPointerMode(mode) {
   pointerMode = mode === 'abs' ? 'abs' : 'rel';
+  if (pad) pad.classList.toggle('pointer-abs', pointerMode === 'abs');
+
   try { localStorage.setItem(POINTER_MODE_KEY, pointerMode); } catch (_) {}
   if (padModeEl) {
     padModeEl.textContent = pointerMode === 'abs' ? 'Absolute' : 'Relative';
@@ -727,8 +784,13 @@ function setPointerMode(mode) {
 function absoluteFor(clientX, clientY) {
   if (!pad) return [0, 0];
   const r = pad.getBoundingClientRect();
+  // In absolute mode the pointer buttons are docked along the bottom edge, and
+  // that strip is not part of the map: the buttons would otherwise be dead
+  // zones in the middle of the screen.
+  const bar = pointerMode === 'abs' ? document.getElementById('mouseButtons') : null;
+  const usable = Math.max(1, r.height - (bar ? bar.offsetHeight : 0));
   const fx = r.width ? (clientX - r.left) / r.width : 0;
-  const fy = r.height ? (clientY - r.top) / r.height : 0;
+  const fy = (clientY - r.top) / usable;
   const clamp01 = (v) => Math.max(0, Math.min(1, v));
   return [Math.round(clamp01(fx) * 32767), Math.round(clamp01(fy) * 32767)];
 }
@@ -1489,6 +1551,8 @@ function destroy() {
   flashTimer = null;
   clearTimeout(pulseTimer);
   pulseTimer = null;
+  clearTimeout(absTimer);
+  absTimer = null;
   clearInterval(ledTimer);
   ledTimer = null;
   ledsEl = null;

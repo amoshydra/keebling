@@ -3,7 +3,7 @@ CONFIG_IDF_TARGET="esp32s3"
 
 # ---- USB (TinyUSB) ----
 # HID is enabled by COUNT, not by an "ENABLED" bool.
-CONFIG_TINYUSB_HID_COUNT=1
+CONFIG_TINYUSB_HID_COUNT=2
 
 # ---- WiFi ----
 CONFIG_ESP_WIFI_SOFTAP_SUPPORT=y

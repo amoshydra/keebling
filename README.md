@@ -51,6 +51,22 @@ Registry on the first build.
 If `flash` fails to connect: hold **BOOT**, start the flash, release BOOT once
 "Connecting…" appears.
 
+### Working on the UI without flashing
+
+The UI is embedded in the firmware, so changing `main/web` normally costs a
+BOOT-replug-power-cycle round trip. For UI work there is a dev server:
+
+```
+node tools/dev-server.mjs --device 192.168.1.50
+```
+
+It serves `main/web` from disk and proxies every other request — the REST
+endpoints and the WebSocket — to the device. The browser sees one origin, so
+there is no CORS to arrange and the saved access code still works. Open
+`http://localhost:8080/?token=<code>`, edit a file, reload the page.
+
+Only firmware changes need a flash; the UI does not.
+
 ## Use
 
 The device prefers to **join your own network** (STA), so the phone or laptop

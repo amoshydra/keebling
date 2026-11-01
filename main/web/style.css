@@ -315,6 +315,27 @@ textarea { font-family: ui-monospace, SFMono-Regular, monospace; resize: vertica
   letter-spacing: .3px;
 }
 #padMode.on { background: #23364d; color: #cfe2f7; }
+/* Absolute mode turns the pad into a map of the screen, so floating buttons
+   over it would be unreachable holes. Dock them along the bottom edge instead,
+   and the mapping measures the pad minus this strip. */
+#pad.pointer-abs #mouseButtons {
+  left: 0;
+  right: 0;
+  bottom: 0;
+  transform: none;
+  justify-content: center;
+  gap: 8px;
+  padding: 6px;
+  background: var(--panel);
+  border-top: 1px solid #232323;
+}
+#pad.pointer-abs #mouseButtons button {
+  width: 84px;
+  height: 44px;
+  border-radius: 10px;
+}
+/* The gesture help is about gestures, which absolute mode does not use. */
+#pad.pointer-abs #helpOpen { display: none; }
 #pad.captured #padMode { display: none; }
 
 /* The captured pad is the only thing being looked at, so a dropped link has to

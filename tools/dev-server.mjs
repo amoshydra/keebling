@@ -1,0 +1,115 @@
+#!/usr/bin/env node
+// Development server for the web UI.
+//
+// The UI normally comes off the device, which means a BOOT-replug-power-cycle
+// round trip for every CSS tweak. This serves `main/web` from disk and proxies
+// everything else - the REST endpoints and the WebSocket - to a running device,
+// so the page still looks same-origin to the browser: no CORS, no token
+// changes, no mixed-origin localStorage.
+//
+//   node tools/dev-server.mjs --device 192.168.1.50
+//   node tools/dev-server.mjs --device esp-remote.local --port 8080
+//
+// Then open http://localhost:8080/?token=<code>. Edit a file, reload the page.
+// Only the firmware needs a flash; the UI does not.
+
+import http from 'node:http';
+import net from 'node:net';
+import { createReadStream, existsSync, statSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const ROOT = path.resolve(HERE, '..', 'main', 'web');
+
+function arg(name, fallback) {
+  const i = process.argv.indexOf(`--${name}`);
+  if (i >= 0 && process.argv[i + 1]) return process.argv[i + 1];
+  return process.env[name.toUpperCase()] || fallback;
+}
+
+const device = arg('device', '');
+if (!device) {
+  console.error('usage: node tools/dev-server.mjs --device <ip-or-host> [--port 8080]');
+  process.exit(1);
+}
+const port = Number(arg('port', '8080'));
+// `--device 192.168.1.50` or `--device 192.168.1.50:8080`; port 80 is the
+// device's normal one, the others are for pointing at a test stub.
+const [host, devicePort] = (() => {
+  const clean = device.replace(/^https?:\/\//, '').replace(/\/$/, '');
+  const m = /^([^:]+):(\d+)$/.exec(clean);
+  return m ? [m[1], Number(m[2])] : [clean, 80];
+})();
+
+const TYPES = {
+  '.html': 'text/html; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+};
+
+// Serve a file from main/web if it exists, otherwise let the device answer.
+function localFile(pathname) {
+  const rel = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
+  const file = path.join(ROOT, rel);
+  if (!file.startsWith(ROOT)) return null;            // no escaping the root
+  if (!existsSync(file) || !statSync(file).isFile()) return null;
+  return file;
+}
+
+const server = http.createServer((req, res) => {
+  const url = new URL(req.url, 'http://localhost');
+  // The device serves uploaded UI files from its filesystem; those are not on
+  // disk here, so they have to come from the device. Everything else in
+  // main/web wins.
+  const file = req.method === 'GET' ? localFile(url.pathname) : null;
+  if (file) {
+    res.writeHead(200, {
+      'content-type': TYPES[path.extname(file)] || 'application/octet-stream',
+      // Never cache: the point of this server is that a reload shows the edit.
+      'cache-control': 'no-store',
+    });
+    createReadStream(file).pipe(res);
+    return;
+  }
+
+  const upstream = http.request({
+    host,
+    port: devicePort,
+    method: req.method,
+    path: req.url,
+    headers: { ...req.headers, host },
+  }, (up) => {
+    res.writeHead(up.statusCode || 502, up.headers);
+    up.pipe(res);
+  });
+  upstream.on('error', (e) => {
+    res.writeHead(502, { 'content-type': 'text/plain' });
+    res.end(`device unreachable at ${host}: ${e.message}\n`);
+  });
+  req.pipe(upstream);
+});
+
+// The WebSocket is a plain TCP stream after the upgrade, so pipe bytes both
+// ways rather than trying to understand it.
+server.on('upgrade', (req, socket, head) => {
+  const up = net.connect(devicePort, host, () => {
+    const headers = Object.entries(req.headers)
+      .map(([k, v]) => `${k}: ${v}`)
+      .join('\r\n');
+    up.write(`${req.method} ${req.url} HTTP/1.1\r\n${headers}\r\n\r\n`);
+    if (head && head.length) up.write(head);
+    socket.pipe(up).pipe(socket);
+  });
+  up.on('error', () => socket.destroy());
+  socket.on('error', () => up.destroy());
+});
+
+server.listen(port, '127.0.0.1', () => {
+  console.log(`serving ${ROOT}`);
+  console.log(`proxying everything else to http://${host}:${devicePort}`);
+  console.log(`open http://localhost:${port}/?token=<device code>`);
+});

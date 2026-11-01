@@ -74,12 +74,25 @@ static const char *s_strings[6] = {
     s_interface_pointer,  // 5: interface 1 (the absolute pointer)
 };
 
+// The interface count and wTotalLength must agree with the descriptors below,
+// or the host reads past the array into whatever follows it. That is not a
+// compile error and not a link error - it is a device that enumerates as
+// nothing, taking the keyboard with it. Count them before changing either.
 static const uint8_t hid_configuration_descriptor[] = {
-    TUD_CONFIG_DESCRIPTOR(1, 1, 0, TUSB_DESC_TOTAL_LEN, TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP, 100),
+    TUD_CONFIG_DESCRIPTOR(1, 2, 0, TUSB_DESC_TOTAL_LEN, TUSB_DESC_CONFIG_ATT_REMOTE_WAKEUP, 100),
     // Interface 0, string idx 4, no boot protocol, report desc len, EP, size, poll
     TUD_HID_DESCRIPTOR(0, 4, false, sizeof(hid_report_descriptor),
                        HID_EP_IN, HID_EP_SIZE, HID_POLL_MS),
+    // Interface 1: the absolute pointer, on its own endpoint and string.
+    TUD_HID_DESCRIPTOR(1, 5, false, sizeof(pointer_report_descriptor),
+                       HID_EP_POINTER, HID_EP_SIZE, HID_POLL_MS),
 };
+
+// A compile-time check that the header and the contents agree. TUD_HID_DESC_LEN
+// is fixed, so this catches the exact mistake above: an array whose declared
+// length is bigger than the bytes it contains.
+_Static_assert(sizeof(hid_configuration_descriptor) == TUSB_DESC_TOTAL_LEN,
+               "configuration descriptor length does not match its header");
 
 // ---- TinyUSB callbacks (all four are REQUIRED) ----
 

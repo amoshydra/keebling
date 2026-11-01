@@ -2776,6 +2776,42 @@ __webTests.push({
 
 __webTests.push({
   page: 'control',
+  name: 'absolute mode hovers and clicks without capturing',
+  fn: async () => {
+    // Pointer lock exists to turn movement into deltas. In absolute mode the
+    // position comes from where the pointer is, so locking it would be the
+    // wrong model - and would hide the cursor the user needs to see.
+    PadView.setPointerMode('abs');
+    const pad = document.getElementById('pad');
+    const r = pad.getBoundingClientRect();
+    const at = (x, y) => ({ clientX: r.left + x, clientY: r.top + y });
+    const cap = __capture();
+
+    pad.dispatchEvent(new PointerEvent('pointermove', {
+      pointerType: 'mouse', bubbles: true, ...at(20, 20),
+    }));
+    await __sleep(40);
+    const hover = cap.filter((m) => m[0] === 0x06).pop();
+    __assert(hover, 'hovering sent no position');
+    __assert(PadView.captured === false, 'absolute mode captured the pointer');
+
+    pad.dispatchEvent(new PointerEvent('pointerdown', {
+      pointerType: 'mouse', bubbles: true, ...at(20, 20),
+    }));
+    const press = cap.filter((m) => m[0] === 0x06).pop();
+    __assert(press[5] === 1, `no button press: buttons=${press[5]}`);
+    __assert(PadView.captured === false, 'the press captured the pointer');
+
+    window.dispatchEvent(new PointerEvent('mouseup', { bubbles: true, button: 0 }));
+    const up = cap.filter((m) => m[0] === 0x06).pop();
+    __assert(up[5] === 0, `the release did not clear the button: ${up[5]}`);
+
+    PadView.setPointerMode('rel');
+  },
+});
+
+__webTests.push({
+  page: 'control',
   name: 'absolute mode maps the pad onto the host screen',
   fn: async () => {
     const pad = document.getElementById('pad');
