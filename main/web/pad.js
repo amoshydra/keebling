@@ -20,21 +20,9 @@ const PadView = (() => {
 
 // ---------------------------------------------------------------- HID maps
 // Keyboard/Keypad usage page 0x07
-const KEY = {
-  KeyA:0x04,KeyB:0x05,KeyC:0x06,KeyD:0x07,KeyE:0x08,KeyF:0x09,KeyG:0x0A,KeyH:0x0B,
-  KeyI:0x0C,KeyJ:0x0D,KeyK:0x0E,KeyL:0x0F,KeyM:0x10,KeyN:0x11,KeyO:0x12,KeyP:0x13,
-  KeyQ:0x14,KeyR:0x15,KeyS:0x16,KeyT:0x17,KeyU:0x18,KeyV:0x19,KeyW:0x1A,KeyX:0x1B,
-  KeyY:0x1C,KeyZ:0x1D,
-  Digit1:0x1E,Digit2:0x1F,Digit3:0x20,Digit4:0x21,Digit5:0x22,Digit6:0x23,Digit7:0x24,
-  Digit8:0x25,Digit9:0x26,Digit0:0x27,
-  Enter:0x28,Escape:0x29,Backspace:0x2A,Tab:0x2B,Space:0x2C,Minus:0x2D,Equal:0x2E,
-  BracketLeft:0x2F,BracketRight:0x30,Backslash:0x31,Semicolon:0x33,Quote:0x34,
-  Backquote:0x35,Comma:0x36,Period:0x37,Slash:0x38,CapsLock:0x39,
-  F1:0x3A,F2:0x3B,F3:0x3C,F4:0x3D,F5:0x3E,F6:0x3F,F7:0x40,F8:0x41,F9:0x42,
-  F10:0x43,F11:0x44,F12:0x45,
-  Insert:0x49,Home:0x4A,PageUp:0x4B,Delete:0x4C,End:0x4D,PageDown:0x4E,
-  ArrowRight:0x4F,ArrowLeft:0x50,ArrowDown:0x51,ArrowUp:0x52,
-};
+// The DOM-code to HID-usage table lives in common.js: the macro DSL needs the
+// same mapping, and two copies of it would drift.
+const KEY = HID_KEYS;
 
 const MOD = {
   ControlLeft:0x01, ShiftLeft:0x02,   AltLeft:0x04,   MetaLeft:0x08,
@@ -894,44 +882,21 @@ function onKeyUp(e) {
 //
 // Ten keys a row on the letter page: at 390px that is a 36px key, which is the
 // same density a phone keyboard uses. The old full-width rows gave 26px.
-const KEY_PAGES = {
-  abc: [
-    // The keys a chord needs, and the ones a terminal needs, on the page you
-    // start on: latching Alt and then reaching for Tab should not mean
-    // changing pages first.
-    [['Escape','Esc'],['Tab','Tab'],['ControlLeft','Ctrl',null,'mod'],
-     ['AltLeft','Alt',null,'mod'],['MetaLeft','Cmd',null,'mod'],
-     ['p:fn','Fn',null,'mod']],
-    [['KeyQ','q','Q'],['KeyW','w','W'],['KeyE','e','E'],['KeyR','r','R'],['KeyT','t','T'],
-     ['KeyY','y','Y'],['KeyU','u','U'],['KeyI','i','I'],['KeyO','o','O'],['KeyP','p','P']],
-    [['KeyA','a','A'],['KeyS','s','S'],['KeyD','d','D'],['KeyF','f','F'],['KeyG','g','G'],
-     ['KeyH','h','H'],['KeyJ','j','J'],['KeyK','k','K'],['KeyL','l','L']],
-    [['ShiftLeft','⇧',null,'wide'],['KeyZ','z','Z'],['KeyX','x','X'],['KeyC','c','C'],
-     ['KeyV','v','V'],['KeyB','b','B'],['KeyN','n','N'],['KeyM','m','M'],
-     ['Backspace','DEL',null,'wide']],
-    [['p:sym','123',null,'wide'],['p:fn','Fn',null,'wide'],
-     ['Slash','?',null,'wide',true],['Space','space',null,'space'],
-     ['Period','.'],['Enter','⏎',null,'wide']],
-  ],
-  sym: [
-    [['Digit1','1','!'],['Digit2','2','@'],['Digit3','3','#'],['Digit4','4','$'],
-     ['Digit5','5','%'],['Digit6','6','^'],['Digit7','7','&'],['Digit8','8','*'],
-     ['Digit9','9','('],['Digit0','0',')']],
-    [['Minus','-','_'],['Equal','=','+'],['BracketLeft','[','{'],
-     ['BracketRight',']','}'],['Backslash','\\','|'],['Semicolon',';',':'],
-     ['Quote',"'",'"'],['Backquote','`','~'],['Slash','/','?']],
-    [['p:abc','ABC',null,'wide'],['Comma',',','<'],['Period','.','>'],
-     ['Space','space',null,'space'],['p:fn','Fn',null,'wide'],['Enter','⏎',null,'wide']],
-  ],
-  fn: [
-    [['F1'],['F2'],['F3'],['F4'],['F5'],['F6']],
-    [['F7'],['F8'],['F9'],['F10'],['F11'],['F12']],
-    [['Escape','Esc'],['Tab','Tab'],['Home','Home'],['End','End'],
-     ['PageUp','PgUp'],['PageDown','PgDn']],
-    [['p:abc','ABC',null,'wide'],['ArrowLeft','←'],['ArrowUp','↑'],['ArrowDown','↓'],
-     ['ArrowRight','→'],['Delete','Del'],['Insert','Ins']],
-  ],
-};
+// The letter and symbol pages come from the host layout (common.js); only the
+// function page is the same whatever the host is set to.
+const FN_PAGE = [
+  [['F1'],['F2'],['F3'],['F4'],['F5'],['F6']],
+  [['F7'],['F8'],['F9'],['F10'],['F11'],['F12']],
+  [['Escape','Esc'],['Tab','Tab'],['Home','Home'],['End','End'],
+   ['PageUp','PgUp'],['PageDown','PgDn']],
+  [['p:abc','ABC',null,'wide'],['ArrowLeft','←'],['ArrowUp','↑'],['ArrowDown','↓'],
+   ['ArrowRight','→'],['Delete','Del'],['Insert','Ins']],
+];
+
+function keyPages() {
+  const layout = hostLayout();
+  return { abc: layout.abc, sym: layout.sym, fn: FN_PAGE };
+}
 
 // Modifiers tapped on the virtual keyboard latch instead of being held. A held
 // modifier needs a second finger, which is why Alt+Tab and Ctrl+C were
@@ -962,6 +927,16 @@ function applyShiftLegends() {
   }
 }
 
+// The layout may have changed since this script loaded; both the typing table
+// and the picture are rebuilt from it.
+function applyHostLayout() {
+  // A layout change starts from the letter page: staying on the symbols page
+  // after the symbols have moved would be disorienting.
+  keyPage = 'abc';
+  refreshTypeMap();
+  buildKeyboard();
+}
+
 function buildKeyboard() {
   // The keys go into their own container so the slot can swap them for the
   // capture field without rebuilding anything on every switch.
@@ -969,7 +944,7 @@ function buildKeyboard() {
   built.textContent = '';
   // Rebuilt per page.
   alwaysShift.clear();
-  for (const row of KEY_PAGES[keyPage]) addKeyboardRow(built, row);
+  for (const row of keyPages()[keyPage]) addKeyboardRow(built, row);
   applyShiftLegends();
 }
 
@@ -1131,34 +1106,15 @@ function buildMedia() {
 // ---------------------------------------------------------------- type text
 // USB HID has no "type this string" notion - it only carries physical key
 // positions, which the host maps through its own layout. US QWERTY assumed.
-const TYPE_MAP = (() => {
-  const m = {};
-  const add = (ch, code, shift) => { m[ch] = [code, !!shift]; };
+const TYPE_MAP = {};
 
-  add(' ', 'Space'); add('\n', 'Enter'); add('\t', 'Tab');
-  add('-', 'Minus'); add('=', 'Equal');
-  add('[', 'BracketLeft'); add(']', 'BracketRight'); add('\\', 'Backslash');
-  add(';', 'Semicolon'); add("'", 'Quote'); add('`', 'Backquote');
-  add(',', 'Comma'); add('.', 'Period'); add('/', 'Slash');
-
-  add('_', 'Minus', 1); add('+', 'Equal', 1);
-  add('{', 'BracketLeft', 1); add('}', 'BracketRight', 1); add('|', 'Backslash', 1);
-  add(':', 'Semicolon', 1); add('"', 'Quote', 1); add('~', 'Backquote', 1);
-  add('<', 'Comma', 1); add('>', 'Period', 1); add('?', 'Slash', 1);
-
-  add('!', 'Digit1', 1); add('@', 'Digit2', 1); add('#', 'Digit3', 1);
-  add('$', 'Digit4', 1); add('%', 'Digit5', 1); add('^', 'Digit6', 1);
-  add('&', 'Digit7', 1); add('*', 'Digit8', 1); add('(', 'Digit9', 1);
-  add(')', 'Digit0', 1);
-
-  for (let i = 0; i <= 9; i++) add(String(i), 'Digit' + i);
-  for (let i = 0; i < 26; i++) {
-    const up = String.fromCharCode(65 + i);
-    add(up.toLowerCase(), 'Key' + up, 0);
-    add(up, 'Key' + up, 1);
-  }
-  return m;
-})();
+// Rebuilt from the layout, so the Type panel cannot type a character the
+// keyboard would not draw.
+function refreshTypeMap() {
+  for (const k of Object.keys(TYPE_MAP)) delete TYPE_MAP[k];
+  Object.assign(TYPE_MAP, layoutTextMap());
+}
+refreshTypeMap();
 
 let typing = false;
 let typeAbort = false;
@@ -1304,7 +1260,7 @@ function init() {
   refreshCaptureUi();
 
   keyPage = 'abc';
-  buildKeyboard();
+  applyHostLayout();
   buildMedia();
   kbModesEl = document.getElementById('kbModes');
   ledsEl = document.getElementById('kbLeds');
@@ -1554,6 +1510,7 @@ return {
   buildKeyboardReport,
   releaseAll,
   setKeyboardSource,
+  applyHostLayout,
   focusCapture,
   pollLeds,
   get keyboardSource() { return kbSource; },

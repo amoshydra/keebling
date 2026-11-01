@@ -202,6 +202,112 @@ function forgetCode() {
   token = '';
 }
 
+
+// ---------------------------------------------------------------- host layouts
+// The on-screen keyboard is a picture of the *host's* layout, not ours: a key
+// sends a position, and the host decides what character that position is. So a
+// layout is not cosmetic - it is what makes the labels true, and what the Type
+// panel and the macro DSL type through.
+//
+// A layout is the two pages the keyboard draws, in the same row shape pad.js
+// renders: [code, label, shiftedLabel, width, alwaysShift]. The character map
+// used for typing is DERIVED from those rows, so the picture and the typing
+// path cannot disagree.
+const LAYOUT_KEY = 'esp32remote.hostLayout';
+
+const LAYOUT_ROWS = {
+  us: {
+    name: 'US QWERTY',
+    sym: [
+      [['Digit1','1','!'],['Digit2','2','@'],['Digit3','3','#'],['Digit4','4','$'],
+       ['Digit5','5','%'],['Digit6','6','^'],['Digit7','7','&'],['Digit8','8','*'],
+       ['Digit9','9','('],['Digit0','0',')']],
+      [['Minus','-','_'],['Equal','=','+'],['BracketLeft','[','{'],
+       ['BracketRight',']','}'],['Backslash','\\','|'],['Semicolon',';',':'],
+       ['Quote',"'",'"'],['Backquote','`','~'],['Slash','/','?']],
+      [['p:abc','ABC',null,'wide'],['Comma',',','<'],['Period','.','>'],
+       ['Space','space',null,'space'],['p:fn','Fn',null,'wide'],['Enter','⏎',null,'wide']],
+    ],
+  },
+  uk: {
+    name: 'UK QWERTY',
+    sym: [
+      // UK moves " to 2, puts #~ where \| was on a US board, and moves \| to
+      // the key left of Z on a real ISO board. The letter rows are unchanged.
+      [['Digit1','1','!'],['Digit2','2','"'],['Digit3','3','£'],['Digit4','4','$'],
+       ['Digit5','5','%'],['Digit6','6','^'],['Digit7','7','&'],['Digit8','8','*'],
+       ['Digit9','9','('],['Digit0','0',')']],
+      [['Minus','-','_'],['Equal','=','+'],['BracketLeft','[','{'],
+       ['BracketRight',']','}'],['Semicolon',';',':'],['Quote',"'",'@'],
+       ['Backquote','`','¬'],['NonUSHash','#','~'],['Slash','/','?']],
+      [['p:abc','ABC',null,'wide'],['Comma',',','<'],['Period','.','>'],
+       ['Space','space',null,'space'],['p:fn','Fn',null,'wide'],['Enter','⏎',null,'wide']],
+    ],
+  },
+};
+
+// The letter page is the same physical board for both: a UK keyboard is a US
+// keyboard with different punctuation, so only the symbol page differs.
+LAYOUT_ROWS.us.abc = [
+  [['Escape','Esc'],['Tab','Tab'],['ControlLeft','Ctrl',null,'mod'],
+   ['AltLeft','Alt',null,'mod'],['MetaLeft','Cmd',null,'mod'],
+   ['p:fn','Fn',null,'mod']],
+  [['KeyQ','q','Q'],['KeyW','w','W'],['KeyE','e','E'],['KeyR','r','R'],['KeyT','t','T'],
+   ['KeyY','y','Y'],['KeyU','u','U'],['KeyI','i','I'],['KeyO','o','O'],['KeyP','p','P']],
+  [['KeyA','a','A'],['KeyS','s','S'],['KeyD','d','D'],['KeyF','f','F'],['KeyG','g','G'],
+   ['KeyH','h','H'],['KeyJ','j','J'],['KeyK','k','K'],['KeyL','l','L']],
+  [['ShiftLeft','⇧',null,'wide'],['KeyZ','z','Z'],['KeyX','x','X'],['KeyC','c','C'],
+   ['KeyV','v','V'],['KeyB','b','B'],['KeyN','n','N'],['KeyM','m','M'],
+   ['Backspace','DEL',null,'wide']],
+  [['p:sym','123',null,'wide'],['p:fn','Fn',null,'wide'],
+   ['Slash','?',null,'wide',true],['Space','space',null,'space'],
+   ['Period','.'],['Enter','⏎',null,'wide']],
+];
+LAYOUT_ROWS.uk.abc = LAYOUT_ROWS.us.abc;
+
+function hostLayoutId() {
+  try {
+    const id = localStorage.getItem(LAYOUT_KEY);
+    return LAYOUT_ROWS[id] ? id : 'us';
+  } catch (_) {
+    return 'us';
+  }
+}
+
+function hostLayout() {
+  return LAYOUT_ROWS[hostLayoutId()];
+}
+
+function setHostLayout(id) {
+  try { localStorage.setItem(LAYOUT_KEY, LAYOUT_ROWS[id] ? id : 'us'); } catch (_) {}
+}
+
+// character -> [DOM code, needsShift], derived from the rows above. Anything the
+// keyboard cannot draw cannot be typed either, which is the invariant worth
+// having: the picture and the typing path are the same data.
+function layoutTextMap() {
+  const map = {};
+  const add = (ch, code, shift) => {
+    if (typeof ch !== 'string' || [...ch].length !== 1) return;
+    map[ch] = [code, !!shift];
+  };
+  const layout = hostLayout();
+  for (const page of [layout.abc, layout.sym]) {
+    for (const row of page) {
+      for (const [code, label, alt, , forceShift] of row) {
+        if (String(code).startsWith('p:')) continue;
+        if (label) add(label, code, forceShift);
+        if (alt) add(alt, code, true);
+      }
+    }
+  }
+  // Whitespace is drawn as a word rather than a character.
+  map[' '] = ['Space', false];
+  map['\n'] = ['Enter', false];
+  map['\t'] = ['Tab', false];
+  return map;
+}
+
 // ---------------------------------------------------------------- viewport
 // The on-screen keyboard can either resize the page or lay itself over it, and
 // which one you get depends on the browser and on the `interactive-widget`
@@ -220,3 +326,20 @@ if (window.visualViewport) {
 }
 window.addEventListener('orientationchange', syncAppHeight);
 syncAppHeight();
+
+// ---------------------------------------------------------------- HID tables
+const HID_KEYS = {
+  KeyA:0x04,KeyB:0x05,KeyC:0x06,KeyD:0x07,KeyE:0x08,KeyF:0x09,KeyG:0x0A,KeyH:0x0B,
+  KeyI:0x0C,KeyJ:0x0D,KeyK:0x0E,KeyL:0x0F,KeyM:0x10,KeyN:0x11,KeyO:0x12,KeyP:0x13,
+  KeyQ:0x14,KeyR:0x15,KeyS:0x16,KeyT:0x17,KeyU:0x18,KeyV:0x19,KeyW:0x1A,KeyX:0x1B,
+  KeyY:0x1C,KeyZ:0x1D,
+  Digit1:0x1E,Digit2:0x1F,Digit3:0x20,Digit4:0x21,Digit5:0x22,Digit6:0x23,Digit7:0x24,
+  Digit8:0x25,Digit9:0x26,Digit0:0x27,
+  Enter:0x28,Escape:0x29,Backspace:0x2A,Tab:0x2B,Space:0x2C,Minus:0x2D,Equal:0x2E,
+  BracketLeft:0x2F,BracketRight:0x30,Backslash:0x31,Semicolon:0x33,Quote:0x34,
+  Backquote:0x35,Comma:0x36,Period:0x37,Slash:0x38,CapsLock:0x39,
+  F1:0x3A,F2:0x3B,F3:0x3C,F4:0x3D,F5:0x3E,F6:0x3F,F7:0x40,F8:0x41,F9:0x42,
+  F10:0x43,F11:0x44,F12:0x45,
+  Insert:0x49,Home:0x4A,PageUp:0x4B,Delete:0x4C,End:0x4D,PageDown:0x4E,
+  ArrowRight:0x4F,ArrowLeft:0x50,ArrowDown:0x51,ArrowUp:0x52,
+};

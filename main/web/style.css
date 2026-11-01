@@ -105,6 +105,18 @@ button:disabled { opacity: .45; }
 
 label { font-size: 13px; display: flex; align-items: center; gap: 8px; }
 input[type=range] { width: 120px; }
+/* Native select styling is a white box on a dark page; give it the same
+   treatment as the text fields. */
+select {
+  width: 100%;
+  height: 44px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #1b1b1b;
+  color: var(--ink);
+  font-size: 14px;
+}
 input[type=text], input[type=password], textarea {
   width: 100%;
   padding: 11px;

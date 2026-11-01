@@ -997,10 +997,8 @@ on('hidLoad', 'click', async () => {
 // a menu, and the list can carry the current value of each - which is the
 // question people actually open settings to answer.
 const SETUP_ROWS = [
-  // No keyboard layout setting exists; saying "US QWERTY" here would read as
-  // one. The section says what the keyboard assumes instead.
   { page: 'typing',  group: 'Everyday',    label: 'Typing',
-    value: () => `${Number(appSettings.type_speed) || 20}/s` },
+    value: () => hostLayout().name },
   { page: 'pointer', group: 'Everyday',    label: 'Pointer & scroll',
     // mouse_gain is already a multiplier, not a percentage.
     value: () => `${(Number(appSettings.mouse_gain) || 1).toFixed(2)}×` },
@@ -1083,6 +1081,14 @@ async function init() {
   wireScreenImageFormats();
   wireForm();
   readIntoForm();
+  const layoutSel = document.getElementById('hostLayout');
+  if (layoutSel) {
+    layoutSel.value = hostLayoutId();
+    layoutSel.addEventListener('change', () => {
+      setHostLayout(layoutSel.value);
+      showSaveNote('Layout saved. It applies to Keys and Deck the next time you open them.');
+    });
+  }
   renderSetupList();
   showSetupPage('');
   const setupBack = document.getElementById('setupBack');

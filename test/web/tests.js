@@ -2776,6 +2776,44 @@ __webTests.push({
 
 __webTests.push({
   page: 'control',
+  name: 'the host layout decides what a key types',
+  fn: async () => {
+    const before = { ...PadView.TYPE_MAP };
+    // US: @ is Shift+2, " is Shift+'
+    __assert(before['@'][0] === 'Digit2' && before['@'][1] === true,
+      `US @ is ${JSON.stringify(before['@'])}`);
+    __assert(before['#'][0] === 'Digit3', `US # is ${JSON.stringify(before['#'])}`);
+
+    setHostLayout('uk');
+    PadView.applyHostLayout();
+    const uk = PadView.TYPE_MAP;
+    // UK swaps them, and # moves to its own key.
+    __assert(uk['"'][0] === 'Digit2' && uk['"'][1] === true,
+      `UK " is ${JSON.stringify(uk['"'])}`);
+    __assert(uk['@'][0] === 'Quote' && uk['@'][1] === true,
+      `UK @ is ${JSON.stringify(uk['@'])}`);
+    __assert(uk['#'][0] === 'NonUSHash' && uk['#'][1] === false,
+      `UK # is ${JSON.stringify(uk['#'])}`);
+
+    // The picture follows the map: the key labelled # sends NonUSHash.
+    const slot = document.getElementById('kbd');
+    slot.classList.add('show');
+    document.querySelector('#kbBuilt .k[data-code="p:sym"]')
+      .dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    const hashKey = [...document.querySelectorAll('#kbBuilt .k')]
+      .find((k) => k.dataset.code === 'NonUSHash');
+    __assert(hashKey && hashKey.querySelector('.p').textContent === '#',
+      'the UK symbols page has no # key');
+    slot.classList.remove('show');
+
+    setHostLayout('us');
+    PadView.applyHostLayout();
+    __assert(PadView.TYPE_MAP['@'][0] === 'Digit2', 'did not switch back to US');
+  },
+});
+
+__webTests.push({
+  page: 'control',
   name: 'Shift relabels the keys it changes',
   fn: async () => {
     const slot = document.getElementById('kbd');

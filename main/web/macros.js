@@ -744,6 +744,8 @@ async function init() {
   runStopEl = document.getElementById('runStop');
 
   macros = [];
+  // The host layout may have changed since this script loaded.
+  if (typeof refreshMacroText === 'function') refreshMacroText();
   deckPages = readPages();
   activePage = (() => {
     try { return localStorage.getItem(PAGE_KEY) || DEFAULT_PAGE; } catch (_) { return DEFAULT_PAGE; }

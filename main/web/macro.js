@@ -51,34 +51,18 @@ const MACRO_CONSUMERS = {
 // which is keyed by DOM code because the control page also drives physical and
 // on-screen keyboards; both suites pin the same characters, so a divergence
 // between the two tables fails a test rather than going unnoticed.
-const MACRO_TEXT = (() => {
-  const m = {};
-  const add = (ch, usage, shift) => { m[ch] = [usage, !!shift]; };
+// character -> [usage, needsShift], rebuilt from the host layout in common.js so
+// a macro types the same characters the keyboard would draw.
+const MACRO_TEXT = {};
 
-  add(' ', 0x2C); add('\n', 0x28); add('\t', 0x2B);
-  add('-', 0x2D); add('=', 0x2E);
-  add('[', 0x2F); add(']', 0x30); add('\\', 0x31);
-  add(';', 0x33); add("'", 0x34); add('`', 0x35);
-  add(',', 0x36); add('.', 0x37); add('/', 0x38);
-
-  add('_', 0x2D, 1); add('+', 0x2E, 1);
-  add('{', 0x2F, 1); add('}', 0x30, 1); add('|', 0x31, 1);
-  add(':', 0x33, 1); add('"', 0x34, 1); add('~', 0x35, 1);
-  add('<', 0x36, 1); add('>', 0x37, 1); add('?', 0x38, 1);
-
-  add('!', 0x1E, 1); add('@', 0x1F, 1); add('#', 0x20, 1);
-  add('$', 0x21, 1); add('%', 0x22, 1); add('^', 0x23, 1);
-  add('&', 0x24, 1); add('*', 0x25, 1); add('(', 0x26, 1);
-  add(')', 0x27, 1);
-
-  for (let i = 0; i <= 9; i++) add(String(i), i === 0 ? 0x27 : 0x1D + i);
-  for (let i = 0; i < 26; i++) {
-    const up = String.fromCharCode(65 + i);
-    add(up.toLowerCase(), 0x04 + i);
-    add(up, 0x04 + i, 1);
+function refreshMacroText() {
+  for (const k of Object.keys(MACRO_TEXT)) delete MACRO_TEXT[k];
+  for (const [ch, [code, shift]] of Object.entries(layoutTextMap())) {
+    const usage = HID_KEYS[code];
+    if (usage !== undefined) MACRO_TEXT[ch] = [usage, !!shift];
   }
-  return m;
-})();
+}
+refreshMacroText();
 
 // ---------------------------------------------------------------- parsing
 // One token. Returns a step, or { error } - never a skipped token: a macro

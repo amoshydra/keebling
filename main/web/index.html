@@ -277,14 +277,20 @@
     <section data-page="typing">
       <h2>Typing</h2>
       <div class="field">
+        <span>Host keyboard layout</span>
+        <select id="hostLayout">
+          <option value="us">US QWERTY</option>
+          <option value="uk">UK QWERTY</option>
+        </select>
+        <p class="note">What <strong>the host</strong> is set to. The on-screen
+          keys and typed text are positions on this layout, so they only produce
+          the characters shown if the host agrees. A UK board differs from a US
+          one in its punctuation, not its letters.</p>
+      </div>
+      <div class="field">
         <label>Speed <input type="range" id="typeSpeed" min="2" max="60" step="1">
           <span id="typeSpeedVal"></span></label>
         <p class="note">Lower this if the target drops characters.</p>
-        <p class="note">The host is assumed to be <strong>US QWERTY</strong>.
-          The on-screen keys and typed text are positions on that layout, so a
-          host set to AZERTY or QWERTZ will produce different characters. There
-          is no layout setting yet: this is the one assumption the keyboard
-          makes.</p>
       </div>
     </section>
 
