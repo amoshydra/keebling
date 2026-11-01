@@ -301,6 +301,22 @@ textarea { font-family: ui-monospace, SFMono-Regular, monospace; resize: vertica
 }
 #pad.captured #escHint { display: block; }
 
+/* Pointer mode, top-left of the pad where the thumb is not working. */
+#padMode {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .07);
+  color: #aaa;
+  font-size: 11.5px;
+  letter-spacing: .3px;
+}
+#padMode.on { background: #23364d; color: #cfe2f7; }
+#pad.captured #padMode { display: none; }
+
 /* The captured pad is the only thing being looked at, so a dropped link has to
    change the surface itself. Red hatch plus a border is legible from across a
    desk without reading the words, and cannot be mistaken for the healthy dark

@@ -180,6 +180,22 @@ static void test_unmounted_discards_outstanding_work(void) {
 
 // Release-all is the panic path. Every category has to be cleared, and the
 // zeroed reports have to actually go out.
+// The absolute pointer is stateless: one call is one position, and nothing is
+// queued behind it. What matters is that it reaches the USB layer unchanged -
+// 0 and 32767 are the edges of the host's mapping and must not be clipped.
+static void test_pointer_is_sent_as_a_position(void) {
+    fake_reset();
+    input_pointer(1234, 30000, 0x01);
+    CHECK_INT(fake_abs_calls(), 1);
+    CHECK_INT(fake_abs_x(), 1234);
+    CHECK_INT(fake_abs_y(), 30000);
+
+    input_pointer(0, 32767, 0);
+    CHECK_INT(fake_abs_calls(), 2);
+    CHECK_INT(fake_abs_x(), 0);
+    CHECK_INT(fake_abs_y(), 32767);
+}
+
 static void test_release_all_clears_every_category(void) {
     const uint8_t keys[6] = {0x04};
 
@@ -278,6 +294,7 @@ int main(void) {
     RUN(test_unmounted_discards_outstanding_work);
     reset_state();
 
+    RUN(test_pointer_is_sent_as_a_position);
     RUN(test_release_all_clears_every_category);
     reset_state();
 

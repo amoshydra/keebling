@@ -13,21 +13,35 @@ static const char *TAG = "usb_hid";
 #define HID_RID_KEYBOARD  1
 #define HID_RID_MOUSE     2
 #define HID_RID_CONSUMER  3
+#define HID_RID_POINTER   4
 
 // HID interface parameters. Named constants so the diagnostics endpoint can
 // report exactly what goes into the configuration descriptor.
 #define HID_EP_IN        0x81
+#define HID_EP_POINTER   0x82
 #define HID_EP_SIZE      16
 #define HID_POLL_MS      1
 
-// 1 configuration, 1 interface, 0 string, total len, attr, 100mA
-#define TUSB_DESC_TOTAL_LEN  (TUD_CONFIG_DESC_LEN + TUD_HID_DESC_LEN)
+// 1 configuration, 2 interfaces, 0 string, total len, attr, 100mA
+#define TUSB_DESC_TOTAL_LEN  (TUD_CONFIG_DESC_LEN + 2 * TUD_HID_DESC_LEN)
 
 // ---- Report descriptor: Keyboard + Mouse + Consumer Control ----
 static const uint8_t hid_report_descriptor[] = {
     TUD_HID_REPORT_DESC_KEYBOARD(HID_REPORT_ID(HID_RID_KEYBOARD)),
     TUD_HID_REPORT_DESC_MOUSE(HID_REPORT_ID(HID_RID_MOUSE)),
     TUD_HID_REPORT_DESC_CONSUMER(HID_REPORT_ID(HID_RID_CONSUMER)),
+};
+
+// The absolute pointer gets its own INTERFACE, not another collection in the
+// one above. Two reasons, both learned the hard way elsewhere:
+//
+//   - Windows and Linux bind HID per interface, so a descriptor mistake here
+//     costs an endpoint rather than the keyboard.
+//   - Linux merges duplicate usages within one interface (hid-input keeps one
+//     input_dev per interface), so a second mouse collection would silently
+//     lose its buttons and wheel.
+static const uint8_t pointer_report_descriptor[] = {
+    TUD_HID_REPORT_DESC_ABSMOUSE(HID_REPORT_ID(HID_RID_POINTER)),
 };
 
 // String descriptors. Index 2 is the USB product name - the "HID name" the
@@ -44,16 +58,20 @@ static char s_manufacturer[SETTINGS_HID_NAME_MAX + 1] = "ESP32";
 // name each one so the host can tell them apart. Ours is one interface
 // carrying three collections, so it is named after the set.
 static char s_interface[SETTINGS_HID_NAME_MAX + 1] = "Keyboard Mouse Media";
+// The pointer interface names itself: a host showing two HID children should
+// not have to guess which is which.
+static const char s_interface_pointer[] = "Absolute Pointer";
 // Serial number. Derived from the chip's MAC so each unit is unique - the
 // example's hardcoded "0001" would make two dongles indistinguishable, and
 // hosts key per-device permissions and rules on this string. Overridable.
 static char s_serial[SETTINGS_HID_NAME_MAX + 1];
-static const char *s_strings[5] = {
-    s_lang,           // 0: language
-    s_manufacturer,   // 1: manufacturer (runtime)
-    s_product,        // 2: product (runtime) - the name the host displays
-    s_serial,         // 3: serial (runtime)
-    s_interface,      // 4: interface (runtime)
+static const char *s_strings[6] = {
+    s_lang,               // 0: language
+    s_manufacturer,       // 1: manufacturer (runtime)
+    s_product,            // 2: product (runtime) - the name the host displays
+    s_serial,             // 3: serial (runtime)
+    s_interface,          // 4: interface 0 (runtime)
+    s_interface_pointer,  // 5: interface 1 (the absolute pointer)
 };
 
 static const uint8_t hid_configuration_descriptor[] = {
@@ -66,8 +84,7 @@ static const uint8_t hid_configuration_descriptor[] = {
 // ---- TinyUSB callbacks (all four are REQUIRED) ----
 
 uint8_t const *tud_hid_descriptor_report_cb(uint8_t instance) {
-    (void)instance;
-    return hid_report_descriptor;
+    return instance == 1 ? pointer_report_descriptor : hid_report_descriptor;
 }
 
 uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id,
@@ -172,6 +189,19 @@ bool usb_hid_led_state(uint8_t *out) {
 
 bool usb_hid_ready(void) {
     return tud_hid_ready();
+}
+
+bool usb_hid_pointer_ready(void) {
+    return tud_hid_n_ready(1);
+}
+
+bool usb_hid_pointer_report(uint16_t x, uint16_t y, uint8_t buttons) {
+    if (!tud_mounted()) return false;
+    // Absolute reports are idempotent: a refused frame only means the cursor
+    // did not move until the next one, which carries the whole position again.
+    // Nothing to queue, unlike a key press.
+    return tud_hid_n_abs_mouse_report(1, HID_RID_POINTER, buttons,
+                                      (int16_t)x, (int16_t)y, 0, 0);
 }
 
 bool usb_hid_keyboard_report(uint8_t mod, const uint8_t keys[6]) {

@@ -148,7 +148,26 @@ function send(bytes) {
 // ---------------------------------------------------------------- senders
 function clamp8(v) { return Math.max(-127, Math.min(127, Math.round(v))); }
 
+function sendPointerAt(x, y) {
+  lastAbs[0] = x;
+  lastAbs[1] = y;
+  send(new Uint8Array([0x06,
+                       x & 0xFF, (x >> 8) & 0xFF,
+                       y & 0xFF, (y >> 8) & 0xFF,
+                       buttons & 0xFF]));
+  markInput();
+}
+
 function sendMouse(dx, dy, wheel) {
+  // In absolute mode a click is not a movement: it is a press at wherever the
+  // pointer already is. Wheel and drag deltas still go as relative reports,
+  // since the host has no absolute equivalent for them.
+
+
+  if (pointerMode === 'abs' && !dx && !dy && !wheel) {
+    sendPointerAt(lastAbs[0], lastAbs[1]);
+    return;
+  }
   send(new Uint8Array([0x01,
                        clamp8(dx) & 0xFF, clamp8(dy) & 0xFF,
                        buttons & 0xFF, clamp8(wheel) & 0xFF]));
@@ -267,6 +286,17 @@ function click(bit, label) {
 function onTouchPointerDown(e) {
   if (e.pointerType === 'mouse') return;     // mouse uses pointer lock instead
 
+  // Absolute mode is a different interaction, not a variant of the gestures:
+  // the finger is a position on the host's screen, and the only thing a drag
+  // does is keep that position current.
+  if (pointerMode === 'abs') {
+    try { pad.setPointerCapture(e.pointerId); } catch (_) {}
+    const [x, y] = absoluteFor(e.clientX, e.clientY);
+    buttons |= 1;
+    sendPointerAt(x, y);
+    return;
+  }
+
   // Only real pointers can be captured; synthetic ones (and some browsers
   // mid-gesture) throw here, and losing the capture is not fatal.
   try { pad.setPointerCapture(e.pointerId); } catch (_) {}
@@ -293,6 +323,12 @@ function onTouchPointerDown(e) {
 
 function onTouchPointerMove(e) {
   if (e.pointerType === 'mouse') return;
+
+  if (pointerMode === 'abs') {
+    const [x, y] = absoluteFor(e.clientX, e.clientY);
+    sendPointerAt(x, y);
+    return;
+  }
 
   const p = pointers.get(e.pointerId);
   if (!p) return;
@@ -354,6 +390,13 @@ function finishGesture() {
 
 function onPointerEnd(e) {
   if (e.pointerType === 'mouse') return;
+
+  if (pointerMode === 'abs') {
+    buttons &= ~1;
+    sendPointerAt(lastAbs[0], lastAbs[1]);
+    return;
+  }
+
   pointers.delete(e.pointerId);
 
   if (pointers.size === 0) {
@@ -652,6 +695,46 @@ const NO_TEXT_USAGE = new Set([
 
 let kbSource = 'built';
 let captureComposing = false;
+
+// 'rel' moves by deltas, 'abs' maps the pad to a position on the host's screen.
+// Absolute reports carry the whole position, so nothing here needs a backlog.
+const POINTER_MODE_KEY = 'esp32remote.pointerMode';
+let pointerMode = 'rel';
+let padModeEl = null;
+// The last absolute position, so a click can press where the pointer already is.
+let lastAbs = [16384, 16384];
+
+function storedPointerMode() {
+  try {
+    return localStorage.getItem(POINTER_MODE_KEY) === 'abs' ? 'abs' : 'rel';
+  } catch (_) {
+    return 'rel';
+  }
+}
+
+function setPointerMode(mode) {
+  pointerMode = mode === 'abs' ? 'abs' : 'rel';
+  try { localStorage.setItem(POINTER_MODE_KEY, pointerMode); } catch (_) {}
+  if (padModeEl) {
+    padModeEl.textContent = pointerMode === 'abs' ? 'Absolute' : 'Relative';
+    padModeEl.classList.toggle('on', pointerMode === 'abs');
+    padModeEl.title = pointerMode === 'abs'
+      ? 'Absolute: the pad is a map of the host screen'
+      : 'Relative: the pad moves the pointer by how far you drag';
+  }
+}
+
+// Where in the 0..32767 space a touch landed. Exposed for the tests.
+function absoluteFor(clientX, clientY) {
+  if (!pad) return [0, 0];
+  const r = pad.getBoundingClientRect();
+  const fx = r.width ? (clientX - r.left) / r.width : 0;
+  const fy = r.height ? (clientY - r.top) / r.height : 0;
+  const clamp01 = (v) => Math.max(0, Math.min(1, v));
+  return [Math.round(clamp01(fx) * 32767), Math.round(clamp01(fy) * 32767)];
+}
+
+
 
 // The host's lock keys. Polled rather than pushed: the page already speaks
 // HTTP, and this is a badge, not a control path.
@@ -1343,6 +1426,17 @@ function init() {
   document.getElementById('typeStop').addEventListener('click', onTypeStop);
   document.getElementById('typeGo').addEventListener('click', onTypeGo);
 
+  padModeEl = document.getElementById('padMode');
+  if (padModeEl) {
+    setPointerMode(storedPointerMode());
+    padModeEl.addEventListener('pointerdown', swallowPointer);
+    padModeEl.addEventListener('click', (e) => {
+      e.stopPropagation();
+      setPointerMode(pointerMode === 'abs' ? 'rel' : 'abs');
+      flash(pointerMode === 'abs' ? 'absolute' : 'relative');
+    });
+  }
+
   helpOpenBtn.addEventListener('pointerdown', swallowPointer);
   helpOpenBtn.addEventListener('pointermove', swallowPointer);
   helpOpenBtn.addEventListener('pointerup', swallowPointer);
@@ -1458,6 +1552,7 @@ function destroy() {
   buttons = 0;
   pointers.clear();
   pad = null;
+  padModeEl = null;
   dot = null;
   statusText = null;
   flashEl = null;
@@ -1510,6 +1605,9 @@ return {
   buildKeyboardReport,
   releaseAll,
   setKeyboardSource,
+  setPointerMode,
+  absoluteFor,
+  get pointerMode() { return pointerMode; },
   applyHostLayout,
   focusCapture,
   pollLeds,

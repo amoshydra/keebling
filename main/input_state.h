@@ -15,6 +15,10 @@ void input_mouse(uint8_t buttons, int8_t dx, int8_t dy, int8_t wheel);
 // Consumer control: send usage (0 = release).
 void input_consumer(uint16_t usage);
 
+// Absolute pointer position, 0..32767 across whatever desktop the host maps it
+// to. Stateless on purpose: see the note in input_state.c.
+void input_pointer(uint16_t x, uint16_t y, uint8_t buttons);
+
 // Release everything — all keys, modifiers, mouse buttons.
 void input_release_all(void);
 

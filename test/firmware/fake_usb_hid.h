@@ -8,6 +8,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdint.h>
 
 #define FAKE_MAX_CALLS 8192
 
@@ -49,3 +50,8 @@ void fake_clear_calls(void);  // empty the log, keep the configuration
 
 const fake_call *fake_last(fake_call_kind kind);
 int fake_count(fake_call_kind kind);
+
+// The absolute pointer's last call, so a test can check what was sent.
+uint16_t fake_abs_x(void);
+uint16_t fake_abs_y(void);
+int fake_abs_calls(void);

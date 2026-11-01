@@ -25,6 +25,12 @@ bool usb_hid_mouse_report(uint8_t buttons, int8_t dx, int8_t dy, int8_t wheel);
 // Send a consumer (media) control report. usage = consumer usage ID (0 = release).
 bool usb_hid_consumer_report(uint16_t usage);
 
+// Send an absolute pointer position, 0..32767 across the desktop the host
+// chooses to map it to. Absolute reports carry the whole position, so a refused
+// one is corrected by the next - there is no backlog to keep.
+bool usb_hid_pointer_report(uint16_t x, uint16_t y, uint8_t buttons);
+bool usb_hid_pointer_ready(void);
+
 // For diagnostics: the report descriptor we hand to the host, and the HID
 // interface parameters from the configuration descriptor.
 const uint8_t *usb_hid_report_descriptor(size_t *len);

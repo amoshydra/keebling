@@ -67,6 +67,10 @@
     <!-- Low-key confirmation that the host is receiving input. Only visible
          while captured and connected. -->
     <div id="inputPulse" aria-hidden="true"></div>
+    <!-- Relative or absolute pointer. Absolute maps the pad to a position on
+         the host's screen instead of moving by deltas; see docs/absolute-pointer.md
+         for what each host does with that. -->
+    <button id="padMode" type="button" aria-label="Pointer mode">Relative</button>
     <!-- Three buttons that need to be reachable without leaving the pad. They
          float over it at the thumb rather than sitting in a row of their own. -->
     <div id="mouseButtons">

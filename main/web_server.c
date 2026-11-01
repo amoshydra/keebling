@@ -1045,6 +1045,7 @@ static esp_err_t bootloader_handler(httpd_req_t *req) {
 #define MSG_CONSUMER  0x03
 #define MSG_PING      0x04
 #define MSG_RELEASE   0x05
+#define MSG_POINTER   0x06
 
 // Static buffer: the largest message is 8 bytes. Avoiding malloc on every
 // mouse move keeps the heap stable at 100+ messages/second.
@@ -1063,6 +1064,14 @@ static void handle_message(const uint8_t *b, size_t len) {
         break;
     case MSG_CONSUMER:
         if (len >= 3) input_consumer((uint16_t)(b[1] | (b[2] << 8)));
+        break;
+    case MSG_POINTER:
+        // [0x06, x_lo, x_hi, y_lo, y_hi, buttons]
+        if (len >= 6) {
+            const uint16_t x = (uint16_t)(b[1] | (b[2] << 8));
+            const uint16_t y = (uint16_t)(b[3] | (b[4] << 8));
+            input_pointer(x, y, b[5]);
+        }
         break;
     case MSG_PING:
         input_heartbeat();

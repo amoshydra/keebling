@@ -98,6 +98,15 @@ void input_mouse(uint8_t buttons, int8_t dx, int8_t dy, int8_t wheel) {
     input_hid_flush();
 }
 
+void input_pointer(uint16_t x, uint16_t y, uint8_t buttons) {
+    lock();
+    // Nothing to remember: an absolute report carries the whole position, so a
+    // refused frame is corrected by the next one. Unlike a key press there is
+    // no state that could be left behind.
+    if (usb_hid_pointer_ready()) usb_hid_pointer_report(x, y, buttons);
+    unlock();
+}
+
 void input_consumer(uint16_t usage) {
     lock();
     // A held media key counts as activity so the watchdog can release it -

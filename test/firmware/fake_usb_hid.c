@@ -72,6 +72,28 @@ bool usb_hid_keyboard_report(uint8_t mod, const uint8_t keys[6]) {
     return accepted;
 }
 
+// Absolute pointer. The host suite only needs to know the call happened and
+// what position it carried; delivery is the same fake as every other report.
+static uint16_t s_last_abs_x;
+static uint16_t s_last_abs_y;
+static int s_abs_calls;
+
+bool usb_hid_pointer_ready(void) {
+    return true;
+}
+
+bool usb_hid_pointer_report(uint16_t x, uint16_t y, uint8_t buttons) {
+    (void)buttons;
+    s_last_abs_x = x;
+    s_last_abs_y = y;
+    s_abs_calls++;
+    return true;
+}
+
+uint16_t fake_abs_x(void) { return s_last_abs_x; }
+uint16_t fake_abs_y(void) { return s_last_abs_y; }
+int fake_abs_calls(void) { return s_abs_calls; }
+
 bool usb_hid_mouse_report(uint8_t buttons, int8_t dx, int8_t dy, int8_t wheel) {
     fake_call *c = record(CALL_MOUSE);
     const bool accepted = fake_accept_mouse;

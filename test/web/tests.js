@@ -2776,6 +2776,90 @@ __webTests.push({
 
 __webTests.push({
   page: 'control',
+  name: 'absolute mode maps the pad onto the host screen',
+  fn: async () => {
+    const pad = document.getElementById('pad');
+    const r = pad.getBoundingClientRect();
+
+    const corner = PadView.absoluteFor(r.left, r.top);
+    __assert(corner[0] === 0 && corner[1] === 0, `top-left is ${corner}`);
+    const far = PadView.absoluteFor(r.right, r.bottom);
+    __assert(far[0] === 32767 && far[1] === 32767, `bottom-right is ${far}`);
+
+    const mid = PadView.absoluteFor(r.left + r.width / 2, r.top + r.height / 2);
+    __assert(Math.abs(mid[0] - 16384) <= 1 && Math.abs(mid[1] - 16384) <= 1,
+      `centre is ${mid}`);
+
+    // Outside the pad clamps instead of wrapping round.
+    const outside = PadView.absoluteFor(r.left - 500, r.bottom + 500);
+    __assert(outside[0] === 0 && outside[1] === 32767, `clamped is ${outside}`);
+  },
+});
+
+__webTests.push({
+  page: 'control',
+  name: 'a touch in absolute mode is a position, not a drag',
+  fn: async () => {
+    const pad = document.getElementById('pad');
+    const r = pad.getBoundingClientRect();
+    const at = (dx, dy) => ({ clientX: r.left + dx, clientY: r.top + dy });
+
+    PadView.setPointerMode('abs');
+    const cap = __capture();
+    const ev = (type, p) => pad.dispatchEvent(new PointerEvent(type, {
+      pointerId: 7, pointerType: 'touch', bubbles: true, ...at(p[0], p[1]),
+    }));
+
+    ev('pointerdown', [10, 20]);
+    const press = cap.filter((m) => m[0] === 0x06).pop();
+    __assert(press, 'no pointer report was sent');
+    __assert(press.length === 6, `pointer report is ${press.length} bytes`);
+    __assert(press[5] === 1, `the press did not set button 1: ${press[5]}`);
+    const x = press[1] | (press[2] << 8);
+    const y = press[3] | (press[4] << 8);
+    __assert(x === Math.round((10 / r.width) * 32767),
+      `x is ${x}, expected ${Math.round((10 / r.width) * 32767)}`);
+
+    // Dragging updates the position; there is no delta report at all.
+    const before = cap.length;
+    ev('pointermove', [r.width / 2, r.height / 2]);
+    const moved = cap.slice(before).filter((m) => m[0] === 0x06).pop();
+    __assert(moved, 'a drag sent no position');
+    __assert(!cap.slice(before).some((m) => m[0] === 0x01),
+      'a drag in absolute mode sent a relative mouse report');
+
+    ev('pointerup', [r.width / 2, r.height / 2]);
+    const up = cap.filter((m) => m[0] === 0x06).pop();
+    __assert(up[5] === 0, `the release did not clear the button: ${up[5]}`);
+
+    // The floating L/R/M buttons are clicks, and in absolute mode a click is a
+    // press where the pointer already is - not a relative report.
+    const capBtn = __capture();
+    const btn = document.getElementById('bLeft');
+    btn.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    __assert(capBtn.some((m) => m[0] === 0x06 && m[5] === 1),
+      'the L button did not press in absolute mode');
+    __assert(!capBtn.some((m) => m[0] === 0x01),
+      'the L button sent a relative report while in absolute mode');
+    btn.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+
+    // Back in relative mode a drag is a delta again. It takes a real move:
+    // relative mode deliberately waits out the tap slop so a tap does not
+    // nudge the cursor before its click lands.
+    PadView.setPointerMode('rel');
+    const cap2 = __capture();
+    ev('pointerdown', [10, 20]);
+    ev('pointermove', [60, 60]);
+    __assert(cap2.some((m) => m[0] === 0x01),
+      'relative mode stopped sending mouse reports');
+    __assert(!cap2.some((m) => m[0] === 0x06),
+      'relative mode is still sending absolute reports');
+    ev('pointerup', [60, 60]);
+  },
+});
+
+__webTests.push({
+  page: 'control',
   name: 'the host layout decides what a key types',
   fn: async () => {
     const before = { ...PadView.TYPE_MAP };
