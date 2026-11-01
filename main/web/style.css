@@ -529,11 +529,19 @@ textarea { font-family: ui-monospace, SFMono-Regular, monospace; resize: vertica
 .krow { display: flex; gap: 4px; margin-bottom: 4px; }
 .k {
   flex: 1;
-  padding: 11px 2px;
-  text-align: center;
+  /* Two-line keys: the character the host will receive, and what Shift would
+     make of it. Centred as a column so both lines sit on the same axis. */
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  min-height: 46px;
+  padding: 4px 2px;
   background: #2c2c2c;
-  border-radius: 4px;
+  border-radius: 6px;
   font-size: 12px;
+  line-height: 1.05;
   /* user-select alone is not enough on touch: without these a long press
      opens the callout / context menu and cancels the pointer stream. */
   user-select: none;
@@ -542,8 +550,16 @@ textarea { font-family: ui-monospace, SFMono-Regular, monospace; resize: vertica
   touch-action: none;
   -webkit-tap-highlight-color: transparent;
 }
+.k .p { font-size: 17px; }
+.k .a { font-size: 9.5px; color: #8f8f8f; }
+/* Shift is down: the shifted character is the one that will be typed, so it is
+   the one in front, in the same amber as a latched modifier. */
+.k.shifted .p { color: var(--warn); }
+.k.shifted .a { color: #6f6f6f; }
 .k.w2 { flex: 2; }
-.k.space { flex: 7; }
+.k.wide { flex: 0 0 54px; font-size: 12px; }
+.k.space { flex: 5; font-size: 12px; color: #9d9d9d; }
+.k.pagekey { background: #333; color: #cfcfcf; }
 .k.mod { background: #3a3a3a; }
 .k.active { background: var(--accent); }
 /* Latched is not the same as pressed: it persists after your finger leaves and

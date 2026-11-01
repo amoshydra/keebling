@@ -2694,15 +2694,79 @@ __webTests.push({
 
 __webTests.push({
   page: 'control',
-  name: 'every virtual key is labelled',
+  name: 'Shift relabels the keys it changes',
+  fn: async () => {
+    const slot = document.getElementById('kbd');
+    slot.classList.add('show');
+    const q = () => document.querySelector('#kbBuilt .k[data-code="KeyQ"]');
+    const shift = () => document.querySelector('#kbBuilt .k[data-code="ShiftLeft"]');
+
+    __assert(q().querySelector('.p').textContent === 'q', 'q does not start lowercase');
+    shift().dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    __assert(q().querySelector('.p').textContent === 'Q',
+      'Shift did not bring the shifted character to the front');
+    __assert(q().classList.contains('shifted'), 'the shifted class is missing');
+
+    shift().dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    __assert(q().querySelector('.p').textContent === 'q', 'the label did not revert');
+    slot.classList.remove('show');
+  },
+});
+
+__webTests.push({
+  page: 'control',
+  name: 'the ? key sends Shift and slash together',
+  fn: async () => {
+    const slot = document.getElementById('kbd');
+    slot.classList.add('show');
+    const cap = __capture();
+    const slash = document.querySelector('#kbBuilt .k[data-code="Slash"]');
+    slash.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    slash.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+    const press = cap.find((r) => r[0] === 2 && r[2] !== 0);
+    __assert(press, 'no key report was sent');
+    __assert(press[1] === 0x02 && press[2] === 0x38,
+      `"?" sent mod=${press[1]} key=0x${press[2].toString(16)}`);
+
+    // The same code on the symbols page is a plain slash. A forced shift that
+    // leaked across pages would make it impossible to type one.
+    document.querySelector('#kbBuilt .k[data-code="p:sym"]')
+      .dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    const cap2 = __capture();
+    const slash2 = document.querySelector('#kbBuilt .k[data-code="Slash"]');
+    slash2.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    slash2.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+    const plain = cap2.find((r) => r[0] === 2 && r[2] !== 0);
+    __assert(plain && plain[1] === 0x00 && plain[2] === 0x38,
+      `plain "/" sent mod=${plain && plain[1]}`);
+
+    document.querySelector('#kbBuilt .k[data-code="p:abc"]')
+      .dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    slot.classList.remove('show');
+  },
+});
+
+__webTests.push({
+  page: 'control',
+  name: 'every virtual key is labelled, on every page',
   fn: async () => {
     // The panel is built at init and only toggled, so this does not need to
     // open it - which matters, because a failed assertion must not leave the
     // keyboard covering the next test's page.
-    const keys = [...document.querySelectorAll('#kbd .k')];
-    __assert(keys.length > 60, `only ${keys.length} keys rendered`);
-    const blank = keys.filter((k) => !k.textContent.trim()).map((k) => k.dataset.code);
-    __assert(!blank.length, `unlabelled keys: ${blank.join(', ')}`);
+    const blank = () => [...document.querySelectorAll('#kbBuilt .k')]
+      .filter((k) => !k.textContent.trim())
+      .map((k) => k.dataset.code);
+
+    __assert(document.querySelectorAll('#kbBuilt .k').length >= 30,
+      'the letter page is missing most of its keys');
+    __assert(!blank().length, `unlabelled on the letter page: ${blank().join(', ')}`);
+
+    for (const page of ['p:sym', 'p:fn', 'p:abc']) {
+      const sw = document.querySelector(`#kbBuilt .k[data-code="${page}"]`);
+      __assert(sw, `no ${page} key on this page`);
+      sw.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+      __assert(!blank().length, `unlabelled after ${page}: ${blank().join(', ')}`);
+    }
   },
 });
 

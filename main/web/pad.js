@@ -192,6 +192,10 @@ function buildKeyboardReport(extraCode, extraShift) {
     else if (KEY[code]) keys.push(KEY[code]);
   }
   if (extraShift) mod |= MOD.ShiftLeft;
+  // A key that is always sent with Shift carries its own ("?" is Shift+/).
+  for (const code of held) {
+    if (alwaysShift.has(code)) mod |= MOD.ShiftLeft;
+  }
   if (extraCode && KEY[extraCode]) keys.push(KEY[extraCode]);
 
   const uniq = [...new Set(keys)].slice(0, 6);      // HID requires distinct codes
@@ -852,50 +856,133 @@ function onKeyUp(e) {
 }
 
 // ---------------------------------------------------------------- virtual keyboard
-const KBD_ROWS = [
-  [['Escape','Esc','mod'],['F1'],['F2'],['F3'],['F4'],['F5'],['F6'],['F7'],['F8'],
-   ['F9'],['F10'],['F11'],['F12']],
-  [['Backquote','`'],['Digit1','1'],['Digit2','2'],['Digit3','3'],['Digit4','4'],
-   ['Digit5','5'],['Digit6','6'],['Digit7','7'],['Digit8','8'],['Digit9','9'],
-   ['Digit0','0'],['Minus','-'],['Equal','='],['Backspace','Bksp','w2']],
-  [['Tab','Tab','mod'],['KeyQ','Q'],['KeyW','W'],['KeyE','E'],['KeyR','R'],['KeyT','T'],
-   ['KeyY','Y'],['KeyU','U'],['KeyI','I'],['KeyO','O'],['KeyP','P'],
-   ['BracketLeft','['],['BracketRight',']'],['Backslash','\\']],
-  [['CapsLock','Caps','mod w2'],['KeyA','A'],['KeyS','S'],['KeyD','D'],['KeyF','F'],
-   ['KeyG','G'],['KeyH','H'],['KeyJ','J'],['KeyK','K'],['KeyL','L'],
-   ['Semicolon',';'],['Quote',"'"],['Enter','Enter','w2']],
-  [['ShiftLeft','Shift','mod w2'],['KeyZ','Z'],['KeyX','X'],['KeyC','C'],['KeyV','V'],
-   ['KeyB','B'],['KeyN','N'],['KeyM','M'],['Comma',','],['Period','.'],
-   ['Slash','/'],['ShiftRight','Shift','mod w2']],
-  [['ControlLeft','Ctrl','mod'],['MetaLeft','Cmd','mod'],['AltLeft','Alt','mod'],
-   ['Space','Space','space'],['AltRight','Alt','mod'],['MetaRight','Cmd','mod'],
-   ['ArrowLeft','←','arrow'],['ArrowUp','↑','arrow'],['ArrowDown','↓','arrow'],
-   ['ArrowRight','→','arrow']],
-];
+// The on-screen keyboard is the host's keyboard, drawn small: the label on a
+// key is the character the host will receive, and the small legend above it is
+// what Shift would make of it. A key is one of:
+//
+//   ['KeyQ', 'q', 'Q']                     label, and its shifted twin
+//   ['ShiftLeft', '⇧', null, 'wide']       a named key, wider than the rest
+//   ['p:sym', '123', 'wide']               switch page, never reaches the host
+//   ['Slash', '?', null, 'wide', true]     always sent with Shift
+//
+// Ten keys a row on the letter page: at 390px that is a 36px key, which is the
+// same density a phone keyboard uses. The old full-width rows gave 26px.
+const KEY_PAGES = {
+  abc: [
+    // The keys a chord needs, and the ones a terminal needs, on the page you
+    // start on: latching Alt and then reaching for Tab should not mean
+    // changing pages first.
+    [['Escape','Esc'],['Tab','Tab'],['ControlLeft','Ctrl',null,'mod'],
+     ['AltLeft','Alt',null,'mod'],['MetaLeft','Cmd',null,'mod'],
+     ['p:fn','Fn',null,'mod']],
+    [['KeyQ','q','Q'],['KeyW','w','W'],['KeyE','e','E'],['KeyR','r','R'],['KeyT','t','T'],
+     ['KeyY','y','Y'],['KeyU','u','U'],['KeyI','i','I'],['KeyO','o','O'],['KeyP','p','P']],
+    [['KeyA','a','A'],['KeyS','s','S'],['KeyD','d','D'],['KeyF','f','F'],['KeyG','g','G'],
+     ['KeyH','h','H'],['KeyJ','j','J'],['KeyK','k','K'],['KeyL','l','L']],
+    [['ShiftLeft','⇧',null,'wide'],['KeyZ','z','Z'],['KeyX','x','X'],['KeyC','c','C'],
+     ['KeyV','v','V'],['KeyB','b','B'],['KeyN','n','N'],['KeyM','m','M'],
+     ['Backspace','DEL',null,'wide']],
+    [['p:sym','123',null,'wide'],['p:fn','Fn',null,'wide'],
+     ['Slash','?',null,'wide',true],['Space','space',null,'space'],
+     ['Period','.'],['Enter','⏎',null,'wide']],
+  ],
+  sym: [
+    [['Digit1','1','!'],['Digit2','2','@'],['Digit3','3','#'],['Digit4','4','$'],
+     ['Digit5','5','%'],['Digit6','6','^'],['Digit7','7','&'],['Digit8','8','*'],
+     ['Digit9','9','('],['Digit0','0',')']],
+    [['Minus','-','_'],['Equal','=','+'],['BracketLeft','[','{'],
+     ['BracketRight',']','}'],['Backslash','\\','|'],['Semicolon',';',':'],
+     ['Quote',"'",'"'],['Backquote','`','~'],['Slash','/','?']],
+    [['p:abc','ABC',null,'wide'],['Comma',',','<'],['Period','.','>'],
+     ['Space','space',null,'space'],['p:fn','Fn',null,'wide'],['Enter','⏎',null,'wide']],
+  ],
+  fn: [
+    [['F1'],['F2'],['F3'],['F4'],['F5'],['F6']],
+    [['F7'],['F8'],['F9'],['F10'],['F11'],['F12']],
+    [['Escape','Esc'],['Tab','Tab'],['Home','Home'],['End','End'],
+     ['PageUp','PgUp'],['PageDown','PgDn']],
+    [['p:abc','ABC',null,'wide'],['ArrowLeft','←'],['ArrowUp','↑'],['ArrowDown','↓'],
+     ['ArrowRight','→'],['Delete','Del'],['Insert','Ins']],
+  ],
+};
 
 // Modifiers tapped on the virtual keyboard latch instead of being held. A held
 // modifier needs a second finger, which is why Alt+Tab and Ctrl+C were
 // effectively unreachable on a phone. Tap Alt, then Tab, and the host sees
 // Alt+Tab; the latch releases with the key that used it.
 const latched = new Set();
+// Keys that are always sent with Shift, so "?" costs one tap instead of two.
+const alwaysShift = new Set();
+let keyPage = 'abc';
+
+function shiftIsDown() {
+  return latched.has('ShiftLeft') || latched.has('ShiftRight') ||
+         held.has('ShiftLeft') || held.has('ShiftRight');
+}
+
+// Swap the big label and the small legend, so the character the host will
+// receive is the one in front of you - which is the answer to "how do I type a
+// question mark" without anyone having to explain Shift+/.
+function applyShiftLegends() {
+  const swapped = shiftIsDown();
+  for (const k of document.querySelectorAll('#kbBuilt .k[data-alt]')) {
+    const big = k.querySelector('.p');
+    const small = k.querySelector('.a');
+    if (!big || !small) continue;
+    big.textContent = swapped ? k.dataset.alt : k.dataset.label;
+    small.textContent = swapped ? k.dataset.label : k.dataset.alt;
+    k.classList.toggle('shifted', swapped);
+  }
+}
 
 function buildKeyboard() {
   // The keys go into their own container so the slot can swap them for the
   // capture field without rebuilding anything on every switch.
   const built = document.getElementById('kbBuilt');
-  for (const row of KBD_ROWS) addKeyboardRow(built, row);
+  built.textContent = '';
+  // Rebuilt per page.
+  alwaysShift.clear();
+  for (const row of KEY_PAGES[keyPage]) addKeyboardRow(built, row);
+  applyShiftLegends();
 }
 
 function addKeyboardRow(kbd, row) {
   const rowEl = document.createElement('div');
   rowEl.className = 'krow';
-  for (const [code, label, extra] of row) {
+  for (const [code, label, alt, extra, forceShift] of row) {
     const k = document.createElement('div');
     k.className = 'k ' + (extra || '');
     k.dataset.code = code;
-    // A row entry without a label falls back to its code, so a key can never
-    // render blank: the function row was twelve empty buttons for want of one.
-    k.textContent = label || code;
+
+    if (code.startsWith('p:')) {
+      k.classList.add('pagekey');
+      k.textContent = label;
+      k.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        keyPage = code.slice(2);
+        buildKeyboard();
+      });
+      rowEl.appendChild(k);
+      continue;
+    }
+
+    if (alt) {
+      k.dataset.label = label;
+      k.dataset.alt = alt;
+      const big = document.createElement('span');
+      big.className = 'p';
+      big.textContent = label;
+      const small = document.createElement('span');
+      small.className = 'a';
+      small.textContent = alt;
+      k.append(big, small);
+    } else {
+      // A row entry without a label falls back to its code, so a key can never
+      // render blank: the function row was twelve empty buttons for want of one.
+      k.textContent = label || code;
+    }
+
+    if (forceShift) alwaysShift.add(code);
 
     const press = (e) => {
       e.preventDefault();
@@ -916,6 +1003,7 @@ function addKeyboardRow(kbd, row) {
           k.classList.add('active', 'latched');
         }
         sendKeyboard();
+        applyShiftLegends();
         return;
       }
 
@@ -942,6 +1030,7 @@ function addKeyboardRow(kbd, row) {
         latched.clear();
       }
       sendKeyboard();
+      applyShiftLegends();
     };
 
     k.addEventListener('pointerdown', press);
@@ -1187,6 +1276,7 @@ function init() {
   if (lostSubEl) lostSubEl.textContent = LOST_SUB;
   refreshCaptureUi();
 
+  keyPage = 'abc';
   buildKeyboard();
   buildMedia();
   kbModesEl = document.getElementById('kbModes');
