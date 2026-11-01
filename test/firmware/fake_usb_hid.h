@@ -8,7 +8,6 @@
 
 #include <stdbool.h>
 #include <stdint.h>
-#include <stdint.h>
 
 #define FAKE_MAX_CALLS 8192
 

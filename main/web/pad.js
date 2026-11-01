@@ -163,7 +163,6 @@ function sendMouse(dx, dy, wheel) {
   // pointer already is. Wheel and drag deltas still go as relative reports,
   // since the host has no absolute equivalent for them.
 
-
   if (pointerMode === 'abs' && !dx && !dy && !wheel) {
     sendPointerAt(lastAbs[0], lastAbs[1]);
     return;
@@ -733,8 +732,6 @@ function absoluteFor(clientX, clientY) {
   const clamp01 = (v) => Math.max(0, Math.min(1, v));
   return [Math.round(clamp01(fx) * 32767), Math.round(clamp01(fy) * 32767)];
 }
-
-
 
 // The host's lock keys. Polled rather than pushed: the page already speaks
 // HTTP, and this is a badge, not a control path.
