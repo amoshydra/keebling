@@ -26,6 +26,12 @@ const WATCH = process.argv.includes('--watch');
 // Everything the device can serve from its filesystem. recover.html is built
 // but not listed: it repairs a broken upload, so it must come from the binary.
 const PAGES = ['index.html', 'recover.html'];
+
+// What the device will accept in an upload. recover.html is built and embedded
+// but is deliberately not one of them: it repairs a broken upload, so it must
+// come from the binary. Shipping it inside the archive made every upload fail
+// whole, which is the behaviour the archive is for - and a fine way to find out.
+const SERVED = ['index.html', 'style.css', 'app.js'];
 const ASSETS = ['app.js', 'style.css', ...PAGES];
 
 const kb = (n) => `${(n / 1024).toFixed(1)} KB`;
@@ -76,7 +82,7 @@ async function buildOnce() {
     total += body.length;
   }
 
-  const zip = await buildZip([...out].map(([name, body]) => ({ name, body })));
+  const zip = await buildZip(SERVED.map((name) => ({ name, body: out.get(name) })));
   await fs.writeFile(path.join(OUT, 'web.zip'), zip);
 
   const digest = createHash('sha256').update(zip).digest('hex').slice(0, 12);
@@ -84,7 +90,7 @@ async function buildOnce() {
   for (const [name, body] of [...out].sort((a, b) => b[1].length - a[1].length)) {
     console.log(`        ${name.padEnd(13)} ${kb(body.length).padStart(9)}`);
   }
-  console.log(`web.zip ${kb(zip.length)}  sha256:${digest}`);
+  console.log(`web.zip ${kb(zip.length)}  ${SERVED.length} files  sha256:${digest}`);
 }
 
 // ---------------------------------------------------------------- zip

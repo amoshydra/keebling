@@ -363,6 +363,20 @@ try {
   report(uiResetsAtSettings > 0, 'the settings page reset reached the device',
     'the stub saw no /ui/reset call during the settings pass');
 
+  // The archive the build produces has to be one the device accepts. It is
+  // easy to get wrong in a way no page test notices: recover.html is built and
+  // embedded but is deliberately not uploadable, and shipping it inside the
+  // archive makes the device refuse the whole upload.
+  const archive = readFileSync(path.join(HERE, '..', '..', 'main', 'web', 'dist', 'web.zip'));
+  const archiveRes = await fetch(`${base}/ui/upload?token=${CODE}`, {
+    method: 'POST',
+    body: archive,
+    headers: { 'Content-Type': 'application/zip' },
+  });
+  report(archiveRes.status === 200, 'the built archive is one the device accepts',
+    `the upload answered HTTP ${archiveRes.status}: ${await archiveRes.text()}`);
+  device.uiFiles.clear();
+
   // The fallback rule itself, straight at the stub: a stored file wins, and an
   // empty one counts as absent so it cannot shadow a working page. This is the
   // contract ui_fs_open() implements on the device; the page tests above only
