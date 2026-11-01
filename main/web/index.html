@@ -551,6 +551,21 @@
         <button id="uiArchiveReset">Reset to built-in</button>
         <button id="uiRefresh">Refresh list</button>
       </div>
+
+      <!-- What the archive will do, before it does it. The device publishes an
+           upload all at once or not at all, so this is the only moment the
+           consequences can still be called off. -->
+      <section id="uiReview" class="review" hidden>
+        <h3 id="uiReviewTitle">Review</h3>
+        <p class="note" id="uiReviewSummary"></p>
+        <div id="uiReviewBody"></div>
+        <div class="row" style="margin-top:12px">
+          <button id="uiReviewGo" class="primary">Upload</button>
+          <button id="uiReviewCancel">Cancel</button>
+        </div>
+        <progress id="uiProgress" max="100" value="0" hidden></progress>
+        <p class="note" id="uiProgressNote"></p>
+      </section>
     </section>
 
   </div>

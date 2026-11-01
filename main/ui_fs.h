@@ -2,9 +2,12 @@
 //
 // Every call is safe when the filesystem is absent: reads report "nothing
 // stored" and writes fail, so the embedded assets in the firmware stay in
-// charge. Names never come from a request: every caller passes a compile-time
-// constant - the asset table for the web files, SCREEN_IMAGE_NAME for the
-// screen image - so there is nothing here to turn into a path injection.
+// charge.
+//
+// Names may come from an upload, so this module does not decide what is
+// allowed: it mounts a partition and treats its argument as a path under it.
+// The web server owns the naming rule (flat segments, one directory level,
+// never a "..") and applies it before anything here is called.
 
 #pragma once
 

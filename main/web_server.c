@@ -73,9 +73,6 @@ static const static_asset_t s_assets[] = {
 };
 #define ASSET_COUNT (sizeof(s_assets) / sizeof(s_assets[0]))
 
-// Long enough for a bundler's hashed chunk name.
-#define UI_NAME_MAX 64
-
 static const static_asset_t *asset_by_file(const char *name) {
     for (size_t i = 0; i < ASSET_COUNT; i++) {
         if (strcmp(s_assets[i].file, name) == 0) return &s_assets[i];
@@ -85,28 +82,57 @@ static const static_asset_t *asset_by_file(const char *name) {
 
 // Which names the device will store and serve.
 //
-// A name is a flat file name: letters, digits, dot, dash and underscore. That
-// set cannot spell a path separator, so an upload cannot walk out of the
-// partition and a request cannot ask for one, whatever the archive claims. It
-// is deliberately NOT the asset table: the built-in UI is one build, and a
-// user's own bundler may emit as many files as it likes.
+// A name is one or two segments of letters, digits, dot, dash and underscore.
+// That set cannot spell "..", a drive letter or an absolute path, so an upload
+// cannot walk out of the partition and a request cannot ask for one, whatever
+// the archive claims. A segment may not start with a dot either, which rules
+// out hidden files and the "." that would name a directory itself.
+//
+// It is deliberately NOT the asset table: the built-in UI is one build, and a
+// user's own bundler may emit as many files, and directories, as it likes.
 //
 // Two names are reserved. "recover.html" repairs a broken upload, so it must
 // come from the firmware and never from a request; the ".tmp" suffix belongs to
-// the writer below and must not be uploadable.
-static bool safe_file_name(const char *name) {
-    const size_t n = strlen(name);
-    if (n == 0 || n >= UI_NAME_MAX) return false;
-    if (name[0] == '.') return false;
-    if (strcmp(name, "recover.html") == 0) return false;
-    if (n > 4 && strcmp(name + n - 4, ".tmp") == 0) return false;
+// the writer and must not be uploadable.
+#define UI_NAME_MAX   128
+#define UI_SEG_MAX    64
+#define UI_DEPTH_MAX  2
+
+static bool safe_segment(const char *seg, size_t n) {
+    if (n == 0 || n >= UI_SEG_MAX) return false;
+    if (seg[0] == '.') return false;
 
     for (size_t i = 0; i < n; i++) {
-        const char c = name[i];
+        const char c = seg[i];
         const bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
                         (c >= '0' && c <= '9') || c == '.' || c == '-' || c == '_';
         if (!ok) return false;
     }
+    return true;
+}
+
+static bool safe_file_name(const char *name) {
+    const size_t n = strlen(name);
+    if (n == 0 || n >= UI_NAME_MAX) return false;
+
+    int depth = 1;
+    const char *seg = name;
+    for (size_t i = 0; i <= n; i++) {
+        if (i < n && name[i] != '/') continue;
+        if (!safe_segment(seg, (size_t)(&name[i] - seg))) return false;
+        if (i < n) {
+            depth++;
+            seg = &name[i] + 1;
+        }
+    }
+    if (depth > UI_DEPTH_MAX) return false;
+
+    const char *base = strrchr(name, '/');
+    base = base ? base + 1 : name;
+    if (strcmp(base, "recover.html") == 0) return false;
+    const size_t bn = strlen(base);
+    if (bn > 4 && strcmp(base + bn - 4, ".tmp") == 0) return false;
+
     return true;
 }
 
@@ -140,6 +166,7 @@ static void collect_stored(const char *name, size_t size, void *ctx) {
     stored_list_t *l = ctx;
     if (l->count == l->cap) return;
     if (!safe_file_name(name)) return;   // never offer what would not be served
+    if (strcmp(name, SCREEN_IMAGE_NAME) == 0) return;   // not a web file
     snprintf(l->items[l->count].name, UI_NAME_MAX, "%s", name);
     l->items[l->count].size = size;
     l->count++;
@@ -828,6 +855,7 @@ static esp_err_t ui_upload_handler(httpd_req_t *req) {
     size_t count = 0;
     const char *why = "not a stored zip";
     int code = 400;
+    bool complete = false;      // false means: publish nothing, whatever got here
     uint8_t hdr[30];
 
     for (;;) {
@@ -836,7 +864,7 @@ static esp_err_t ui_upload_handler(httpd_req_t *req) {
         const uint32_t sig = le32(hdr);
         // The central directory is the natural end of the entries. It is not
         // parsed: the local headers already carried everything needed.
-        if (sig == ZIP_CENTRAL_SIG || sig == ZIP_END_SIG) break;
+        if (sig == ZIP_CENTRAL_SIG || sig == ZIP_END_SIG) { complete = true; break; }
         if (sig != ZIP_LOCAL_SIG) break;
         if (recv_exact(req, hdr + 4, 26) != 0) { why = "body ended early"; break; }
 
@@ -891,15 +919,28 @@ static esp_err_t ui_upload_handler(httpd_req_t *req) {
         count++;
     }
 
-    if (code == 400 && why && strcmp(why, "not a stored zip") != 0 && count > 0) {
-        // A later entry failed: nothing has been published yet, so drop the
-        // whole set rather than blend two versions.
-        for (size_t i = 0; i < count; i++) ui_fs_discard(entries[i].name, entries[i].f);
-        count = 0;
+    // The shell is not optional: a UI without index.html has nothing to load,
+    // and the sweep below would delete the one that did. Checked here as well
+    // as in the page, because an archive can arrive from curl.
+    if (complete && count > 0) {
+        bool has_shell = false;
+        for (size_t i = 0; i < count && !has_shell; i++) {
+            has_shell = strcmp(entries[i].name, "index.html") == 0;
+        }
+        if (!has_shell) {
+            complete = false;
+            why = "archive has no index.html";
+        }
     }
 
-    if (count == 0) {
-        return upload_refuse(req, "400 Bad Request", code, why);
+    // Published only when the archive ended where it said it would. A transfer
+    // that dies halfway leaves temps, never a UI: the previous one keeps
+    // serving, and the next upload replaces them.
+    if (!complete || count == 0) {
+        for (size_t i = 0; i < count; i++) ui_fs_discard(entries[i].name, entries[i].f);
+        if (count == 0 && complete) why = "archive carried no files";
+        return upload_refuse(req, code == 400 ? "400 Bad Request" : "408 Request Timeout",
+                             code, why);
     }
 
     // Past this point the archive is complete. The rename is the moment the new

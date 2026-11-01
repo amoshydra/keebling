@@ -42,14 +42,21 @@ const TYPES = {
 // The built-in files, which are also what the firmware embeds.
 const UI_FILES = ['index.html', 'style.css', 'app.js'];
 
-// Mirrors safe_file_name() in main/web_server.c: a flat name, so a separator
-// cannot be spelled; two names reserved.
+// Mirrors safe_file_name() in main/web_server.c: one or two segments, each a
+// plain name, so ".." cannot be spelled; two names reserved.
 function safeName(name) {
-  if (!name || name.length >= 64) return false;
-  if (name.startsWith('.')) return false;
-  if (name === 'recover.html') return false;
-  if (name.endsWith('.tmp')) return false;
-  return /^[A-Za-z0-9._-]+$/.test(name);
+  if (!name || name.length >= 128) return false;
+  const parts = name.split('/');
+  if (parts.length > 2) return false;
+  for (const part of parts) {
+    if (!part || part.length >= 64) return false;
+    if (part.startsWith('.')) return false;
+    if (!/^[A-Za-z0-9._-]+$/.test(part)) return false;
+  }
+  const base = parts[parts.length - 1];
+  if (base === 'recover.html') return false;
+  if (base.endsWith('.tmp')) return false;
+  return true;
 }
 
 // Mirrors UI_ARCHIVE_MAX in main/web_server.c: the cap on a whole archive.

@@ -1038,3 +1038,44 @@ input[type=checkbox], input[type=radio] { width: 18px; height: 18px; }
   #linkLost .lost-mark,
   .k.latched { animation: none; }
 }
+
+/* ---- upload review --------------------------------------------------- */
+.review {
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid #2b2b2b;
+  border-radius: 10px;
+  background: #141414;
+}
+.review[hidden] { display: none; }
+.review h3 { font-size: 13px; margin-bottom: 2px; }
+.review-group { margin-top: 10px; }
+.review-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 11px;
+  letter-spacing: .7px;
+  text-transform: uppercase;
+  color: #8a8a8a;
+}
+.review-head .n { margin-left: auto; color: #bbb; letter-spacing: 0; text-transform: none; }
+.review-list { list-style: none; margin: 5px 0 0; padding: 0; }
+.review-list li {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 3px 0;
+  font-size: 12.5px;
+  color: #cfcfcf;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  word-break: break-all;
+}
+.review-list li .size { margin-left: auto; color: #7f7f7f; font-size: 11px; }
+.review-list li.locked { color: #7f7f7f; }
+.review-group.add .review-head { color: #7fd18a; }
+.review-group.replace .review-head { color: #e2c07a; }
+.review-group.remove .review-head { color: #e58b82; }
+.review-group.locked .review-head { color: #8a8a8a; }
+.review-problem { color: var(--warn); font-size: 12.5px; margin-top: 8px; }
+#uiProgress { width: 100%; height: 6px; margin-top: 12px; }

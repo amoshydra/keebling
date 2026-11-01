@@ -270,6 +270,8 @@ try {
       device.settings = { usb_product: 'Legacy Product', macros: target.legacyMacros };
       migrationMark = device.saved.length;
     }
+    // A target that leaves files behind would change what the next one loads.
+    device.uiFiles.clear();
     for (const [name, body] of Object.entries(target.storedUiFiles || {})) {
       device.uiFiles.set(name, Buffer.from(body));
     }

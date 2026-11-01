@@ -2416,6 +2416,24 @@ const __waitState = async (name, prefix) => {
   __assert(__state(name).startsWith(prefix),
     `${name} is "${__state(name)}", expected "${prefix}..."`);
 };
+// Choosing a file only opens the review; nothing is sent until Upload is
+// pressed, which is the behaviour these tests exist to pin down.
+const __confirmUpload = async () => {
+  // Reading the archive and listing the device is asynchronous: the review
+  // opens a moment after the file is chosen.
+  for (let i = 0; i < 100 && document.getElementById('uiReview').hidden; i++) await __sleep(50);
+  const go = document.getElementById('uiReviewGo');
+  __assert(!document.getElementById('uiReview').hidden, 'the review did not open');
+  go.click();
+  for (let i = 0; i < 100; i++) {
+    const note = document.getElementById('uiNote').textContent +
+      document.getElementById('uiProgressNote').textContent;
+    if (note.includes('Reload') || note.includes('Refused') || note.includes('dropped')) return;
+    await __sleep(50);
+  }
+  __assert(false, `the upload never finished: ${document.getElementById('uiProgressNote').textContent}`);
+};
+
 const __pickArchive = (file) => {
   const picker = document.getElementById('uiArchivePicker');
   const dt = new DataTransfer();
@@ -2515,18 +2533,22 @@ __webTests.push({
     __pickArchive(__zip([
       { name: 'style.css', body: css },
       { name: 'app.js', body: js },
+      // The shell has to be in the archive: without it there is nothing to load.
+      { name: 'index.html', body: await (await fetch('/index.html')).text() },
     ]));
+    await __confirmUpload();
     await __waitState('style.css', 'uploaded');
     await __waitState('app.js', 'uploaded');
 
     __assert((await (await fetch('/style.css')).text()) === css, 'style.css was not replaced');
     __assert((await (await fetch('/app.js')).text()) === js, 'app.js was not replaced');
-    // The archive did not carry one of the three, so that one keeps its
-    // built-in copy rather than being emptied.
-    __assert(__state('index.html').startsWith('built-in'),
-      `index.html became "${__state('index.html')}"`);
+    // The shell came with the archive this time, so it is stored too.
+    __assert(__state('index.html').startsWith('uploaded'),
+      `index.html is "${__state('index.html')}"`);
     const note = document.getElementById('uiNote').textContent;
-    __assert(note.includes('Reload'), `note: ${note}`);
+    __assert(note.includes('Reload'),
+      `note: "${note}" progress: "${document.getElementById('uiProgressNote').textContent}"`);
+    __assert(document.getElementById('uiReview').hidden, 'the review stayed open after a successful upload');
   },
 });
 
@@ -2557,7 +2579,7 @@ __webTests.push({
     // A flat name is fine now, whoever emitted it - that is the point. What is
     // refused is anything that could be a path, the recovery page, hidden
     // files and the temp suffix the writer owns.
-    for (const bad of ['../evil.js', 'a/b.js', 'recover.html', '.hidden', 'x.tmp']) {
+    for (const bad of ['../evil.js', 'a/b/c.js', 'recover.html', '.hidden', 'x.tmp']) {
       const zip = __zip([
         { name: 'style.css', body: 'body{color:red}' },
         { name: bad, body: 'x' },
@@ -2581,10 +2603,20 @@ __webTests.push({
     // The point of dropping the asset-table whitelist: a user's own build can
     // ship as many files as it likes.
     __pickArchive(__zip([
+      { name: 'index.html', body: await (await fetch('/index.html')).text() },
       { name: 'chunk-4f2a.js', body: 'export const x = 1;' },
       { name: 'logo.svg', body: '<svg xmlns="http://www.w3.org/2000/svg"></svg>' },
     ]));
-    await __waitState('chunk-4f2a.js', 'uploaded');
+    await __confirmUpload();
+    const said = document.getElementById('uiNote').textContent;
+    __assert(said.includes('Reload'),
+      `said: "${said}" progress: "${document.getElementById('uiProgressNote').textContent}"`);
+    const now = await (await fetch(`/ui/files?token=${window.__CODE}`)).json();
+    await __sleep(400);
+    const rows = [...document.querySelectorAll('#fileList .file')].map((r) => r.dataset.file);
+    const raw = await (await fetch(`/ui/files?token=${window.__CODE}`)).json();
+    __assert(rows.includes('chunk-4f2a.js'),
+      `said: ${said}; now: ${JSON.stringify(now.files)}; later: ${JSON.stringify(raw.files)}`);
 
     const js = await fetch('/chunk-4f2a.js');
     __assert(js.status === 200, `the chunk answered HTTP ${js.status}`);
@@ -2607,6 +2639,143 @@ __webTests.push({
     await __sleep(400);
     const gone = await fetch('/chunk-4f2a.js');
     __assert(gone.status === 404, `the chunk survived the reset: HTTP ${gone.status}`);
+  },
+});
+
+__webTests.push({
+  page: 'ui',
+  name: 'the review says what will arrive, what will go, and what is locked',
+  fn: async () => {
+    await __waitForUiFiles();
+    const shell = await (await fetch('/index.html')).text();
+
+    // A known starting point: three files stored, so the review has something
+    // to replace and something to remove.
+    __pickArchive(__zip([
+      { name: 'index.html', body: shell },
+      { name: 'style.css', body: 'body{background:#000}' },
+      { name: 'app.js', body: 'export default 0;' },
+    ]));
+    await __confirmUpload();
+    await __waitState('app.js', 'uploaded');
+
+    __pickArchive(__zip([
+      { name: 'index.html', body: shell },
+      { name: 'style.css', body: 'body{background:#111}' },   // already stored
+      { name: 'assets/theme.css', body: '.x{color:red}' },     // new, in a folder
+    ]));
+    for (let i = 0; i < 100 && document.getElementById('uiReview').hidden; i++) await __sleep(50);
+    __assert(!document.getElementById('uiReview').hidden, 'the review did not open');
+
+    const names = (sel) => [...document.querySelectorAll(`${sel} .review-list li`)]
+      .map((li) => li.firstChild.textContent);
+
+    // style.css exists from the previous test, so it is a replacement, not an add.
+    const added = names('.review-group.add');
+    __assert(added.includes('assets/theme.css'), `added: ${added.join(' | ')}`);
+    __assert(!added.includes('style.css'), 'a stored file was offered as new');
+
+    const replaced = names('.review-group.replace');
+    __assert(replaced.includes('style.css'), `replaced: ${replaced.join(' | ')}`);
+
+    // The archive is the whole UI, so what it does not carry goes.
+    const removed = names('.review-group.remove');
+    __assert(removed.includes('app.js'), `removed: ${removed.join(' | ')}`);
+
+    // Never uploaded, never removed, and said so.
+    const locked = names('.review-group.locked');
+    __assert(locked.includes('recover.html'), `locked: ${locked.join(' | ')}`);
+
+    document.getElementById('uiReviewCancel').click();
+    __assert(document.getElementById('uiReview').hidden, 'cancel did not close the review');
+    // Nothing was sent: app.js is still the one the previous upload stored.
+    __assert(__state('app.js').startsWith('uploaded'), `app.js is "${__state('app.js')}"`);
+    __assert((await fetch('/app.js').then((r) => r.text())) === 'export default 0;',
+      'cancelling changed what is served');
+
+    window.confirm = () => true;
+    document.getElementById('uiArchiveReset').click();
+    await __sleep(400);
+  },
+});
+
+__webTests.push({
+  page: 'ui',
+  name: 'an archive with no index.html is refused before it is sent',
+  fn: async () => {
+    await __waitForUiFiles();
+    __pickArchive(__zip([{ name: 'app.js', body: 'export default 1;' }]));
+    await __sleep(300);
+
+    __assert(document.getElementById('uiReview').hidden, 'the review opened for an archive with no shell');
+    const note = document.getElementById('uiNote').textContent;
+    __assert(note.includes('index.html'), `note: ${note}`);
+  },
+});
+
+__webTests.push({
+  page: 'ui',
+  name: 'a name that could be a path is refused before it is sent',
+  fn: async () => {
+    await __waitForUiFiles();
+    __pickArchive(__zip([
+      { name: 'index.html', body: '<!doctype html><body>ok' },
+      { name: '../nvs', body: 'x' },
+    ]));
+    await __sleep(300);
+
+    __assert(document.getElementById('uiReview').hidden, 'the review opened for a path');
+    const note = document.getElementById('uiNote').textContent;
+    __assert(note.includes('../nvs'), `note: ${note}`);
+  },
+});
+
+__webTests.push({
+  page: 'ui',
+  name: 'a folder inside the archive is stored and served',
+  fn: async () => {
+    await __waitForUiFiles();
+    __pickArchive(__zip([
+      { name: 'index.html', body: await (await fetch('/index.html')).text() },
+      { name: 'assets/theme.css', body: '.x{color:red}' },
+    ]));
+    await __confirmUpload();
+    await __waitState('assets/theme.css', 'uploaded');
+
+    const got = await fetch('/assets/theme.css');
+    __assert(got.status === 200, `the nested file answered HTTP ${got.status}`);
+    __assert((await got.text()) === '.x{color:red}', 'the nested file came back changed');
+
+    window.confirm = () => true;
+    document.getElementById('uiArchiveReset').click();
+    await __sleep(400);
+    __assert((await fetch('/assets/theme.css')).status === 404, 'the folder survived the reset');
+  },
+});
+
+__webTests.push({
+  page: 'ui',
+  name: 'a truncated archive publishes nothing',
+  fn: async () => {
+    await __waitForUiFiles();
+    const before = await fetch('/app.js').then((r) => r.text());
+    __assert(before.length > 0, 'the device had no app.js to begin with');
+
+    // One big entry, cut in the middle of its body: this is a transfer that
+    // stopped halfway, which is what a dropped connection looks like.
+    const whole = __zip([{ name: 'index.html', body: 'x'.repeat(4000) }]);
+    const bytes = new Uint8Array(await whole.arrayBuffer());
+    const cut = new File([bytes.slice(0, 1200)], 'cut.zip', { type: 'application/zip' });
+
+    const r = await fetch(`/ui/upload?token=${window.__CODE}`, { method: 'POST', body: cut });
+    __assert(r.status === 408 || r.status === 400, `a truncated archive answered HTTP ${r.status}`);
+
+    // The previous UI is untouched: the device renames nothing until it has
+    // the whole archive.
+    __assert((await fetch('/app.js').then((x) => x.text())) === before,
+      'a truncated archive changed what is served');
+    __assert(__state('index.html').startsWith('built-in'),
+      `index.html is "${__state('index.html')}"`);
   },
 });
 
