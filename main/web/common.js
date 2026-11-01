@@ -248,10 +248,17 @@ const LAYOUT_ROWS = {
 
 // The letter page is the same physical board for both: a UK keyboard is a US
 // keyboard with different punctuation, so only the symbol page differs.
+// A remote is used for short interactions while looking at the host: a URL, a
+// path, a port number, a chord, an arrow key. So the two rows a phone keyboard
+// hides - digits and arrows - are on the letter page, because a page switch is
+// the most expensive thing this keyboard can ask for.
 LAYOUT_ROWS.us.abc = [
   [['Escape','Esc'],['Tab','Tab'],['ControlLeft','Ctrl',null,'mod'],
    ['AltLeft','Alt',null,'mod'],['MetaLeft','Cmd',null,'mod'],
    ['p:fn','Fn',null,'mod']],
+  [['Digit1','1','!'],['Digit2','2','@'],['Digit3','3','#'],['Digit4','4','$'],
+   ['Digit5','5','%'],['Digit6','6','^'],['Digit7','7','&'],['Digit8','8','*'],
+   ['Digit9','9','('],['Digit0','0',')']],
   [['KeyQ','q','Q'],['KeyW','w','W'],['KeyE','e','E'],['KeyR','r','R'],['KeyT','t','T'],
    ['KeyY','y','Y'],['KeyU','u','U'],['KeyI','i','I'],['KeyO','o','O'],['KeyP','p','P']],
   [['KeyA','a','A'],['KeyS','s','S'],['KeyD','d','D'],['KeyF','f','F'],['KeyG','g','G'],
@@ -262,9 +269,9 @@ LAYOUT_ROWS.us.abc = [
   // One key, like the real board: slash, with the question mark as its shifted
   // legend. A dedicated "?" key here read as a slash key and could only ever
   // produce a question mark.
-  [['p:sym','123',null,'wide'],['p:fn','Fn',null,'wide'],
-   ['Slash','/','?','wide'],['Space','space',null,'space'],
-   ['Period','.'],['Enter','⏎',null,'wide']],
+  [['p:sym','?123',null,'wide'],['Comma',','],['Space','space',null,'space'],
+   ['Period','.'],['Slash','/','?'],['Enter','⏎',null,'wide']],
+  [['ArrowLeft','←'],['ArrowUp','↑'],['ArrowDown','↓'],['ArrowRight','→']],
 ];
 LAYOUT_ROWS.uk.abc = LAYOUT_ROWS.us.abc;
 
@@ -340,6 +347,15 @@ const HID_KEYS = {
   Digit8:0x25,Digit9:0x26,Digit0:0x27,
   Enter:0x28,Escape:0x29,Backspace:0x2A,Tab:0x2B,Space:0x2C,Minus:0x2D,Equal:0x2E,
   BracketLeft:0x2F,BracketRight:0x30,Backslash:0x31,Semicolon:0x33,Quote:0x34,
+  // ISO keys the UK layout needs.
+  NonUSHash:0x32,IntlBackslash:0x64,
+  // Keypad: distinct usages from the number row, and Num Lock changes what
+  // the host does with them.
+  NumLock:0x53,NumpadDivide:0x54,NumpadMultiply:0x55,NumpadSubtract:0x56,
+  NumpadAdd:0x57,NumpadEnter:0x58,
+  Numpad1:0x59,Numpad2:0x5A,Numpad3:0x5B,Numpad4:0x5C,Numpad5:0x5D,
+  Numpad6:0x5E,Numpad7:0x5F,Numpad8:0x60,Numpad9:0x61,Numpad0:0x62,
+  NumpadDecimal:0x63,
   Backquote:0x35,Comma:0x36,Period:0x37,Slash:0x38,CapsLock:0x39,
   F1:0x3A,F2:0x3B,F3:0x3C,F4:0x3D,F5:0x3E,F6:0x3F,F7:0x40,F8:0x41,F9:0x42,
   F10:0x43,F11:0x44,F12:0x45,

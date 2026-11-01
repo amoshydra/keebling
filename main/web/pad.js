@@ -1027,13 +1027,25 @@ const FN_PAGE = [
   [['F7'],['F8'],['F9'],['F10'],['F11'],['F12']],
   [['Escape','Esc'],['Tab','Tab'],['Home','Home'],['End','End'],
    ['PageUp','PgUp'],['PageDown','PgDn']],
-  [['p:abc','ABC',null,'wide'],['ArrowLeft','←'],['ArrowUp','↑'],['ArrowDown','↓'],
-   ['ArrowRight','→'],['Delete','Del'],['Insert','Ins']],
+  [['p:abc','ABC',null,'wide'],['p:kp','Num',null,'wide'],['Home','Home'],
+   ['End','End'],['PageUp','PgUp'],['PageDown','PgDn']],
+];
+
+// A real keypad, with Keypad usages rather than the number row. The host reads
+// them differently - games and spreadsheets distinguish them, and with Num Lock
+// off KP7 is Home - which is the whole point of having one.
+const KP_PAGE = [
+  [['NumLock','NumLk'],['NumpadDivide','/'],['NumpadMultiply','*'],
+   ['NumpadSubtract','−']],
+  [['Numpad7','7'],['Numpad8','8'],['Numpad9','9'],['NumpadAdd','+']],
+  [['Numpad4','4'],['Numpad5','5'],['Numpad6','6'],['NumpadEnter','⏎']],
+  [['Numpad1','1'],['Numpad2','2'],['Numpad3','3'],['Backspace','DEL']],
+  [['Numpad0','0'],['NumpadDecimal','.'],['p:abc','ABC'],['p:fn','Fn']],
 ];
 
 function keyPages() {
   const layout = hostLayout();
-  return { abc: layout.abc, sym: layout.sym, fn: FN_PAGE };
+  return { abc: layout.abc, sym: layout.sym, fn: FN_PAGE, kp: KP_PAGE };
 }
 
 // Modifiers tapped on the virtual keyboard latch instead of being held. A held
@@ -1658,6 +1670,7 @@ return {
   releaseAll,
   setKeyboardSource,
   setPointerMode,
+  keyPages,
   absoluteFor,
   get pointerMode() { return pointerMode; },
   applyHostLayout,
@@ -1667,6 +1680,7 @@ return {
   get captureField() { return captureField; },
   NO_TEXT_USAGE,
   KEY,
+  MOD,
   TYPE_MAP,
 };
 

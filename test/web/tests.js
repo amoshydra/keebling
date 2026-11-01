@@ -2955,6 +2955,79 @@ __webTests.push({
 
 __webTests.push({
   page: 'control',
+  name: 'every key the keyboard draws has a HID usage',
+  fn: async () => {
+    // A key with no usage is a key that does nothing, and nothing else notices:
+    // the UK "#" shipped dead for want of one entry in HID_KEYS.
+    const missing = [];
+    for (const layoutId of Object.keys(LAYOUT_ROWS)) {
+      const saved = hostLayoutId();
+      setHostLayout(layoutId);
+      for (const [pageName, rows] of Object.entries(PadView.keyPages())) {
+        for (const row of rows) {
+          for (const [code] of row) {
+            if (String(code).startsWith('p:')) continue;
+            // A modifier is a report bit, not a usage - it is the one kind of
+            // key that legitimately has no entry in HID_KEYS.
+            if (HID_KEYS[code] === undefined && PadView.MOD[code] === undefined) {
+              missing.push(`${layoutId}/${pageName}: ${code}`);
+            }
+          }
+        }
+      }
+      setHostLayout(saved);
+    }
+    __assert(!missing.length, `keys with no usage: ${missing.join(', ')}`);
+  },
+});
+
+__webTests.push({
+  page: 'control',
+  name: 'the keypad sends keypad usages, not the number row',
+  fn: async () => {
+    // KP7 and Digit7 are different keys to the host, and with Num Lock off KP7
+    // is Home. A numpad built from the number row would be a lie.
+    const slot = document.getElementById('kbd');
+    slot.classList.add('show');
+    document.querySelector('#kbBuilt .k[data-code="p:fn"]')
+      .dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    const num = document.querySelector('#kbBuilt .k[data-code="p:kp"]');
+    __assert(num, 'the Fn page does not lead to the keypad');
+    num.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+
+    const cap = __capture();
+    const seven = document.querySelector('#kbBuilt .k[data-code="Numpad7"]');
+    __assert(seven, 'no keypad 7 on the keypad page');
+    seven.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    seven.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+    const press = cap.find((r) => r[0] === 2 && r[2] !== 0);
+    __assert(press && press[2] === 0x5F,
+      `keypad 7 sent 0x${press && press[2].toString(16)}, expected 0x5f (KP7)`);
+
+    document.querySelector('#kbBuilt .k[data-code="p:abc"]')
+      .dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    slot.classList.remove('show');
+  },
+});
+
+__webTests.push({
+  page: 'control',
+  name: 'digits and arrows are on the letter page',
+  fn: async () => {
+    // The two rows a phone keyboard hides are the two a remote reaches for
+    // most; a page switch is the most expensive thing this keyboard can ask.
+    const slot = document.getElementById('kbd');
+    slot.classList.add('show');
+    for (const code of ['Digit1', 'Digit0', 'ArrowLeft', 'ArrowRight']) {
+      __assert(document.querySelector(`#kbBuilt .k[data-code="${code}"]`),
+        `${code} is not on the letter page`);
+    }
+    slot.classList.remove('show');
+  },
+});
+
+__webTests.push({
+  page: 'control',
   name: 'slash types slash, and Shift makes it a question mark',
   fn: async () => {
     const slot = document.getElementById('kbd');
