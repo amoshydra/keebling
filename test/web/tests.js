@@ -2955,33 +2955,34 @@ __webTests.push({
 
 __webTests.push({
   page: 'control',
-  name: 'the ? key sends Shift and slash together',
+  name: 'slash types slash, and Shift makes it a question mark',
   fn: async () => {
     const slot = document.getElementById('kbd');
     slot.classList.add('show');
+    const slash = () => document.querySelector('#kbBuilt .k[data-code="Slash"]');
+    const shift = () => document.querySelector('#kbBuilt .k[data-code="ShiftLeft"]');
+
+    // One key, like the real board: by default it is a slash.
+    __assert(slash().querySelector('.p').textContent === '/',
+      `the key shows "${slash().querySelector('.p').textContent}"`);
     const cap = __capture();
-    const slash = document.querySelector('#kbBuilt .k[data-code="Slash"]');
-    slash.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
-    slash.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
-    const press = cap.find((r) => r[0] === 2 && r[2] !== 0);
-    __assert(press, 'no key report was sent');
-    __assert(press[1] === 0x02 && press[2] === 0x38,
-      `"?" sent mod=${press[1]} key=0x${press[2].toString(16)}`);
-
-    // The same code on the symbols page is a plain slash. A forced shift that
-    // leaked across pages would make it impossible to type one.
-    document.querySelector('#kbBuilt .k[data-code="p:sym"]')
-      .dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
-    const cap2 = __capture();
-    const slash2 = document.querySelector('#kbBuilt .k[data-code="Slash"]');
-    slash2.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
-    slash2.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
-    const plain = cap2.find((r) => r[0] === 2 && r[2] !== 0);
+    slash().dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    slash().dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+    const plain = cap.find((r) => r[0] === 2 && r[2] !== 0);
     __assert(plain && plain[1] === 0x00 && plain[2] === 0x38,
-      `plain "/" sent mod=${plain && plain[1]}`);
+      `"/" sent mod=${plain && plain[1]} key=0x${plain && plain[2].toString(16)}`);
 
-    document.querySelector('#kbBuilt .k[data-code="p:abc"]')
-      .dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    // Latching Shift relabels it, and then it types the question mark.
+    shift().dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    __assert(slash().querySelector('.p').textContent === '?',
+      'Shift did not bring the question mark to the front');
+    const cap2 = __capture();
+    slash().dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    slash().dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+    const shifted = cap2.find((r) => r[0] === 2 && r[2] !== 0);
+    __assert(shifted && shifted[1] === 0x02 && shifted[2] === 0x38,
+      `"?" sent mod=${shifted && shifted[1]} key=0x${shifted && shifted[2].toString(16)}`);
+
     slot.classList.remove('show');
   },
 });

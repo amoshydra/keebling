@@ -198,10 +198,6 @@ function buildKeyboardReport(extraCode, extraShift) {
     else if (KEY[code]) keys.push(KEY[code]);
   }
   if (extraShift) mod |= MOD.ShiftLeft;
-  // A key that is always sent with Shift carries its own ("?" is Shift+/).
-  for (const code of held) {
-    if (alwaysShift.has(code)) mod |= MOD.ShiftLeft;
-  }
   if (extraCode && KEY[extraCode]) keys.push(KEY[extraCode]);
 
   const uniq = [...new Set(keys)].slice(0, 6);      // HID requires distinct codes
@@ -1045,8 +1041,6 @@ function keyPages() {
 // effectively unreachable on a phone. Tap Alt, then Tab, and the host sees
 // Alt+Tab; the latch releases with the key that used it.
 const latched = new Set();
-// Keys that are always sent with Shift, so "?" costs one tap instead of two.
-const alwaysShift = new Set();
 let keyPage = 'abc';
 
 function shiftIsDown() {
@@ -1085,7 +1079,6 @@ function buildKeyboard() {
   const built = document.getElementById('kbBuilt');
   built.textContent = '';
   // Rebuilt per page.
-  alwaysShift.clear();
   for (const row of keyPages()[keyPage]) addKeyboardRow(built, row);
   applyShiftLegends();
 }
@@ -1093,7 +1086,7 @@ function buildKeyboard() {
 function addKeyboardRow(kbd, row) {
   const rowEl = document.createElement('div');
   rowEl.className = 'krow';
-  for (const [code, label, alt, extra, forceShift] of row) {
+  for (const [code, label, alt, extra] of row) {
     const k = document.createElement('div');
     k.className = 'k ' + (extra || '');
     k.dataset.code = code;
@@ -1125,8 +1118,6 @@ function addKeyboardRow(kbd, row) {
       // render blank: the function row was twelve empty buttons for want of one.
       k.textContent = label || code;
     }
-
-    if (forceShift) alwaysShift.add(code);
 
     const press = (e) => {
       e.preventDefault();

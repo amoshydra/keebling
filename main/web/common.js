@@ -210,7 +210,7 @@ function forgetCode() {
 // panel and the macro DSL type through.
 //
 // A layout is the two pages the keyboard draws, in the same row shape pad.js
-// renders: [code, label, shiftedLabel, width, alwaysShift]. The character map
+// renders: [code, label, shiftedLabel, width]. The character map
 // used for typing is DERIVED from those rows, so the picture and the typing
 // path cannot disagree.
 const LAYOUT_KEY = 'esp32remote.hostLayout';
@@ -259,8 +259,11 @@ LAYOUT_ROWS.us.abc = [
   [['ShiftLeft','⇧',null,'wide'],['KeyZ','z','Z'],['KeyX','x','X'],['KeyC','c','C'],
    ['KeyV','v','V'],['KeyB','b','B'],['KeyN','n','N'],['KeyM','m','M'],
    ['Backspace','DEL',null,'wide']],
+  // One key, like the real board: slash, with the question mark as its shifted
+  // legend. A dedicated "?" key here read as a slash key and could only ever
+  // produce a question mark.
   [['p:sym','123',null,'wide'],['p:fn','Fn',null,'wide'],
-   ['Slash','?',null,'wide',true],['Space','space',null,'space'],
+   ['Slash','/','?','wide'],['Space','space',null,'space'],
    ['Period','.'],['Enter','⏎',null,'wide']],
 ];
 LAYOUT_ROWS.uk.abc = LAYOUT_ROWS.us.abc;
@@ -294,9 +297,9 @@ function layoutTextMap() {
   const layout = hostLayout();
   for (const page of [layout.abc, layout.sym]) {
     for (const row of page) {
-      for (const [code, label, alt, , forceShift] of row) {
+      for (const [code, label, alt] of row) {
         if (String(code).startsWith('p:')) continue;
-        if (label) add(label, code, forceShift);
+        if (label) add(label, code, false);
         if (alt) add(alt, code, true);
       }
     }
