@@ -74,6 +74,10 @@ function localFile(pathname) {
   return file;
 }
 
+const upstreamAgent = new http.Agent({ keepAlive: true, maxSockets: 8 });
+// Keep-alive sockets keep their Nagle setting too.
+upstreamAgent.on('free', (sock) => sock.setNoDelay(true));
+
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
   // The device serves uploaded UI files from its filesystem; those are not on
@@ -96,6 +100,7 @@ const server = http.createServer((req, res) => {
     method: req.method,
     path: req.url,
     headers: deviceHeaders(req),
+    agent: upstreamAgent,
   }, (up) => {
     res.writeHead(up.statusCode || 502, up.headers);
     up.pipe(res);
@@ -110,7 +115,12 @@ const server = http.createServer((req, res) => {
 // The WebSocket is a plain TCP stream after the upgrade, so pipe bytes both
 // ways rather than trying to understand it.
 server.on('upgrade', (req, socket, head) => {
+  // Pointer reports are 6-13 bytes. With Nagle on, those sit in the buffer
+  // waiting for company, and the cursor arrives in clumps - the proxy feels
+  // slower than the device even though the round trip is 3ms. Both legs off.
+  socket.setNoDelay(true);
   const up = net.connect(devicePort, host, () => {
+    up.setNoDelay(true);
     const headers = Object.entries(deviceHeaders(req))
       .filter(([, v]) => v !== undefined)
       .map(([k, v]) => `${k}: ${v}`)
