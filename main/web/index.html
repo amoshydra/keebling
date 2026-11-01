@@ -279,8 +279,12 @@
       <div class="field">
         <label>Speed <input type="range" id="typeSpeed" min="2" max="60" step="1">
           <span id="typeSpeedVal"></span></label>
-        <p class="note">Lower this if the target drops characters. Assumes a US
-          QWERTY layout on the host.</p>
+        <p class="note">Lower this if the target drops characters.</p>
+        <p class="note">The host is assumed to be <strong>US QWERTY</strong>.
+          The on-screen keys and typed text are positions on that layout, so a
+          host set to AZERTY or QWERTZ will produce different characters. There
+          is no layout setting yet: this is the one assumption the keyboard
+          makes.</p>
       </div>
     </section>
 
@@ -417,6 +421,7 @@
         the device. It is not shared with another phone or browser, and clearing
         this site's data removes it.</p>
       <div id="deckPages" class="pagestrip" role="tablist" aria-label="Deck pages"></div>
+      <div id="deckPageTools" class="pagerow" hidden></div>
       <div id="macroList"></div>
       <div class="row" style="margin-top:12px">
         <button id="macroAdd" class="primary">New button</button>

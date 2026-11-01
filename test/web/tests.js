@@ -2180,6 +2180,56 @@ __webTests.push({
 
 __webTests.push({
   page: 'macros',
+  name: 'a page can be renamed, and deleting one keeps its buttons',
+  fn: async () => {
+    const chips = () => [...document.querySelectorAll('#deckPages .page:not(.add)')]
+      .map((c) => c.textContent);
+
+    // Work on a page of its own so the fixtures on the first page survive.
+    document.querySelector('#deckPages .page.add').click();
+    await __sleep(60);
+    document.getElementById('deckEdit').click();
+
+    const tools = document.getElementById('deckPageTools');
+    __assert(!tools.hidden, 'the page tools are hidden in edit mode');
+    const press = (label) => tools.querySelectorAll('button').forEach((b) => {
+      if (b.textContent === label) b.click();
+    });
+
+    tools.querySelector('input').value = 'Renamed page';
+    press('Rename');
+    await __sleep(400);
+    __assert(chips().includes('Renamed page'), `pages: ${chips().join(', ')}`);
+
+    // A button created here belongs to the renamed page.
+    document.getElementById('macroAdd').click();
+    document.getElementById('editName').value = 'Moves with the page';
+    document.getElementById('editSteps').value = '{ENTER}';
+    document.getElementById('editSave').click();
+    await __sleep(400);
+    let stored = JSON.parse(localStorage.getItem('esp32remote.macros') || '[]');
+    const made = stored.find((m) => m.name === 'Moves with the page');
+    __assert(made && made.page === 'Renamed page', `stored page: ${made && made.page}`);
+
+    // Deleting the page must move its button somewhere, not delete it.
+    const before = stored.length;
+    press('Delete page');
+    await __sleep(400);
+    stored = JSON.parse(localStorage.getItem('esp32remote.macros') || '[]');
+    __assert(!chips().includes('Renamed page'), 'the page is still in the strip');
+    __assert(stored.length === before, 'deleting a page deleted its buttons');
+    __assert(stored.some((m) => m.name === 'Moves with the page'),
+      'the button did not survive the page delete');
+
+    document.getElementById('deckEdit').click();
+    chips().length;                       // leave the deck where the next test expects it
+    document.querySelector('#deckPages .page:not(.add)').click();
+    await __sleep(60);
+  },
+});
+
+__webTests.push({
+  page: 'macros',
   name: 'a deck button keeps its colour',
   fn: async () => {
     document.getElementById('deckEdit').click();

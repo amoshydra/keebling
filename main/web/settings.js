@@ -997,8 +997,10 @@ on('hidLoad', 'click', async () => {
 // a menu, and the list can carry the current value of each - which is the
 // question people actually open settings to answer.
 const SETUP_ROWS = [
-  { page: 'typing',  group: 'Everyday',    label: 'Keyboard',
-    value: () => 'US QWERTY' },
+  // No keyboard layout setting exists; saying "US QWERTY" here would read as
+  // one. The section says what the keyboard assumes instead.
+  { page: 'typing',  group: 'Everyday',    label: 'Typing',
+    value: () => `${Number(appSettings.type_speed) || 20}/s` },
   { page: 'pointer', group: 'Everyday',    label: 'Pointer & scroll',
     // mouse_gain is already a multiplier, not a percentage.
     value: () => `${(Number(appSettings.mouse_gain) || 1).toFixed(2)}×` },

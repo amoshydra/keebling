@@ -307,6 +307,7 @@ function renderPages() {
     });
     strip.appendChild(b);
   }
+  renderPageTools();
   const add = el('button', 'page add', '+');
   add.type = 'button';
   add.title = 'Add a page';
@@ -319,6 +320,71 @@ function renderPages() {
     render();
   });
   strip.appendChild(add);
+}
+
+// Renaming and deleting pages live in edit mode, next to the grid they change.
+// Deleting moves the page's buttons to a surviving page rather than destroying
+// them, so there is nothing to confirm.
+function renderPageTools() {
+  const tools = document.getElementById('deckPageTools');
+  if (!tools) return;
+  tools.hidden = !editMode;
+  if (!editMode) { tools.textContent = ''; return; }
+  tools.textContent = '';
+
+  const input = el('input');
+  input.type = 'text';
+  input.value = activePage;
+  input.maxLength = 20;
+  input.setAttribute('aria-label', 'Page name');
+  input.spellcheck = false;
+
+  const apply = () => renamePage(input.value);
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') apply(); });
+
+  const rename = el('button', '', 'Rename');
+  rename.type = 'button';
+  rename.addEventListener('click', apply);
+
+  const del = el('button', 'danger', 'Delete page');
+  del.type = 'button';
+  del.disabled = deckPages.length < 2;
+  del.title = del.disabled
+    ? 'The deck always has at least one page'
+    : `Move this page's buttons to another page and remove it`;
+  del.addEventListener('click', deletePage);
+
+  tools.append(input, rename, del);
+}
+
+function renamePage(raw) {
+  const next = String(raw || '').trim().slice(0, 20);
+  if (!next || next === activePage) return;
+  if (deckPages.includes(next)) {
+    showSaveNote('Not renamed: there is already a page with that name.', true);
+    return;
+  }
+  const at = deckPages.indexOf(activePage);
+  const was = activePage;
+  deckPages[at] = next;
+  activePage = next;
+  for (const m of macros) if (m.page === was) m.page = next;
+  writePages();
+  store(macros);
+  render();
+}
+
+function deletePage() {
+  if (deckPages.length < 2) return;
+  const at = deckPages.indexOf(activePage);
+  const fallback = deckPages[at === 0 ? 1 : 0];
+  const was = activePage;
+  for (const m of macros) if (m.page === was) m.page = fallback;
+  deckPages.splice(at, 1);
+  activePage = fallback;
+  writePages();
+  store(macros);
+  render();
 }
 
 // A deck button: the whole tile is the target, so a thumb does not have to find

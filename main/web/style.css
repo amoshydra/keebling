@@ -696,6 +696,18 @@ input[type=checkbox], input[type=radio] { width: 18px; height: 18px; }
   box-shadow: inset 0 0 0 1px #365b83;
 }
 .pagestrip .page.add { padding: 0 14px; font-size: 16px; }
+
+/* Page rename and delete, only in edit mode. */
+.pagerow { display: flex; gap: 8px; margin-bottom: 12px; }
+.pagerow[hidden] { display: none; }
+.pagerow input {
+  flex: 1 1 auto;
+  height: 42px;
+  min-width: 0;
+  font-size: 14px;
+}
+.pagerow button { height: 42px; padding: 0 14px; font-size: 12.5px; }
+.pagerow button:disabled { opacity: .4; }
 /* A grid of buttons, not a list of records. Three across is the most that fits
    a phone while keeping each tile a comfortable thumb target. */
 #macroList.deck {
