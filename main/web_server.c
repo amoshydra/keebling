@@ -1365,6 +1365,11 @@ esp_err_t web_server_start(void) {
 
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.max_open_sockets = 7;
+    // Without this the server compares URIs with strcmp, so the "/*" route
+    // below matches only the literal string "/*" - every page would 404 while
+    // the handler sat there registered. A pattern with no '*' still compares
+    // exactly, so the specific endpoints keep their precise match.
+    cfg.uri_match_fn = httpd_uri_match_wildcard;
     // The upload handler holds the archive's entry table and a chunk buffer on
     // this task's stack, and the listing builds JSON on it.
     cfg.stack_size = 8192;
