@@ -75,13 +75,61 @@ The code is remembered in `localStorage`, so step 4 is a one-time thing per
 browser. You can also skip it entirely with
 `http://<address>/?token=YOURCODE`.
 
-### Macros
+### The four tabs
 
-⚡ **Macros** opens the stored sequences: each has a large Run button, and
-**Stop** interrupts one between characters and releases everything. A macro is
-text typed into the host, with braced tokens for the keys that are not
-characters — `{SEARCH}chrome{ENTER}` presses the Search media key, types
+| Tab | What it is |
+|---|---|
+| **Remote** | the touchpad, full height, with `L` `M` `R` floating at the thumb |
+| **Keys** | the same pad with a keyboard slot open: on-screen keyboard, media keys, or typed text |
+| **Deck** | a grid of buttons you press — sequences, chords, pages of them |
+| **Setup** | everything you configure, one section at a time |
+
+**Release** sits in the status bar on every tab. It clears every held key and
+button on the host, and it is deliberately not next to a button you press in a
+hurry.
+
+### Keys
+
+**Keys** is the same pad with a slot open underneath it, and the slot holds one
+of three things: the on-screen keyboard, the media keys, or a text box that is
+typed into the host.
+
+The on-screen keyboard has three pages — letters, symbols, and function keys
+with the arrows — at ten keys a row. **Every key shows the character the host
+will receive**, with what Shift would make of it above; when Shift is latched
+the two swap, so the key in front of you is always the one that will be typed.
+There is a `?` key that sends Shift and `/` together, because otherwise the
+most common symbol costs two taps. Esc, Tab, Ctrl, Alt, Cmd and Fn sit on the
+letter page: a chord should not need a page change first.
+
+Below the keys, a small badge shows **CAPS LOCK** and **NUM LOCK** as the host
+reports them, read from the USB LED output report. With no host attached there
+is nothing to report and the badge stays hidden rather than claiming everything
+is off.
+
+**Built-in / Your keyboard** at the top of the slot switches to the phone's own
+keyboard: the page focuses a hidden field and translates what the IME sends —
+printable characters arrive as text, while arrows, Tab, Esc, Enter, Backspace,
+F-keys and Ctrl chords arrive as real keys. What the page can and cannot get
+from a phone keyboard is measured, not guessed: see
+`docs/phone-keyboard.md`.
+
+### Deck
+
+**Deck** is a grid of buttons. Tapping one runs it; **Edit** switches the deck
+into edit mode, where a tile opens the editor and shows its own Edit and Delete
+actions. **Stop** in the run bar interrupts a sequence between characters and
+releases everything.
+
+A button is text typed into the host, with braced tokens for the keys that are
+not characters — `{SEARCH}chrome{ENTER}` presses the Search media key, types
 `chrome` and presses Enter.
+
+Each button can carry one of five colours, and the deck can hold several
+**pages** (the chip strip above the grid). A button marked **Run while held**
+starts on press and stops on release: put `{REPEAT:n}` in it and it loops for
+as long as your finger stays down, which is what a volume or scroll button
+wants.
 
 | Token | Meaning |
 |---|---|
@@ -89,6 +137,7 @@ characters — `{SEARCH}chrome{ENTER}` presses the Search media key, types
 | `{CTRL+C}` `{CMD+SPACE}` `{CTRL+ALT+DEL}` | modifier combination — CTRL, SHIFT, ALT, CMD, then a key or a single character |
 | `{PLAYPAUSE}` `{PLAY}` `{PAUSE}` `{NEXTTRACK}` `{PREVTRACK}` `{STOP}` `{VOLUMEUP}` `{VOLUMEDOWN}` `{MUTE}` `{SEARCH}` `{CALC}` `{BROWSERHOME}` `{BROWSERBACK}` `{BROWSERFORWARD}` | a Consumer Control usage, sent as a press/release pair |
 | `{WAIT:500}` | pause for that many milliseconds (up to 60000) |
+| `{REPEAT:3}` … `{/REPEAT}` | repeat the tokens between them; nests up to eight deep, counts 1–100, and the expansion is capped at 2000 steps |
 | `{{` `}}` | a literal brace |
 
 Anything outside braces is typed through the same US QWERTY mapping as the
@@ -96,7 +145,7 @@ Type panel, at the `type_speed` rate. Tokens are matched case-insensitively; an
 unrecognised one is an error, not a skip — the page names it and refuses to run
 the macro rather than typing part of it.
 
-Macros are stored **in the browser**, under `localStorage`, not on the device.
+The deck is stored **in the browser**, under `localStorage`, not on the device.
 They were in the settings blob once — capped at 1023 bytes shared with every
 other setting, and wiped by a partition change — and moving them out trades
 that for a browser's megabytes. What it costs is that they are per-browser: a
@@ -111,8 +160,8 @@ says so instead of showing a list that was never stored.
 ### Updating the web UI
 
 The pages are built into the firmware, but the device also carries a 320 KB
-LittleFS partition that is served in preference to them. ⚙ Settings →
-**Open UI files page** lists every file, says whether the device is serving the
+LittleFS partition that is served in preference to them. Setup →
+**Web UI files** lists every file, says whether the device is serving the
 built-in copy or one that was uploaded, and offers **Upload…** and **Reset to
 built-in** per file. Changes are live on the next page load — no restart and no
 reflash, which matters because flashing this board means BOOT, replug and a
@@ -125,13 +174,13 @@ only once it is complete. The four views live in `index.html` as `<template>`s
 and are mounted by `router.js`, so an uploaded `index.html` that breaks the
 shell takes every view with it; keep a copy of a working one before replacing
 it. A broken view script is recoverable: the shell still loads the other
-views, and the UI files page (or Settings' **Reset UI to built-in**) can delete
+views, and the UI files page (or Setup's **Reset UI to built-in**) can delete
 it. Uploads are token-gated, limited to the UI's own file names and capped at
 64 KB per file.
 
 ### Custom screen image
 
-Settings → **Screen** → **Choose image…** puts a picture on the LCD as a
+Setup → **Screen** → **Choose image…** puts a picture on the LCD as a
 fourth BOOT screen. The preview shows the dithered 160×80 copy the device will
 actually draw, not the original file.
 
@@ -348,10 +397,12 @@ main/
                   uploaded to the LittleFS partition, which is served in
                   preference. index.html is the one shell: the top bar, the
                   auth gate and a <template> per view; router.js mounts one
-                  template into <main> from the hash (#/, #/settings,
-                  #/macros, #/ui) and calls the view's init()/destroy().
-                  pad.js, settings.js, macros.js + macro.js (the macro DSL)
-                  and ui.js are those four views.
+                  template into <main> from the hash and calls the view's
+                  init()/destroy(). The tabs map to #/ (Remote), #/keys,
+                  #/deck and #/setup; #/macros, #/settings and #/ui are kept
+                  as aliases so old links still land somewhere.
+                  pad.js is Remote and Keys, macros.js + macro.js are Deck,
+                  settings.js is Setup and ui.js is the UI files page.
 partitions.csv    4 MB app partition, then a 320 KB LittleFS partition for
                   uploaded UI files and the screen image — appended so nvs and
                   the app do not move
@@ -360,6 +411,8 @@ test/web/         browser-driven UI tests, no npm dependencies
 docs/             design notes
   screen-image.md  the custom screen image: what was built, the file format,
                    and the measured numbers
+  phone-keyboard.md what a phone keyboard actually delivers, the rules that
+                   turn it into HID reports, and what was tried and discarded
 ```
 
 ## Reflashing
@@ -420,6 +473,11 @@ Recovery from it is a plain power cycle.
   dead end. Transport and volume keys are handled by desktops by default;
   anything else (`Calculator` for instance) arrives as a keycode but needs an
   action bound to it in your desktop environment.
+- **A browser that hides its keyboard from the page cannot be laid out
+  around.** With the phone's own keyboard up, Chrome shrinks the page to fit
+  (reported 553/554 in the measurements); Cromite reports no change at all
+  (765/766), so its keyboard simply covers the bottom of the slot. The mode
+  works in both, but only Chrome lays it out correctly.
 - **BLE HID is not implemented** (USB only). The S3 supports both, but WiFi + BLE
   share one 2.4 GHz radio, so expect added jitter if you add it.
 - The dongle draws up to ~800 mA with WiFi + backlight.
