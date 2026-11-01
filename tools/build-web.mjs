@@ -56,7 +56,7 @@ async function buildOnce() {
   out.set('style.css', css.outputFiles[0].contents);
 
   for (const page of PAGES) {
-    const html = await fs.readFile(path.join(SRC, page), 'utf8');
+    const html = await inlineIcons(await fs.readFile(path.join(SRC, page), 'utf8'));
     out.set(page, Buffer.from(await minify(html, {
       collapseWhitespace: true,
       conservativeCollapse: true,
@@ -170,6 +170,63 @@ async function buildZip(entries) {
   end.writeUInt32LE(offset, 16);
 
   return Buffer.concat([...locals, centralBuf, end]);
+}
+
+
+// ---------------------------------------------------------------- icons
+//
+// Markup writes <svg data-icon="keyboard"></svg> and the build replaces it with
+// the real drawing from lucide-static, so the source carries a name rather than
+// a path and every icon in the UI comes from one set: same 24-unit grid, same
+// 2-unit stroke, same round caps.
+//
+// Inlining happens here rather than at runtime because the icons sit in the
+// templates, which are cloned long after boot. Nothing from lucide ships except
+// the icons this file actually names.
+
+const ICON_DIR = path.join(ROOT, 'node_modules', 'lucide-static', 'icons');
+const ICON_CACHE = new Map();
+
+const ICON_SVG = /<svg\s+data-icon="([a-z0-9-]+)"([^>]*)><\/svg>/g;
+
+async function iconBody(name) {
+  if (ICON_CACHE.has(name)) return ICON_CACHE.get(name);
+
+  const file = path.join(ICON_DIR, `${name}.svg`);
+  let raw;
+  try {
+    raw = await fs.readFile(file, 'utf8');
+  } catch {
+    throw new Error(`unknown icon "${name}": ${path.relative(ROOT, file)} does not exist`);
+  }
+
+  // lucide-static files open with a licence comment, so the first '>' in the
+  // file belongs to the comment, not to the <svg> element.
+  const clean = raw.replace(/<!--[\s\S]*?-->/g, '');
+  const open = clean.indexOf('<svg');
+  const body = clean.slice(clean.indexOf('>', open) + 1, clean.lastIndexOf('</svg>'));
+  const viewBox = (clean.match(/viewBox="([^"]+)"/) || [, '0 0 24 24'])[1];
+  const out = { body: body.replace(/\s+/g, ' ').trim(), viewBox };
+  ICON_CACHE.set(name, out);
+  return out;
+}
+
+async function inlineIcons(html) {
+  const names = [];
+  for (const m of html.matchAll(ICON_SVG)) names.push(m[1]);
+
+  let out = html;
+  for (const name of new Set(names)) {
+    const { body, viewBox } = await iconBody(name);
+    const re = new RegExp(`<svg\\s+data-icon="${name}"([^>]*)><\\/svg>`, 'g');
+    out = out.replace(re, (_m, attrs) => {
+      const cls = (attrs.match(/class="([^"]*)"/) || [, 'ico'])[1];
+      return `<svg class="${cls}" viewBox="${viewBox}" xmlns="http://www.w3.org/2000/svg" ` +
+             `fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" ` +
+             `stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
+    });
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------- run

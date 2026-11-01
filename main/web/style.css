@@ -546,6 +546,20 @@ textarea { font-family: ui-monospace, SFMono-Regular, monospace; resize: vertica
   background: #202020;
   color: #8c8c8c;
   font-size: 12.5px;
+  /* The panes carry icons, the source row is text: both centre the same way. */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+/* Icons are inlined by tools/build-web.mjs from lucide-static, so they are
+   drawing, not a font: one stroke weight everywhere and no colour emoji
+   deciding what a button looks like on someone else's phone. */
+.ico {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
 }
 /* `display: grid` above beats the hidden attribute, so say it explicitly. */
 #kbSource[hidden] { display: none; }
