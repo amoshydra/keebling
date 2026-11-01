@@ -139,6 +139,9 @@
       <button type="button" role="tab" data-src="system">⌨ Your keyboard</button>
     </div>
     <div id="kbBuilt"></div>
+    <!-- What the host says its lock keys are doing. Empty and hidden when they
+         are all off, so it costs nothing in the normal case. -->
+    <div id="kbLeds" hidden></div>
     <div id="kbCapture" hidden>
       <button id="kbCaptureOpen" type="button" class="primary">⌨ Tap to type</button>
       <p class="note">Keys go to the host — nothing echoes here.</p>

@@ -664,6 +664,33 @@ const NO_TEXT_USAGE = new Set([
 
 let kbSource = 'built';
 let captureComposing = false;
+
+// The host's lock keys. Polled rather than pushed: the page already speaks
+// HTTP, and this is a badge, not a control path.
+let ledsEl = null;
+let ledTimer = null;
+
+async function pollLeds() {
+  if (!ledsEl || !kbd || !kbd.classList.contains('show')) return;
+  try {
+    const res = await apiFetch('/state');
+    if (!res.ok) return;
+    const st = await res.json();
+    const on = [];
+    // known=false means the host has never sent an LED byte; saying "nothing is
+    // lit" then would be a guess, so say nothing at all.
+    if (st.known) {
+
+      if (st.caps) on.push('CAPS');
+      if (st.num) on.push('NUM');
+      if (st.scroll) on.push('SCROLL');
+    }
+    ledsEl.textContent = on.length ? on.join(' · ') + ' LOCK' : '';
+    ledsEl.hidden = !on.length;
+  } catch (_) {
+    // Unreachable device: the status dot already says so.
+  }
+}
 // When the last Tab was seen. Hacker's Keyboard moves focus for its own Tab
 // key, and an IME can do that even though the keydown was cancelled - so the
 // caret is put back, but only right after a Tab, so a deliberate tap survives.
@@ -1280,6 +1307,10 @@ function init() {
   buildKeyboard();
   buildMedia();
   kbModesEl = document.getElementById('kbModes');
+  ledsEl = document.getElementById('kbLeds');
+  if (ledsEl) { ledsEl.hidden = true; ledsEl.textContent = ''; }
+  clearInterval(ledTimer);
+  ledTimer = setInterval(pollLeds, 2000);
   kbd = document.getElementById('kbd');
   setPane('built');
   // The Keys tab is this same view with the keyboard slot open, so arriving
@@ -1411,6 +1442,9 @@ function destroy() {
   flashTimer = null;
   clearTimeout(pulseTimer);
   pulseTimer = null;
+  clearInterval(ledTimer);
+  ledTimer = null;
+  ledsEl = null;
 
   clearInterval(heartbeatTimer);
   heartbeatTimer = null;
@@ -1521,6 +1555,7 @@ return {
   releaseAll,
   setKeyboardSource,
   focusCapture,
+  pollLeds,
   get keyboardSource() { return kbSource; },
   get captureField() { return captureField; },
   NO_TEXT_USAGE,

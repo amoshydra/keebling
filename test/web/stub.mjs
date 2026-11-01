@@ -64,6 +64,8 @@ function screenImageOk(b) {
 export function startStub(port = 0) {
   // What the "device" holds. Tests can read and change this.
   const device = {
+    // The host's lock keys, for the Keys view's badge.
+    ledsKnown: true, num: false, caps: false, scroll: false,
     settings: {},
     saved: [],          // every /settings body the stub received
     restarts: 0,
@@ -112,6 +114,28 @@ export function startStub(port = 0) {
           });
         }
         res.writeHead(405); res.end(); return;
+
+      case '/state':
+        if (!needAuth()) return;
+        if (req.method === 'POST') {
+          // Test-only: the real device answers from the USB LED report.
+          return readBody((b) => {
+            let next = {};
+            try { next = JSON.parse(b); } catch (_) { /* ignore */ }
+            for (const k of ['known', 'num', 'caps', 'scroll']) {
+              if (next[k] !== undefined) {
+                device[k === 'known' ? 'ledsKnown' : k] = next[k];
+              }
+            }
+            json({ ok: true });
+          });
+        }
+        return json({
+          known: device.ledsKnown !== false,
+          num: !!device.num,
+          caps: !!device.caps,
+          scroll: !!device.scroll,
+        });
 
       case '/hid':
         if (!needAuth()) return;

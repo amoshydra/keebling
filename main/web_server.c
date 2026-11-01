@@ -237,6 +237,26 @@ static esp_err_t logs_handler(httpd_req_t *req) {
 // What the host learns about us from the USB descriptors. Without this the
 // report descriptor can only be inspected with a USB analyser or by digging
 // through the browser's HID internals.
+// Lock-key state, polled by the Keys view. An HTTP read rather than a pushed
+// websocket frame: the page already speaks HTTP, and a keyboard LED is not
+// worth a second transport.
+static esp_err_t state_handler(httpd_req_t *req) {
+    if (!req_authorised(req)) {
+        httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "forbidden");
+        return ESP_FAIL;
+    }
+    uint8_t leds = 0;
+    const bool known = usb_hid_led_state(&leds);
+    char out[48];
+    snprintf(out, sizeof(out), "{\"known\":%s,\"num\":%d,\"caps\":%d,\"scroll\":%d}",
+             known ? "true" : "false",
+             known ? (leds & 1) : 0,
+             known ? ((leds >> 1) & 1) : 0,
+             known ? ((leds >> 2) & 1) : 0);
+    httpd_resp_set_type(req, "application/json");
+    return httpd_resp_sendstr(req, out);
+}
+
 static esp_err_t hid_handler(httpd_req_t *req) {
     if (!req_authorised(req)) {
         httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "forbidden");
@@ -1150,6 +1170,7 @@ esp_err_t web_server_start(void) {
         { .uri = "/scan",       .method = HTTP_GET,  .handler = scan_handler },
         { .uri = "/logs",       .method = HTTP_GET,  .handler = logs_handler },
         { .uri = "/hid",        .method = HTTP_GET,  .handler = hid_handler },
+        { .uri = "/state",      .method = HTTP_GET,  .handler = state_handler },
         { .uri = "/save",       .method = HTTP_POST, .handler = save_handler },
         { .uri = "/forget",     .method = HTTP_POST, .handler = forget_handler },
         { .uri = "/settings",   .method = HTTP_GET,  .handler = settings_get_handler },

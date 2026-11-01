@@ -37,3 +37,8 @@ const char *usb_hid_string(int index);
 
 // True if ready to accept a report.
 bool usb_hid_ready(void);
+
+// The host's keyboard LED byte, as last sent to us (bit 0 Num, 1 Caps,
+// 2 Scroll). Returns false until the host has sent one, which is why it is a
+// pair rather than a bare zero: 0 means every LED off, and unknown is not that.
+bool usb_hid_led_state(uint8_t *out);

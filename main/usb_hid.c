@@ -77,10 +77,21 @@ uint16_t tud_hid_get_report_cb(uint8_t instance, uint8_t report_id,
     return 0;
 }
 
+// The host tells a keyboard which LEDs to light. Until this was read the page
+// could not know whether Caps Lock was on, so it could only guess - and typing
+// lowercase on a host with Caps Lock lit produces capitals.
+static uint8_t s_leds;
+static volatile bool s_leds_known;
+
 void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id,
                            hid_report_type_t report_type, uint8_t const *buffer,
                            uint16_t bufsize) {
-    (void)instance; (void)report_id; (void)report_type; (void)buffer; (void)bufsize;
+    (void)instance;
+    if (report_type != HID_REPORT_TYPE_OUTPUT || !buffer || !bufsize) return;
+    // Report ID 0 is the boot-protocol form; anything else must be the keyboard.
+    if (report_id != 0 && report_id != HID_RID_KEYBOARD) return;
+    s_leds = buffer[0];
+    s_leds_known = true;
 }
 
 void tud_hid_report_complete_cb(uint8_t instance, uint8_t const *report, uint16_t len) {
@@ -151,6 +162,12 @@ void usb_hid_init(void) {
 
 bool usb_hid_mounted(void) {
     return tud_mounted();
+}
+
+bool usb_hid_led_state(uint8_t *out) {
+    if (!s_leds_known) return false;
+    if (out) *out = s_leds;
+    return true;
 }
 
 bool usb_hid_ready(void) {

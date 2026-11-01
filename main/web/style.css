@@ -508,7 +508,18 @@ textarea { font-family: ui-monospace, SFMono-Regular, monospace; resize: vertica
 }
 /* The capture field is the whole keyboard when the system one is in use: it has
    to be a real, focusable input or Android will not raise the IME. */
-#kbCapture { display: flex; flex-direction: column; gap: 8px; }
+/* What the host says its lock keys are doing. Empty and hidden when they are
+   all off, so it costs no height in the normal case. */
+#kbLeds {
+  margin-top: 6px;
+  font-size: 10px;
+  letter-spacing: 1.2px;
+  text-align: right;
+  color: var(--warn);
+}
+#kbLeds[hidden] { display: none; }
+
+/* Fallback: if the keyboard refuses the hidden field
 #kbCapture[hidden] { display: none; }
 /* The focus target: 1px at the top-left corner, fixed. Rendered and focusable,
    but the caret is at (0,0) - above the keyboard and above everything else -

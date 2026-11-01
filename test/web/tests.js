@@ -2694,6 +2694,38 @@ __webTests.push({
 
 __webTests.push({
   page: 'control',
+  name: 'the host\'s Caps Lock shows up on the keyboard',
+  fn: async () => {
+    const slot = document.getElementById('kbd');
+    slot.classList.add('show');
+    const badge = document.getElementById('kbLeds');
+
+    // The host has told us nothing yet: the badge must stay silent rather than
+    // claim every LED is off. Saying "all off" when the state is unknown is the
+    // same kind of lie as the fallback that guessed at the keyboard.
+    __assert(badge.hidden, 'the badge is showing before the host said anything');
+    await apiPost('/state', { known: false, caps: true });
+    await PadView.pollLeds();
+    __assert(badge.hidden, 'the badge guessed a lock state the host never sent');
+    await apiPost('/state', { known: true });
+
+    // The stub stands in for the host: POST /state is its way of saying what
+    // the USB LED report contained.
+    await apiPost('/state', { caps: true });
+    await PadView.pollLeds();
+    __assert(!badge.hidden && /CAPS/.test(badge.textContent),
+      `badge says: "${badge.textContent}"`);
+
+    await apiPost('/state', { caps: false });
+    await PadView.pollLeds();
+    __assert(badge.hidden, 'the badge stayed lit after Caps Lock went off');
+
+    slot.classList.remove('show');
+  },
+});
+
+__webTests.push({
+  page: 'control',
   name: 'Shift relabels the keys it changes',
   fn: async () => {
     const slot = document.getElementById('kbd');
