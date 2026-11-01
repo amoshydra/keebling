@@ -1381,17 +1381,18 @@ esp_err_t web_server_start(void) {
         return ESP_FAIL;
     }
 
-    // One entry per asset, all served by static_handler.
-    static httpd_uri_t asset_uris[ASSET_COUNT];
-    for (size_t i = 0; i < ASSET_COUNT; i++) {
-        asset_uris[i].uri = s_assets[i].path;
-        asset_uris[i].method = HTTP_GET;
-        asset_uris[i].handler = static_handler;
-        asset_uris[i].user_ctx = NULL;
-        asset_uris[i].is_websocket = false;
-        asset_uris[i].handle_ws_control_frames = false;
-        asset_uris[i].supported_subprotocol = NULL;
-    }
+    // One wildcard, not one route per built-in file: what the device serves
+    // from its filesystem is decided by the user's upload, so the set is not
+    // known here. Registered last, so the endpoints below win the match.
+    static httpd_uri_t asset_route = {
+        .uri = "/*",
+        .method = HTTP_GET,
+        .handler = static_handler,
+        .user_ctx = NULL,
+        .is_websocket = false,
+        .handle_ws_control_frames = false,
+        .supported_subprotocol = NULL,
+    };
 
     httpd_uri_t uris[] = {
         { .uri = "/recover.html", .method = HTTP_GET, .handler = recover_handler },
@@ -1418,14 +1419,6 @@ esp_err_t web_server_start(void) {
     // Log rather than ESP_ERROR_CHECK: a full handler table should degrade to
     // "that endpoint 404s", not reboot the device.
     size_t registered = 0;
-    for (size_t i = 0; i < ASSET_COUNT; i++) {
-        esp_err_t err = httpd_register_uri_handler(s_server, &asset_uris[i]);
-        if (err != ESP_OK) {
-            ESP_LOGE(TAG, "register %s failed: %s", asset_uris[i].uri, esp_err_to_name(err));
-        } else {
-            registered++;
-        }
-    }
     for (size_t i = 0; i < sizeof(uris) / sizeof(uris[0]); i++) {
         esp_err_t err = httpd_register_uri_handler(s_server, &uris[i]);
         if (err != ESP_OK) {
@@ -1433,6 +1426,14 @@ esp_err_t web_server_start(void) {
         } else {
             registered++;
         }
+    }
+    // The catch-all goes last: the handler table is matched in order, so this
+    // one must never be able to answer for /auth, /ws or an API path.
+    esp_err_t wildcard = httpd_register_uri_handler(s_server, &asset_route);
+    if (wildcard != ESP_OK) {
+        ESP_LOGE(TAG, "register /* failed: %s", esp_err_to_name(wildcard));
+    } else {
+        registered++;
     }
 
     ESP_LOGI(TAG, "HTTP server started on port %d (%zu handlers)",
