@@ -6,7 +6,10 @@
 // can sit next to the function it calls without running before the template is
 // mounted.
 
-const SettingsView = (() => {
+
+import { apiFetch, apiPost, appSettings, forgetCode, hostLayout, hostLayoutId, saveSettingsToDevice, setHostLayout, setLocal } from './common.js';
+
+export const SettingsView = (() => {
 
 let dot = null;
 let statusText = null;

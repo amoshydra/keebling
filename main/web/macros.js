@@ -13,7 +13,11 @@
 // The view is mounted and unmounted by router.js: refs and listeners belong to
 // init(), and destroy() has to stop the socket, the heartbeat and any run.
 
-const MacrosView = (() => {
+
+import { appSettings, saveSettingsToDevice, token } from './common.js';
+import { describeMacroStep, parseMacro, refreshMacroText, runMacro } from './macro.js';
+
+export const MacrosView = (() => {
 
 const STORE_KEY = 'esp32remote.macros';
 const COLOURS = ['', 'blue', 'amber', 'red', 'green'];

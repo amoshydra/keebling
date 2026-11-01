@@ -2373,31 +2373,77 @@ const __waitState = async (name, prefix) => {
   __assert(__state(name).startsWith(prefix),
     `${name} is "${__state(name)}", expected "${prefix}..."`);
 };
-const __pick = (name, file) => {
-  const picker = __row(name).querySelector('.picker');
+const __pickArchive = (file) => {
+  const picker = document.getElementById('uiArchivePicker');
   const dt = new DataTransfer();
   dt.items.add(file);
   picker.files = dt.files;
   picker.dispatchEvent(new Event('change', { bubbles: true }));
 };
 
+// A stored zip, the only kind the device accepts. The CRC is left at zero:
+// neither the device nor the stub checks it, and the point of the test is the
+// envelope, not the checksum.
+function __zip(files) {
+  const enc = new TextEncoder();
+  const parts = [];
+  const dirs = [];
+  let offset = 0;
+  for (const f of files) {
+    const name = enc.encode(f.name);
+    const body = typeof f.body === 'string' ? enc.encode(f.body) : f.body;
+    const local = new Uint8Array(30 + name.length);
+    const l = new DataView(local.buffer);
+    l.setUint32(0, 0x04034b50, true);
+    l.setUint16(4, 20, true);
+    l.setUint16(8, 0, true);
+    l.setUint32(18, body.length, true);
+    l.setUint32(22, body.length, true);
+    l.setUint16(26, name.length, true);
+    local.set(name, 30);
+
+    const dir = new Uint8Array(46 + name.length);
+    const d = new DataView(dir.buffer);
+    d.setUint32(0, 0x02014b50, true);
+    d.setUint16(4, 20, true);
+    d.setUint16(6, 20, true);
+    d.setUint32(20, body.length, true);
+    d.setUint32(24, body.length, true);
+    d.setUint16(28, name.length, true);
+    d.setUint32(42, offset, true);
+    dir.set(name, 46);
+
+    parts.push(local, body);
+    dirs.push(dir);
+    offset += local.length + body.length;
+  }
+  const central = dirs.reduce((n, d) => n + d.length, 0);
+  const end = new Uint8Array(22);
+  const e = new DataView(end.buffer);
+  e.setUint32(0, 0x06054b50, true);
+  e.setUint16(8, files.length, true);
+  e.setUint16(10, files.length, true);
+  e.setUint32(12, central, true);
+  e.setUint32(16, offset, true);
+  return new File([...parts, ...dirs, end], 'web.zip', { type: 'application/zip' });
+}
+
 let __embeddedCss = '';   // captured before the upload test replaces it
 
 __webTests.push({
   page: 'ui',
-  name: 'lists every UI file and says where it is served from',
+  name: 'lists the bundle and says where each file is served from',
   fn: async () => {
     await __waitForUiFiles();
     __assert(__gateHidden(), 'the upload view asked for the code');
 
     const rows = [...document.querySelectorAll('#fileList .file')];
     const names = rows.map((r) => r.dataset.file);
-    __assert(rows.length === 9, `listed ${rows.length} files: ${names.join('|')}`);
-    __assert(names.includes('index.html') && names.includes('ui.js'),
-      `missing files: ${names.join('|')}`);
-    __assert(names.includes('router.js'), `missing files: ${names.join('|')}`);
-    __assert(!names.includes('settings.html') && !names.includes('macros.html')
-      && !names.includes('ui.html'), `the removed pages are still listed: ${names.join('|')}`);
+    __assert(rows.length === 3, `listed ${rows.length} files: ${names.join('|')}`);
+    __assert(names.includes('index.html') && names.includes('app.js')
+      && names.includes('style.css'), `missing files: ${names.join('|')}`);
+    __assert(!names.includes('pad.js') && !names.includes('router.js'),
+      `the pre-bundle sources are still listed: ${names.join('|')}`);
     __assert(names.filter((n) => n === 'index.html').length === 1,
       'index.html was listed twice');
     for (const r of rows) {
@@ -2406,78 +2452,91 @@ __webTests.push({
     }
     __assert(document.getElementById('statusText').textContent.includes('filesystem'),
       `status: ${document.getElementById('statusText').textContent}`);
-    __assert(document.getElementById('fsNote').textContent.includes('per file'),
+    __assert(document.getElementById('fsNote').textContent.includes('archive'),
       `size note: ${document.getElementById('fsNote').textContent}`);
+    __assert(!document.querySelector('#fileList .upload'),
+      'the listing still offers a per-file upload');
   },
 });
 
 __webTests.push({
   page: 'ui',
-  name: 'uploading a file makes the device serve it',
+  name: 'uploading an archive replaces the whole UI',
   fn: async () => {
     await __waitForUiFiles();
     __embeddedCss = await (await fetch('/style.css')).text();
     __assert(__embeddedCss.includes('--accent'), 'the embedded stylesheet did not come back');
 
-    const body = '/* uploaded by the test */\nbody { background: #123456; }\n';
-    __pick('style.css', new File([body], 'style.css', { type: 'text/css' }));
+    const css = 'body{background:#123456}';
+    const js = 'window.__fromArchive = true;';
+    __pickArchive(__zip([
+      { name: 'style.css', body: css },
+      { name: 'app.js', body: js },
+    ]));
     await __waitState('style.css', 'uploaded');
+    await __waitState('app.js', 'uploaded');
 
-    const served = await (await fetch('/style.css')).text();
-    __assert(served === body, `the device served "${served.slice(0, 60)}"`);
-    const note = document.getElementById('uiNote').textContent;
-    __assert(note.includes('replaces the built-in copy'), `note: ${note}`);
-  },
-});
-
-__webTests.push({
-  page: 'ui',
-  name: 'resetting a file brings the built-in copy back',
-  fn: async () => {
-    await __waitForUiFiles();
-    __assert(__state('style.css').startsWith('uploaded'), 'the upload test did not leave a file stored');
-    window.confirm = () => true;   // the reset asks first
-
-    __row('style.css').querySelector('.reset').click();
-    await __waitState('style.css', 'built-in');
-
-    const served = await (await fetch('/style.css')).text();
-    __assert(served === __embeddedCss, 'the built-in stylesheet did not come back');
-    const note = document.getElementById('uiNote').textContent;
-    __assert(note.includes('back to the built-in copy'), `note: ${note}`);
-  },
-});
-
-__webTests.push({
-  page: 'ui',
-  name: 'a name that is not a UI file is refused',
-  fn: async () => {
-    const cases = ['../style.css', 'evil.txt', 'index.html/../style.css',
-                   'style.css.tmp', 'screen.img'];
-    for (const name of cases) {
-      const q = `name=${encodeURIComponent(name)}&token=${window.__CODE}`;
-      const up = await fetch(`/ui/upload?${q}`, { method: 'POST', body: 'x' });
-      __assert(up.status === 400, `upload of ${name} answered HTTP ${up.status}`);
-      const reset = await fetch(`/ui/reset?${q}`, { method: 'POST' });
-      __assert(reset.status === 400, `reset of ${name} answered HTTP ${reset.status}`);
-    }
-    const served = await (await fetch('/style.css')).text();
-    __assert(served === __embeddedCss, 'a refused upload changed what is served');
-  },
-});
-
-__webTests.push({
-  page: 'ui',
-  name: 'an empty file is refused, not stored as an empty page',
-  fn: async () => {
-    const r = await fetch(`/ui/upload?name=index.html&token=${window.__CODE}`,
-      { method: 'POST', body: '' });
-    __assert(r.status === 400, `the endpoint answered HTTP ${r.status}`);
+    __assert((await (await fetch('/style.css')).text()) === css, 'style.css was not replaced');
+    __assert((await (await fetch('/app.js')).text()) === js, 'app.js was not replaced');
+    // The archive did not carry one of the three, so that one keeps its
+    // built-in copy rather than being emptied.
     __assert(__state('index.html').startsWith('built-in'),
       `index.html became "${__state('index.html')}"`);
+    const note = document.getElementById('uiNote').textContent;
+    __assert(note.includes('Reload'), `note: ${note}`);
+  },
+});
+
+__webTests.push({
+  page: 'ui',
+  name: 'resetting brings the built-in UI back',
+  fn: async () => {
+    await __waitForUiFiles();
+    __assert(__state('style.css').startsWith('uploaded'), 'the upload test did not leave files stored');
+    window.confirm = () => true;   // the reset asks first
+
+    document.getElementById('uiArchiveReset').click();
+    await __waitState('style.css', 'built-in');
+    await __waitState('app.js', 'built-in');
+
+    __assert((await (await fetch('/style.css')).text()) === __embeddedCss,
+      'the built-in stylesheet did not come back');
+    const note = document.getElementById('uiNote').textContent;
+    __assert(note.includes('built-in UI'), `note: ${note}`);
+  },
+});
+
+__webTests.push({
+  page: 'ui',
+  name: 'an archive naming a file that is not part of the UI is refused whole',
+  fn: async () => {
+    const before = await (await fetch('/style.css')).text();
+    for (const bad of ['../evil.js', 'evil.txt', 'recover.html', 'pad.js']) {
+      const zip = __zip([
+        { name: 'style.css', body: 'body{color:red}' },
+        { name: bad, body: 'x' },
+      ]);
+      const r = await fetch(`/ui/upload?token=${window.__CODE}`,
+        { method: 'POST', body: zip, duplex: 'half' });
+      __assert(r.status === 400, `an archive with ${bad} answered HTTP ${r.status}`);
+    }
+    // Nothing was published, not even the entry that was fine.
+    __assert((await (await fetch('/style.css')).text()) === before,
+      'a refused archive changed what is served');
+    __assert(__state('style.css').startsWith('built-in'),
+      `style.css became "${__state('style.css')}"`);
+  },
+});
+
+__webTests.push({
+  page: 'ui',
+  name: 'an empty upload is refused, not stored as an empty page',
+  fn: async () => {
+    const r = await fetch(`/ui/upload?token=${window.__CODE}`, { method: 'POST', body: '' });
+    __assert(r.status === 400, `the endpoint answered HTTP ${r.status}`);
 
     await __waitForUiFiles();
-    __pick('index.html', new File([], 'index.html', { type: 'text/html' }));
+    __pickArchive(new File([], 'web.zip', { type: 'application/zip' }));
     await __sleep(300);
     const note = document.getElementById('uiNote').textContent;
     __assert(note.includes('empty'), `note: ${note}`);
@@ -2488,24 +2547,24 @@ __webTests.push({
 
 __webTests.push({
   page: 'ui',
-  name: 'an over-size file is refused, and the page refuses it first',
+  name: 'an over-size archive is refused, and the page refuses it first',
   fn: async () => {
     await __waitForUiFiles();
     const big = new Uint8Array(UiView.maxSize + 1);
 
-    const r = await fetch(`/ui/upload?name=macros.js&token=${window.__CODE}`,
-      { method: 'POST', body: big });
+    const r = await fetch(`/ui/upload?token=${window.__CODE}`,
+      { method: 'POST', body: big, duplex: 'half' });
     __assert(r.status === 413, `the endpoint answered HTTP ${r.status}`);
-    __assert(__state('macros.js').startsWith('built-in'),
-      `macros.js became "${__state('macros.js')}"`);
+    __assert(__state('app.js').startsWith('built-in'),
+      `app.js became "${__state('app.js')}"`);
 
     // The page checks the size before the file leaves the browser.
-    __pick('macros.js', new File([big], 'macros.js'));
+    __pickArchive(new File([big], 'web.zip', { type: 'application/zip' }));
     await __sleep(300);
     const note = document.getElementById('uiNote').textContent;
     __assert(note.includes('Nothing was uploaded'), `note: ${note}`);
-    __assert(__state('macros.js').startsWith('built-in'),
-      `macros.js became "${__state('macros.js')}"`);
+    __assert(__state('app.js').startsWith('built-in'),
+      `app.js became "${__state('app.js')}"`);
   },
 });
 
@@ -2519,30 +2578,6 @@ __webTests.push({
     __assert(up.status === 403, `an upload without a code answered HTTP ${up.status}`);
     const reset = await fetch('/ui/reset?all=1', { method: 'POST' });
     __assert(reset.status === 403, `a reset without a code answered HTTP ${reset.status}`);
-  },
-});
-
-// ---------------------------------------------------------------- broken view script
-// The point of the page: when an uploaded view script breaks, the shell still
-// loads and the other views keep working, so the upload view can put the
-// built-in copy back. The runner stores the broken file before this pass.
-__webTests.push({
-  page: 'ui-broken',
-  name: 'the upload view works while another view script is broken, and can reset it',
-  fn: async () => {
-    await __waitForUiFiles();
-
-    const broken = await (await fetch('/pad.js')).text();
-    __assert(broken.includes('broken upload'), 'the runner did not store a broken pad.js');
-    __assert(__state('pad.js').startsWith('uploaded'), `pad.js is "${__state('pad.js')}"`);
-
-    window.confirm = () => true;
-    __row('pad.js').querySelector('.reset').click();
-    await __waitState('pad.js', 'built-in');
-
-    const served = await (await fetch('/pad.js')).text();
-    __assert(served.includes('const PadView'), 'the built-in pad.js did not come back');
-    __assert(!served.includes('broken upload'), 'the broken copy is still being served');
   },
 });
 

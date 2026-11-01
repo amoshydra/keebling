@@ -17,7 +17,10 @@
 
 // HID usages, not DOM event codes: this page has no physical keyboard, and the
 // wire report carries usages. Keyboard/Keypad page 0x07.
-const MACRO_KEYS = {
+
+import { HID_KEYS, layoutTextMap, token } from './common.js';
+
+export const MACRO_KEYS = {
   ENTER: 0x28, ESC: 0x29, ESCAPE: 0x29,
   BKSP: 0x2A, BACKSPACE: 0x2A, TAB: 0x2B, SPACE: 0x2C,
   F1: 0x3A, F2: 0x3B, F3: 0x3C, F4: 0x3D, F5: 0x3E, F6: 0x3F,
@@ -30,16 +33,16 @@ const MACRO_KEYS = {
 
 // Modifier bits, as they appear in the keyboard report's first byte. Left-hand
 // variants only: nothing here needs to tell left from right.
-const MACRO_MODS = {
+export const MACRO_MODS = {
   CTRL: 0x01, CONTROL: 0x01,
   SHIFT: 0x02,
   ALT: 0x04, OPT: 0x04, OPTION: 0x04,
   CMD: 0x08, COMMAND: 0x08, META: 0x08, WIN: 0x08, SUPER: 0x08,
 };
-const MACRO_SHIFT = 0x02;
+export const MACRO_SHIFT = 0x02;
 
 // Consumer Control (usage page 0x0C) - the same usages the media panel sends.
-const MACRO_CONSUMERS = {
+export const MACRO_CONSUMERS = {
   PLAY: 0xB0, PAUSE: 0xB1, PLAYPAUSE: 0xCD,
   NEXTTRACK: 0xB5, PREVTRACK: 0xB6, STOP: 0xB7,
   VOLUMEUP: 0xE9, VOLUMEDOWN: 0xEA, MUTE: 0xE2,
@@ -53,9 +56,9 @@ const MACRO_CONSUMERS = {
 // between the two tables fails a test rather than going unnoticed.
 // character -> [usage, needsShift], rebuilt from the host layout in common.js so
 // a macro types the same characters the keyboard would draw.
-const MACRO_TEXT = {};
+export const MACRO_TEXT = {};
 
-function refreshMacroText() {
+export function refreshMacroText() {
   for (const k of Object.keys(MACRO_TEXT)) delete MACRO_TEXT[k];
   for (const [ch, [code, shift]] of Object.entries(layoutTextMap())) {
     const usage = HID_KEYS[code];
@@ -68,7 +71,7 @@ refreshMacroText();
 // One token. Returns a step, or { error } - never a skipped token: a macro
 // that types part of what its author wrote is worse than one that refuses to
 // run and says which token it did not understand.
-function parseMacroToken(raw, index) {
+export function parseMacroToken(raw, index) {
   const token = '{' + raw + '}';
   const body = raw.trim();
   if (!body) return { error: 'empty token', token, index };
@@ -142,7 +145,7 @@ function parseMacroToken(raw, index) {
 //   errors:   [{index, token, message}] - the macro must not run
 //   warnings: [{index, ch, message}] - characters with no US QWERTY key, which
 //             a run skips and reports
-function parseMacro(text) {
+export function parseMacro(text) {
   const src = String(text == null ? '' : text);
   const steps = [];
   const errors = [];
@@ -252,7 +255,7 @@ function parseMacro(text) {
 }
 
 // Label for the progress line and the editor's preview.
-function describeMacroStep(step) {
+export function describeMacroStep(step) {
   if (!step) return '';
   if (step.kind === 'text') return `type \u201c${step.text}\u201d`;
   if (step.kind === 'wait') return `wait ${step.ms} ms`;
@@ -263,16 +266,16 @@ function describeMacroStep(step) {
 // ---------------------------------------------------------------- running
 // Report builders. Mirrored from pad.js without its held-key state: a macro
 // runs on its own page, so every report starts from nothing held.
-function macroKeyReport(mod, usage) {
+export function macroKeyReport(mod, usage) {
   return new Uint8Array([0x02, mod & 0xFF, usage & 0xFF, 0, 0, 0, 0, 0]);
 }
-function macroConsumerReport(usage) {
+export function macroConsumerReport(usage) {
   return new Uint8Array([0x03, usage & 0xFF, (usage >> 8) & 0xFF]);
 }
 
 // Sleeps in slices, so a Stop during a long {WAIT:...} lands promptly instead
 // of after the whole delay.
-async function macroSleep(ms, stopped) {
+export async function macroSleep(ms, stopped) {
   const slice = 25;
   for (let left = ms; left > 0; left -= slice) {
     if (stopped && stopped()) return;
@@ -286,7 +289,7 @@ async function macroSleep(ms, stopped) {
 // opts: send(bytes), gapMs (press-to-release, and between characters),
 //       stopped(), onStep(i, step), onChar(typed, total)
 // Returns { steps, ran, chars, skipped, stopped }.
-async function runMacro(steps, opts) {
+export async function runMacro(steps, opts) {
   const send = opts.send;
   const gap = Math.max(2, Math.round(Number(opts.gapMs) || 40));
   const stopped = opts.stopped || (() => false);

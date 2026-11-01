@@ -1,22 +1,29 @@
-// UI files page: which files the device is serving from its filesystem and
-// which are still the built-in copies, with upload and reset.
+// UI files page: what the device is serving, and one way to replace it.
 //
-// The listing, the size cap and the whitelist all come from the device, so
-// this page cannot offer an upload the endpoint would refuse for a reason
-// other than size.
+// The unit of change is a whole archive. The UI is a bundle - index.html,
+// style.css, app.js - and a file-at-a-time upload could leave the shell loading
+// a script from a different build. The archive is written and renamed in one
+// pass on the device, so an upload either lands completely or not at all.
+//
+// The listing, the size cap and the whitelist all come from the device, so this
+// page cannot offer an upload the endpoint would refuse for a reason other than
+// size.
 //
 // The view is mounted and unmounted by router.js: refs belong to init().
 
-const UiView = (() => {
+import { apiFetch, apiPost } from './common.js';
+
+export const UiView = (() => {
 
 let dot = null;
 let statusText = null;
 let fileList = null;
 let fsNote = null;
 let uiNote = null;
+let picker = null;
 
 let uiFiles = [];      // [{ name, stored, size, embedded }]
-let maxSize = 0;       // per-file cap the device reported
+let maxSize = 0;       // cap on the whole archive, as the device reports it
 let loaded = false;    // the tests wait on this
 let loadGen = 0;       // invalidates a listing that is still in flight
 
@@ -72,9 +79,9 @@ function render(d) {
       'the mount.', true);
   } else if (d.total) {
     setNote(fsNote, `${fmtSize(d.used)} used of ${fmtSize(d.total)} on the device; ` +
-      `up to ${fmtSize(maxSize)} per file.`);
+      `an archive may be up to ${fmtSize(maxSize)}.`);
   } else {
-    setNote(fsNote, `Up to ${fmtSize(maxSize)} per file.`);
+    setNote(fsNote, `An archive may be up to ${fmtSize(maxSize)}.`);
   }
 
   for (const f of uiFiles) {
@@ -93,92 +100,70 @@ function render(d) {
       ? `uploaded · ${fmtSize(f.size)}`
       : `built-in · ${fmtSize(f.embedded)}`;
     head.append(name, state);
-
-    const acts = document.createElement('div');
-    acts.className = 'acts';
-
-    const picker = document.createElement('input');
-    picker.type = 'file';
-    picker.className = 'picker';
-    picker.hidden = true;
-    picker.addEventListener('change', () => {
-      const file = picker.files && picker.files[0];
-      picker.value = '';        // so the same file can be chosen twice in a row
-      if (file) uploadFile(f.name, file);
-    });
-
-    const upload = document.createElement('button');
-    upload.className = 'upload';
-    upload.textContent = 'Upload…';
-    upload.disabled = !d.mounted;
-    upload.addEventListener('click', () => picker.click());
-
-    const reset = document.createElement('button');
-    reset.className = 'reset';
-    reset.textContent = 'Reset to built-in';
-    reset.hidden = !f.stored;
-    reset.addEventListener('click', () => resetFile(f.name));
-
-    acts.append(upload, reset, picker);
-    row.append(head, acts);
+    row.append(head);
     fileList.appendChild(row);
   }
 }
 
-async function uploadFile(name, file) {
-  // An empty file would be refused by the device (a zero-length file counts as
-  // absent), and it is never what someone means to upload.
+async function uploadArchive(file) {
+  if (!file) return false;
+
+  // An empty file would be refused by the device, and it is never what someone
+  // means to upload.
   if (!file.size) {
-    setNote(uiNote, `${name} is empty, so there is nothing to upload. ` +
-      'The built-in copy is still being served.', true);
+    setNote(uiNote, 'That file is empty, so there is nothing to upload. ' +
+      'The UI on the device is unchanged.', true);
     return false;
   }
   // The device enforces this too; refusing here keeps a needless transfer off
   // the WiFi link and gives the reason immediately.
   if (maxSize && file.size > maxSize) {
-    setNote(uiNote, `${name} is ${fmtSize(file.size)}, over the ${fmtSize(maxSize)} ` +
-      'the device stores per file. Nothing was uploaded.', true);
+    setNote(uiNote, `${file.name} is ${fmtSize(file.size)}, over the ` +
+      `${fmtSize(maxSize)} the device takes for a whole archive. Nothing was uploaded.`, true);
     return false;
   }
 
-  setNote(uiNote, `uploading ${name} (${fmtSize(file.size)})…`);
+  setNote(uiNote, `uploading ${file.name} (${fmtSize(file.size)})…`);
   try {
-    const r = await apiFetch(`/ui/upload?name=${encodeURIComponent(name)}`, {
+    const r = await apiFetch('/ui/upload', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/octet-stream' },
+      headers: { 'Content-Type': 'application/zip' },
       body: file,
     });
     if (!r.ok) {
       let why = '';
       try { why = (await r.text()).trim(); } catch (_) { /* body may be gone */ }
-      setNote(uiNote, `${name} was refused (HTTP ${r.status})` +
-        (why ? `: ${why}` : '') + '. Nothing changed.', true);
+      setNote(uiNote, `The archive was refused (HTTP ${r.status})` +
+        (why ? `: ${why}` : '') + '. The UI on the device is unchanged.', true);
       return false;
     }
-    setNote(uiNote, `${name} uploaded. It replaces the built-in copy until it is reset.`);
+    let said = '';
+    try { said = (await r.text()).trim(); } catch (_) { /* the answer is a courtesy */ }
+    setNote(uiNote, (said || 'Uploaded') +
+      '. Reload the page to run the new UI — this one is still in memory.');
     await loadFiles();
     return true;
   } catch (_) {
-    setNote(uiNote, `The upload of ${name} was cut off. The previous copy is ` +
-      'still being served; try again.', true);
+    setNote(uiNote, 'The upload was cut off. The previous UI is still being ' +
+      'served; try again.', true);
     return false;
   }
 }
 
-async function resetFile(name) {
-  if (!confirm(`Delete the uploaded ${name} and go back to the built-in copy?`)) return false;
-  setNote(uiNote, `resetting ${name}…`);
+async function resetArchive() {
+  if (!confirm('Delete every uploaded file and go back to the built-in UI?')) return false;
+  setNote(uiNote, 'resetting to the built-in UI…');
   try {
-    const r = await apiPost(`/ui/reset?name=${encodeURIComponent(name)}`);
+    const r = await apiPost('/ui/reset?all=1');
     if (!r.ok) {
-      setNote(uiNote, `Resetting ${name} failed (HTTP ${r.status}).`, true);
+      setNote(uiNote, `Resetting failed (HTTP ${r.status}).`, true);
       return false;
     }
-    setNote(uiNote, `${name} is back to the built-in copy.`);
+    setNote(uiNote, 'The built-in UI is being served again. Reload the page.');
     await loadFiles();
     return true;
   } catch (_) {
-    setNote(uiNote, `Resetting ${name} failed — the device is unreachable.`, true);
+    setNote(uiNote, 'Resetting failed — the device is unreachable.', true);
     return false;
   }
 }
@@ -195,6 +180,21 @@ async function init() {
   maxSize = 0;
   loaded = false;
 
+  const upload = document.getElementById('uiArchiveUpload');
+  picker = document.createElement('input');
+  picker.type = 'file';
+  picker.id = 'uiArchivePicker';
+  picker.accept = 'application/zip,.zip';
+  picker.hidden = true;
+  document.body.appendChild(picker);
+  picker.addEventListener('change', () => {
+    const file = picker.files && picker.files[0];
+    picker.value = '';          // so the same archive can be chosen twice
+    if (file) uploadArchive(file);
+  });
+  upload.addEventListener('click', () => picker.click());
+
+  document.getElementById('uiArchiveReset').addEventListener('click', resetArchive);
   document.getElementById('uiRefresh').addEventListener('click', loadFiles);
   await loadFiles();
 }
@@ -204,6 +204,7 @@ function destroy() {
   uiFiles = [];
   maxSize = 0;
   loaded = false;
+  picker = null;
   dot = null;
   statusText = null;
   fileList = null;
@@ -214,6 +215,8 @@ function destroy() {
 return {
   init,
   destroy,
+  uploadArchive,
+  resetArchive,
   get loaded() { return loaded; },
   get maxSize() { return maxSize; },
 };

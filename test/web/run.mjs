@@ -216,8 +216,6 @@ try {
     // ...and the recovery story: one view's script has been replaced by a
     // broken upload, so the shell and the upload view have to still work and
     // be able to reset it.
-    { page: 'ui-broken', url: `${base}/?token=${CODE}#/ui`, metrics: PHONE,
-      storedUiFiles: { 'pad.js': '/* broken upload */\nconst = ;' } },
     // Navigation between the four views, back/forward and mount/unmount.
     { page: 'navigation', url: `${base}/?token=${CODE}#/`, metrics: PHONE },
     // A reload has to land on the view the hash names, not back on control.
@@ -231,7 +229,12 @@ try {
     // page has to be the way out.
     { page: 'recover', url: `${base}/recover.html`, metrics: PHONE,
       clearStorage: true,
-      storedUiFiles: { 'index.html': '<!doctype html><body>broken upload' } },
+      // A whole broken bundle, not one broken file: the UI is one script now,
+      // so this is the failure that can take every view at once.
+      storedUiFiles: {
+        'index.html': '<!doctype html><body>broken upload',
+        'app.js': 'const = ;',
+      } },
   ];
 
   let settingsSaves = [];
@@ -364,7 +367,7 @@ try {
   // empty one counts as absent so it cannot shadow a working page. This is the
   // contract ui_fs_open() implements on the device; the page tests above only
   // exercise the happy path.
-  const embeddedCss = readFileSync(path.join(HERE, '..', '..', 'main', 'web', 'style.css'), 'utf8');
+  const embeddedCss = readFileSync(path.join(HERE, '..', '..', 'main', 'web', 'dist', 'style.css'), 'utf8');
 
   device.uiFiles.set('style.css', Buffer.alloc(0));
   const emptyServed = await (await fetch(`${base}/style.css`)).text();

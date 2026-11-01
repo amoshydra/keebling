@@ -41,9 +41,15 @@ from their official repo rather than reimplemented from the datasheet.
 . ~/esp/esp-idf/export.sh          # ESP-IDF v5.3.2
 cd esp32-remote
 idf.py set-target esp32s3          # first time only
+pnpm install                       # first time only: esbuild, html-minifier
+pnpm build                         # bundles and minifies the UI into main/web/dist
 idf.py build
 idf.py -p /dev/ttyACM0 flash
 ```
+
+The firmware embeds `main/web/dist`, never `main/web` itself, so **`pnpm build`
+comes before `idf.py build`**. The build fails with that instruction if you
+forget.
 
 `esp_tinyusb` and `joltwallet/littlefs` are fetched from the ESP Component
 Registry on the first build.
@@ -60,8 +66,10 @@ BOOT-replug-power-cycle round trip. For UI work there is a dev server:
 node tools/dev-server.mjs --device 192.168.1.50
 ```
 
-It serves `main/web` from disk and proxies every other request — the REST
-endpoints and the WebSocket — to the device. The browser sees one origin, so
+It serves `main/web/dist` from disk and proxies every other request — the REST
+endpoints and the WebSocket — to the device. Run `pnpm build` once, or
+`pnpm watch` in another terminal, so the bundle on disk matches what you are
+editing. The browser sees one origin, so
 there is no CORS to arrange and the saved access code still works. Open
 `http://localhost:8080/?token=<code>`, edit a file, reload the page.
 
@@ -183,16 +191,19 @@ built-in** per file. Changes are live on the next page load — no restart and n
 reflash, which matters because flashing this board means BOOT, replug and a
 power cycle.
 
-An upload replaces the built-in copy until it is reset, so a bad edit can break
-a view — but not permanently. A missing, empty or half-written file is never
-served: the built-in copy is the floor, and an upload is renamed into place
-only once it is complete. The four views live in `index.html` as `<template>`s
-and are mounted by `router.js`, so an uploaded `index.html` that breaks the
-shell takes every view with it; keep a copy of a working one before replacing
-it. A broken view script is recoverable: the shell still loads the other
-views, and the UI files page (or Setup's **Reset UI to built-in**) can delete
-it. Uploads are token-gated, limited to the UI's own file names and capped at
-64 KB per file.
+The unit of upload is the whole UI, not a file: `pnpm build` writes
+`main/web/dist/web.zip` and the device unpacks it in one pass. That matters
+because the UI is a bundle — an `index.html` from one build loading an `app.js`
+from another is the failure that leaves a blank page with no way back. Every
+entry is written to `<name>.tmp` and renamed only after the whole archive has
+arrived, so an interrupted upload leaves the previous UI serving, and a
+zero-length file is never served: the built-in copy is the floor.
+
+An upload replaces the built-in copy until it is reset, so a bad *build* can
+break the UI — but not permanently: `/recover.html` is served by the firmware
+itself and deletes the stored copies. Uploads are token-gated, names are
+matched against the asset table rather than used to build a path, and the
+archive is capped at 192 KB with 96 KB per entry.
 
 ### Custom screen image
 
@@ -387,12 +398,12 @@ are snapshots of current state, so this maps 1:1 onto the hardware with no queue
 
 | Endpoint | Auth | Purpose |
 |---|---|---|
-| `GET /`, `/index.html`, `/style.css`, `/*.js` | none | the web UI — a stored copy when one was uploaded, the embedded asset otherwise |
+| `GET /`, `/index.html`, `/style.css`, `/app.js` | none | the web UI — the stored bundle when one was uploaded, the embedded one otherwise |
 | `GET /auth?token=` | token | validate a code (204 or 403) |
 | `GET /ws?token=` | token | control channel |
 | `POST /bootloader?token=` | token | reboot into USB download mode |
 | `GET /ui/files?token=` | token | each UI file: stored on the device or still embedded |
-| `POST /ui/upload?token=&name=` | token | store one UI file (raw body, 64 KB cap) |
+| `POST /ui/upload?token=` | token | store a whole UI (stored zip body, 192 KB cap, 96 KB per entry) |
 | `POST /ui/reset?token=&name=` (or `&all=1`) | token | delete stored copies, restoring the embedded ones |
 | `GET /screen/image?token=` | token | the stored screen image, header and CRC included (404 when there is none) |
 | `POST /screen/image?token=` | token | store the packed screen image (raw body, exactly 6,408 bytes) |
@@ -409,16 +420,18 @@ main/
   ui_fs.c/.h      LittleFS mount and file plumbing for the uploaded UI
   screen_image.c/.h the custom screen image: file format, validation, storage
   display.c/.h    ST7735 driver, 80×160 framebuffer, 5×7 font (non-fatal)
-  web/            the UI. Every file is embedded in the binary and can also be
-                  uploaded to the LittleFS partition, which is served in
-                  preference. index.html is the one shell: the top bar, the
-                  auth gate and a <template> per view; router.js mounts one
-                  template into <main> from the hash and calls the view's
-                  init()/destroy(). The tabs map to #/ (Remote), #/keys,
-                  #/deck and #/setup; #/macros, #/settings and #/ui are kept
-                  as aliases so old links still land somewhere.
-                  pad.js is Remote and Keys, macros.js + macro.js are Deck,
-                  settings.js is Setup and ui.js is the UI files page.
+  web/            the UI sources. These are ES modules and are NOT what the
+                  device serves: `tools/build-web.mjs` bundles them with
+                  esbuild into web/dist (index.html, style.css, app.js and the
+                  repair page), which is what gets embedded. index.html is the
+                  one shell: the top bar, the auth gate and a <template> per
+                  view; router.js mounts one template into <main> from the
+                  hash and calls the view's init()/destroy(). The tabs map to
+                  #/ (Remote), #/keys, #/deck and #/setup; #/macros,
+                  #/settings and #/ui are kept as aliases so old links still
+                  land somewhere. pad.js is Remote and Keys, macros.js +
+                  macro.js are Deck, settings.js is Setup and ui.js is the UI
+                  files page.
 partitions.csv    4 MB app partition, then a 320 KB LittleFS partition for
                   uploaded UI files and the screen image — appended so nvs and
                   the app do not move
@@ -463,6 +476,7 @@ Recovery from it is a plain power cycle.
 
 | Task | Command |
 |---|---|
+| Build the UI | `pnpm build` (or `pnpm watch`) |
 | Build | `idf.py build` |
 | Flash (download mode) | `idf.py -p /dev/ttyACM0 flash` |
 | Enter download mode | unplug → hold BOOT → replug |

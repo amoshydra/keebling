@@ -11,7 +11,9 @@ import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const WEB = path.join(HERE, '..', '..', 'main', 'web');
+// The built UI, which is what the firmware ships and therefore what the tests
+// must exercise. Run `pnpm build` first.
+const WEB = path.join(HERE, '..', '..', 'main', 'web', 'dist');
 
 // The access code the stub accepts. Any 12 Crockford characters would do.
 export const CODE = 'ABCDEFGHJKMN';
@@ -31,13 +33,45 @@ const TYPES = {
 
 // The names the device accepts for upload, mirroring s_assets in
 // main/web_server.c. Anything else is refused, so no path can be invented.
-const UI_FILES = [
-  'index.html', 'style.css', 'common.js', 'router.js', 'pad.js',
-  'settings.js', 'macros.js', 'macro.js', 'ui.js',
-];
+const UI_FILES = ['index.html', 'style.css', 'app.js'];
 
-// Mirrors UI_UPLOAD_MAX in main/web_server.c.
-const UI_MAX = 64 * 1024;
+// Mirrors UI_ARCHIVE_MAX in main/web_server.c: the cap on a whole archive.
+const UI_MAX = 192 * 1024;
+const UI_ENTRY_MAX = 96 * 1024;
+
+// Reads a stored zip, mirroring ui_upload_handler: local headers only, names
+// matched against the whitelist, sizes checked, deflate refused.
+function readStoredZip(buf) {
+  const err = (status, why) => Object.assign(new Error(why), { status });
+  const out = [];
+  let at = 0;
+  for (;;) {
+    if (at + 4 > buf.length) throw err(400, 'body ended early');
+    const sig = buf.readUInt32LE(at);
+    if (sig === 0x02014b50 || sig === 0x06054b50) return out;   // central directory
+    if (sig !== 0x04034b50) throw err(400, 'not a stored zip');
+    if (at + 30 > buf.length) throw err(400, 'body ended early');
+
+    const method = buf.readUInt16LE(at + 8);
+    const size = buf.readUInt32LE(at + 18);
+    const nameLen = buf.readUInt16LE(at + 26);
+    const extraLen = buf.readUInt16LE(at + 28);
+    if (method !== 0) throw err(400, 'archive must be stored, not deflated');
+    if (!size) throw err(400, 'empty entry');
+    if (size > UI_ENTRY_MAX) throw err(400, 'entry too large');
+    if (!nameLen || nameLen >= 32) throw err(400, 'bad entry name');
+
+    const nameAt = at + 30;
+    const name = buf.toString('utf8', nameAt, nameAt + nameLen);
+    if (!UI_FILES.includes(name)) throw err(400, 'unknown file in archive');
+    if (out.some((e) => e.name === name)) throw err(400, 'duplicate entry');
+
+    const bodyAt = nameAt + nameLen + extraLen;
+    if (bodyAt + size > buf.length) throw err(408, 'upload interrupted');
+    out.push({ name, body: buf.subarray(bodyAt, bodyAt + size) });
+    at = bodyAt + size;
+  }
+}
 
 // Mirrors the screen image formats in main/screen_image.h: an 8-byte header
 // (format, reserved, payload length, CRC-32) and a packed payload - 6,400 bytes
@@ -203,16 +237,13 @@ export function startStub(port = 0) {
         if (req.method !== 'POST') { res.writeHead(405); res.end(); return; }
         if (!needAuth()) return;
 
-        const name = url.searchParams.get('name') || '';
-        if (!UI_FILES.includes(name)) { res.writeHead(400); res.end('unknown file'); return; }
-
         const len = Number(req.headers['content-length'] || 0);
         if (!len) { res.writeHead(400); res.end('empty body'); return; }
         if (len > UI_MAX) {
           // Read the body before refusing, the same as the firmware: a client
           // that is mid-upload then sees the 413 instead of a dead socket.
           req.on('data', () => {});
-          req.on('end', () => { res.writeHead(413); res.end('file too large'); });
+          req.on('end', () => { res.writeHead(413); res.end('archive too large'); });
           return;
         }
 
@@ -220,9 +251,18 @@ export function startStub(port = 0) {
         let got = 0;
         req.on('data', (c) => { chunks.push(c); got += c.length; });
         req.on('end', () => {
-          if (got !== len) { res.writeHead(400); res.end('upload interrupted'); return; }
-          device.uiFiles.set(name, Buffer.concat(chunks));
-          res.writeHead(200); res.end('stored');
+          if (got !== len) { res.writeHead(408); res.end('upload interrupted'); return; }
+          let entries;
+          try {
+            entries = readStoredZip(Buffer.concat(chunks));
+          } catch (e) {
+            res.writeHead(e.status || 400); res.end(e.message);
+            return;
+          }
+          if (!entries.length) { res.writeHead(400); res.end('no files'); return; }
+          // All or nothing: the firmware renames only once every entry is in.
+          for (const e of entries) device.uiFiles.set(e.name, Buffer.from(e.body));
+          res.writeHead(200); res.end(`${entries.length} files stored`);
         });
         return;
       }

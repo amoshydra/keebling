@@ -523,29 +523,22 @@
 
     <section>
       <h2>UI files</h2>
-      <p class="note">Each file the device serves has a built-in copy in the
-        firmware. Uploading one here <strong>replaces the built-in copy until it
-        is reset</strong>; resetting deletes the uploaded file and the built-in
-        copy is served again. Changes take effect on the next page load — no
-        restart and no reflashing.</p>
-      <p class="note">The four views are templates in <code>index.html</code>,
-        mounted by <code>router.js</code>. An upload that breaks the shell takes
-        every view with it, so keep a copy of a working <code>index.html</code>
-        before replacing it. A broken view script is recovered here: the shell
-        still loads and the other views keep working.</p>
+      <p class="note">The UI is one bundle: <code>index.html</code>,
+        <code>style.css</code> and <code>app.js</code>, built by
+        <code>pnpm build</code>. It is uploaded as <strong>one archive</strong>,
+        never a file at a time — the shell and the script it loads can then never
+        be one version apart. Uploading <strong>replaces the built-in copies
+        until they are reset</strong>; changes take effect on the next page load,
+        with no restart and no reflashing.</p>
+      <p class="note">Build it with <code>pnpm build</code>, then upload
+        <code>main/web/dist/web.zip</code>. An upload is written in one piece: if
+        the transfer is interrupted, the previous UI keeps being served.</p>
       <div id="fileList"></div>
       <p class="note" id="fsNote"></p>
       <p class="note" id="uiNote"></p>
-    </section>
-
-    <section>
-      <h2>How an update goes</h2>
-      <p class="note">Edit the file on this phone or on a computer, then upload
-        it here and reload. Nothing needs to be reflashed.</p>
-      <p class="note">An upload is written in one piece: if the transfer is
-        interrupted, the previous copy keeps being served, so a dropped
-        connection cannot leave a half-written page behind.</p>
       <div class="row" style="margin-top:10px">
+        <button id="uiArchiveUpload" class="primary">Upload web.zip…</button>
+        <button id="uiArchiveReset">Reset to built-in</button>
         <button id="uiRefresh">Refresh list</button>
       </div>
     </section>
@@ -553,12 +546,6 @@
   </div>
 </template>
 
-<script src="common.js"></script>
-<script src="macro.js"></script>
-<script src="pad.js"></script>
-<script src="settings.js"></script>
-<script src="macros.js"></script>
-<script src="ui.js"></script>
-<script src="router.js"></script>
+<script type="module" src="app.js"></script>
 </body>
 </html>

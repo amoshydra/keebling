@@ -2,20 +2,20 @@
 // requests, and the device settings blob.
 
 // ---------------------------------------------------------------- access code
-const TOKEN_KEY = 'esp32remote.token';
-const TOKEN_LEN = 12;
-let token = '';
+export const TOKEN_KEY = 'esp32remote.token';
+export const TOKEN_LEN = 12;
+export let token = '';
 
-function normalizeToken(t) {
+export function normalizeToken(t) {
   return String(t || '').replace(/[-\s]/g, '').toUpperCase();
 }
 
 // localStorage access can throw rather than merely fail (Safari private
 // browsing rejects writes), so every access goes through these.
-function storeToken(t) { try { localStorage.setItem(TOKEN_KEY, t); } catch (_) {} }
-function clearStoredToken() { try { localStorage.removeItem(TOKEN_KEY); } catch (_) {} }
+export function storeToken(t) { try { localStorage.setItem(TOKEN_KEY, t); } catch (_) {} }
+export function clearStoredToken() { try { localStorage.removeItem(TOKEN_KEY); } catch (_) {} }
 
-function loadStoredToken() {
+export function loadStoredToken() {
   try {
     const saved = normalizeToken(localStorage.getItem(TOKEN_KEY));
     if (saved.length !== TOKEN_LEN) return false;
@@ -26,7 +26,7 @@ function loadStoredToken() {
 
 // ?token=... wins (an explicit hand-off, e.g. from the QR later on), otherwise
 // fall back to whatever was saved last time.
-function loadToken() {
+export function loadToken() {
   const url = new URL(location.href);
   const fromUrl = url.searchParams.get('token');
   if (fromUrl) {
@@ -39,7 +39,7 @@ function loadToken() {
   return loadStoredToken();
 }
 
-async function verifyToken(t) {
+export async function verifyToken(t) {
   try {
     const r = await fetch(`/auth?token=${encodeURIComponent(t)}`, { cache: 'no-store' });
     return r.ok;
@@ -47,16 +47,16 @@ async function verifyToken(t) {
 }
 
 // ---------------------------------------------------------------- requests
-function apiUrl(path) {
+export function apiUrl(path) {
   const sep = path.includes('?') ? '&' : '?';
   return `${path}${sep}token=${encodeURIComponent(token)}`;
 }
 
-async function apiFetch(path, opts) {
+export async function apiFetch(path, opts) {
   return fetch(apiUrl(path), Object.assign({ cache: 'no-store' }, opts || {}));
 }
 
-async function apiPost(path, body) {
+export async function apiPost(path, body) {
   const opts = { method: 'POST', cache: 'no-store' };
   if (body !== undefined) {
     opts.headers = { 'Content-Type': 'application/json' };
@@ -68,7 +68,7 @@ async function apiPost(path, body) {
 // ---------------------------------------------------------------- settings
 // The device stores one JSON blob. The firmware only reads the USB name keys; every
 // other key is the UI's business, so adding one is not a firmware change.
-const SETTINGS_DEFAULTS = {
+export const SETTINGS_DEFAULTS = {
   usb_product: 'ESP32 Remote',      // USB string 2 - the name the host shows
   usb_manufacturer: 'ESP32',        // USB string 1
   usb_interface: 'Keyboard Mouse Media',  // USB string 4 - cosmetic label
@@ -82,9 +82,9 @@ const SETTINGS_DEFAULTS = {
   tap_max_ms: 220,
 };
 
-let appSettings = Object.assign({}, SETTINGS_DEFAULTS);
+export let appSettings = Object.assign({}, SETTINGS_DEFAULTS);
 
-async function loadSettings() {
+export async function loadSettings() {
   try {
     const r = await apiFetch('/settings');
     if (r.ok) {
@@ -98,12 +98,12 @@ async function loadSettings() {
 
 // Values the UI can change without a round trip (kept so a device that is
 // briefly unreachable does not lose them).
-function localOverrides() {
+export function localOverrides() {
   try { return JSON.parse(localStorage.getItem('esp32remote.settings') || '{}'); }
   catch (_) { return {}; }
 }
 
-function setLocal(setting, value) {
+export function setLocal(setting, value) {
   appSettings[setting] = value;
   const o = localOverrides();
   o[setting] = value;
@@ -117,9 +117,9 @@ function setLocal(setting, value) {
 //
 // `hid_name` is also dead: it was the original key for the product name before
 // the manufacturer string existed, and usb_hid.c no longer reads it.
-const DEAD_SETTINGS = ['macros', 'hid_name'];
+export const DEAD_SETTINGS = ['macros', 'hid_name'];
 
-async function saveSettingsToDevice() {
+export async function saveSettingsToDevice() {
   // Send the lot, minus the keys that are no longer part of the model.
   const outgoing = Object.assign({}, appSettings);
   for (const k of DEAD_SETTINGS) delete outgoing[k];
@@ -134,7 +134,7 @@ async function saveSettingsToDevice() {
 // ---------------------------------------------------------------- access gate
 // The gate's markup is part of the shell (index.html) and starts hidden, so it
 // never flashes on a page that already has a valid code.
-function showGate(msg) {
+export function showGate(msg) {
   const gate = document.getElementById('gate');
   if (!gate) return;
   gate.classList.remove('hidden');
@@ -142,13 +142,13 @@ function showGate(msg) {
   document.getElementById('tokenInput').focus();
 }
 
-function hideGate() {
+export function hideGate() {
   const gate = document.getElementById('gate');
   if (gate) gate.classList.add('hidden');
 }
 
 // Runs onReady() once a valid code is available, prompting for it if needed.
-async function requireAuth(onReady) {
+export async function requireAuth(onReady) {
   // URL parameter wins (an explicit hand-off), otherwise the saved code.
   // Reading localStorage unconditionally matters: this was once gated on the
   // URL having a token, which meant the saved code was written and never read.
@@ -197,7 +197,7 @@ async function requireAuth(onReady) {
 
 // ---------------------------------------------------------------- misc
 // Recover the stored code so the settings page's "Forget code" behaves.
-function forgetCode() {
+export function forgetCode() {
   clearStoredToken();
   token = '';
 }
@@ -213,9 +213,9 @@ function forgetCode() {
 // renders: [code, label, shiftedLabel, width]. The character map
 // used for typing is DERIVED from those rows, so the picture and the typing
 // path cannot disagree.
-const LAYOUT_KEY = 'esp32remote.hostLayout';
+export const LAYOUT_KEY = 'esp32remote.hostLayout';
 
-const LAYOUT_ROWS = {
+export const LAYOUT_ROWS = {
   us: {
     name: 'US QWERTY',
     sym: [
@@ -275,7 +275,7 @@ LAYOUT_ROWS.us.abc = [
 ];
 LAYOUT_ROWS.uk.abc = LAYOUT_ROWS.us.abc;
 
-function hostLayoutId() {
+export function hostLayoutId() {
   try {
     const id = localStorage.getItem(LAYOUT_KEY);
     return LAYOUT_ROWS[id] ? id : 'us';
@@ -284,18 +284,18 @@ function hostLayoutId() {
   }
 }
 
-function hostLayout() {
+export function hostLayout() {
   return LAYOUT_ROWS[hostLayoutId()];
 }
 
-function setHostLayout(id) {
+export function setHostLayout(id) {
   try { localStorage.setItem(LAYOUT_KEY, LAYOUT_ROWS[id] ? id : 'us'); } catch (_) {}
 }
 
 // character -> [DOM code, needsShift], derived from the rows above. Anything the
 // keyboard cannot draw cannot be typed either, which is the invariant worth
 // having: the picture and the typing path are the same data.
-function layoutTextMap() {
+export function layoutTextMap() {
   const map = {};
   const add = (ch, code, shift) => {
     if (typeof ch !== 'string' || [...ch].length !== 1) return;
@@ -324,7 +324,7 @@ function layoutTextMap() {
 // hint. Sizing the app from the visual viewport covers both cases: if the
 // keyboard overlays, this shrinks the layout to the part still visible, and if
 // it resizes, the two agree and nothing moves.
-function syncAppHeight() {
+export function syncAppHeight() {
   const vv = window.visualViewport;
   const h = Math.round(vv ? vv.height : window.innerHeight);
   document.documentElement.style.setProperty('--app-height', h + 'px');
@@ -338,7 +338,7 @@ window.addEventListener('orientationchange', syncAppHeight);
 syncAppHeight();
 
 // ---------------------------------------------------------------- HID tables
-const HID_KEYS = {
+export const HID_KEYS = {
   KeyA:0x04,KeyB:0x05,KeyC:0x06,KeyD:0x07,KeyE:0x08,KeyF:0x09,KeyG:0x0A,KeyH:0x0B,
   KeyI:0x0C,KeyJ:0x0D,KeyK:0x0E,KeyL:0x0F,KeyM:0x10,KeyN:0x11,KeyO:0x12,KeyP:0x13,
   KeyQ:0x14,KeyR:0x15,KeyS:0x16,KeyT:0x17,KeyU:0x18,KeyV:0x19,KeyW:0x1A,KeyX:0x1B,

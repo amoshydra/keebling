@@ -16,7 +16,10 @@
 // and every listener is attached in init(), because the pad is a fresh clone
 // each time; destroy() has to put back what init() took out.
 
-const PadView = (() => {
+
+import { HID_KEYS, apiFetch, appSettings, hostLayout, layoutTextMap, token } from './common.js';
+
+export const PadView = (() => {
 
 // ---------------------------------------------------------------- HID maps
 // Keyboard/Keypad usage page 0x07

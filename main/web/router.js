@@ -13,7 +13,14 @@
 // outgoing view's DOM is replaced, so it can release held keys and close its
 // socket while they still exist.
 
-const Router = (() => {
+
+import { PadView } from './pad.js';
+import { MacrosView } from './macros.js';
+import { SettingsView } from './settings.js';
+import { UiView } from './ui.js';
+import { appSettings, loadSettings, requireAuth } from './common.js';
+
+export const Router = (() => {
   const main = document.getElementById('view');
 
   const control = () => (typeof PadView === 'undefined' ? null : PadView);

@@ -39,20 +39,14 @@ extern const unsigned char index_html_start[]    asm("_binary_index_html_start")
 extern const unsigned char index_html_end[]      asm("_binary_index_html_end");
 extern const unsigned char style_css_start[]     asm("_binary_style_css_start");
 extern const unsigned char style_css_end[]       asm("_binary_style_css_end");
-extern const unsigned char common_js_start[]     asm("_binary_common_js_start");
-extern const unsigned char common_js_end[]       asm("_binary_common_js_end");
-extern const unsigned char pad_js_start[]        asm("_binary_pad_js_start");
-extern const unsigned char pad_js_end[]          asm("_binary_pad_js_end");
-extern const unsigned char router_js_start[]     asm("_binary_router_js_start");
-extern const unsigned char router_js_end[]       asm("_binary_router_js_end");
-extern const unsigned char settings_js_start[]   asm("_binary_settings_js_start");
-extern const unsigned char settings_js_end[]     asm("_binary_settings_js_end");
-extern const unsigned char macros_js_start[]     asm("_binary_macros_js_start");
-extern const unsigned char macros_js_end[]       asm("_binary_macros_js_end");
-extern const unsigned char macro_js_start[]      asm("_binary_macro_js_start");
-extern const unsigned char macro_js_end[]        asm("_binary_macro_js_end");
-extern const unsigned char ui_js_start[]         asm("_binary_ui_js_start");
-extern const unsigned char ui_js_end[]           asm("_binary_ui_js_end");
+extern const unsigned char app_js_start[]        asm("_binary_app_js_start");
+extern const unsigned char app_js_end[]          asm("_binary_app_js_end");
+
+// The archive cap belongs with the asset table: the listing advertises it and
+// the upload enforces it, and the two must not drift apart.
+#define UI_ARCHIVE_MAX  (192 * 1024)   // the whole archive
+#define UI_ENTRY_MAX    (96 * 1024)    // one file inside it
+#define UI_ENTRY_COUNT  8              // more than the asset table has
 
 typedef struct {
     const char *path;     // request URI
@@ -68,17 +62,14 @@ typedef struct {
 // This table is also the upload whitelist: only names that appear here can be
 // written, so a request cannot invent a path. "/" and "/index.html" are the
 // same file; the listing endpoint collapses them.
+// Three files, because the UI is built into a bundle. The source files this
+// table used to name no longer exist on the device; a request for one of them
+// is a stale page, and a 404 is the honest answer.
 static const static_asset_t s_assets[] = {
-    { "/",              "text/html",              "index.html",    index_html_start,    index_html_end },
-    { "/index.html",    "text/html",              "index.html",    index_html_start,    index_html_end },
-    { "/style.css",     "text/css",               "style.css",     style_css_start,     style_css_end },
-    { "/common.js",     "application/javascript", "common.js",     common_js_start,     common_js_end },
-    { "/pad.js",        "application/javascript", "pad.js",        pad_js_start,        pad_js_end },
-    { "/router.js",     "application/javascript", "router.js",     router_js_start,     router_js_end },
-    { "/settings.js",   "application/javascript", "settings.js",   settings_js_start,   settings_js_end },
-    { "/macros.js",     "application/javascript", "macros.js",     macros_js_start,     macros_js_end },
-    { "/macro.js",      "application/javascript", "macro.js",      macro_js_start,      macro_js_end },
-    { "/ui.js",         "application/javascript", "ui.js",         ui_js_start,         ui_js_end },
+    { "/",              "text/html",              "index.html", index_html_start, index_html_end },
+    { "/index.html",    "text/html",              "index.html", index_html_start, index_html_end },
+    { "/style.css",     "text/css",               "style.css",  style_css_start,  style_css_end },
+    { "/app.js",        "application/javascript", "app.js",     app_js_start,     app_js_end },
 };
 #define ASSET_COUNT (sizeof(s_assets) / sizeof(s_assets[0]))
 
@@ -570,13 +561,7 @@ static esp_err_t static_handler(httpd_req_t *req) {
 // can do is need a reset - never a reflash.
 // ---------------------------------------------------------------------------
 
-// Largest single file the device will store. The biggest today is pad.js at
-// around 34 KB (settings.js is about the same), and the planned screen image is
-// about 32 KB; 64 KB leaves room for both without letting one request exhaust
-// the 320 KB partition.
-#define UI_UPLOAD_MAX (64 * 1024)
-
-// Longest name in the asset table is "settings.js".
+// Longest name in the asset table is "index.html".
 #define UI_NAME_MAX 32
 
 // The asset table is the whitelist. A name that is not one of the UI's own
@@ -605,7 +590,7 @@ static esp_err_t ui_files_handler(httpd_req_t *req) {
     }
 
     cJSON_AddBoolToObject(root, "mounted", ui_fs_mounted());
-    cJSON_AddNumberToObject(root, "max_size", UI_UPLOAD_MAX);
+    cJSON_AddNumberToObject(root, "max_size", UI_ARCHIVE_MAX);
 
     size_t total = 0, used = 0;
     if (ui_fs_usage(&total, &used) == ESP_OK) {
@@ -660,10 +645,61 @@ static void drain_body(httpd_req_t *req, size_t limit) {
     }
 }
 
-// POST /ui/upload?name=<whitelisted> with the raw file as the body. The body is
-// streamed to the filesystem in 512-byte chunks and only renamed into place
-// once complete, so nothing here needs the whole file in RAM and a transfer
-// that dies halfway leaves the previous copy serving.
+// The UI is built as a bundle by tools/build-web.mjs - index.html, style.css
+// and app.js - and shipped as one archive. Uploading the archive rather than a
+// file at a time is what keeps the shell and the script it loads from ever
+// being one version apart, which is the failure that leaves a blank page with
+// no way back except a reflash.
+//
+// The archive is stored, not deflated: the bundle is already minified, so the
+// archive's job is to make a whole UI arrive as one object. Requiring no
+// inflate keeps this to a header parser.
+//
+// Every entry is written to "<name>.tmp" and renamed only after the whole
+// archive has arrived, so an interrupted upload leaves the previous UI serving.
+// Names are matched against the asset table, never used to build a path.
+// ---------------------------------------------------------------------------
+
+#define ZIP_LOCAL_SIG    0x04034b50u
+#define ZIP_CENTRAL_SIG  0x02014b50u
+#define ZIP_END_SIG      0x06054b50u
+
+static uint16_t le16(const uint8_t *p) { return (uint16_t)(p[0] | (p[1] << 8)); }
+static uint32_t le32(const uint8_t *p) {
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+typedef struct {
+    const char *name;   // a pointer into the asset table, never into the request
+    FILE *f;
+} zip_entry_t;
+
+// Exactly n bytes, or -1. A slow phone is not a failure; one that vanished is.
+static int recv_exact(httpd_req_t *req, uint8_t *buf, size_t n) {
+    size_t got = 0;
+    int stalls = 0;
+    while (got < n) {
+        int r = httpd_req_recv(req, (char *)buf + got, n - got);
+        if (r == HTTPD_SOCK_ERR_TIMEOUT) {
+            if (++stalls > 6) return -1;
+            continue;
+        }
+        if (r <= 0) return -1;
+        stalls = 0;
+        got += (size_t)r;
+    }
+    return 0;
+}
+
+static esp_err_t upload_refuse(httpd_req_t *req, const char *status, int code, const char *why) {
+    drain_body(req, UI_ARCHIVE_MAX);
+    httpd_resp_set_status(req, status);
+    httpd_resp_set_type(req, "text/plain");
+    httpd_resp_send(req, why, HTTPD_RESP_USE_STRLEN);
+    return ESP_FAIL;
+}
+
+// POST /ui/upload with a stored zip as the body.
 static esp_err_t ui_upload_handler(httpd_req_t *req) {
     if (req->method != HTTP_POST) {
         httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "POST only");
@@ -673,87 +709,114 @@ static esp_err_t ui_upload_handler(httpd_req_t *req) {
         httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "forbidden");
         return ESP_FAIL;
     }
-
-    char query[160];
-    char name[UI_NAME_MAX];
-    if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK ||
-        httpd_query_key_value(query, "name", name, sizeof(name)) != ESP_OK) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "name required");
-        return ESP_FAIL;
-    }
-    if (!asset_by_file(name)) {
-        ESP_LOGW(TAG, "upload of '%s' refused: not a UI file", name);
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "unknown file");
-        return ESP_FAIL;
-    }
-
-    // Checked before a byte is read. Truncating instead would leave a broken
-    // page with no hint of what happened.
-    if (req->content_len == 0) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "empty body");
-        return ESP_FAIL;
-    }
-    if (req->content_len > UI_UPLOAD_MAX) {
-        ESP_LOGW(TAG, "%s: %u bytes over the %u byte cap",
-                 name, (unsigned)req->content_len, (unsigned)UI_UPLOAD_MAX);
-        // No 413 in httpd_err_code_t. Nothing is stored, and the body is only
-        // read up to the cap so the client can see this answer; anything
-        // beyond that is left unread, so the connection is closed after it.
-        drain_body(req, UI_UPLOAD_MAX);
-        httpd_resp_set_status(req, "413 Content Too Large");
-        httpd_resp_set_type(req, "text/plain");
-        httpd_resp_send(req, "file too large", HTTPD_RESP_USE_STRLEN);
-        return ESP_FAIL;
-    }
-
     if (!ui_fs_mounted()) {
-        // Refused like the over-size case, and the body is drained for the same
-        // reason: the client should see this answer, not a dropped socket.
-        drain_body(req, UI_UPLOAD_MAX);
-        httpd_resp_set_status(req, "503 Service Unavailable");
-        httpd_resp_set_type(req, "text/plain");
-        httpd_resp_send(req, "no filesystem", HTTPD_RESP_USE_STRLEN);
-        return ESP_FAIL;
+        return upload_refuse(req, "503 Service Unavailable", 503, "no filesystem");
+    }
+    if (req->content_len == 0) {
+        return upload_refuse(req, "400 Bad Request", 400, "empty body");
+    }
+    if (req->content_len > UI_ARCHIVE_MAX) {
+        ESP_LOGW(TAG, "archive of %u bytes over the %u byte cap",
+                 (unsigned)req->content_len, (unsigned)UI_ARCHIVE_MAX);
+        return upload_refuse(req, "413 Content Too Large", 413, "archive too large");
     }
 
-    FILE *f = ui_fs_open_temp(name);
-    if (!f) {
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "cannot write");
-        return ESP_FAIL;
-    }
+    zip_entry_t entries[UI_ENTRY_COUNT];
+    size_t count = 0;
+    const char *why = "not a stored zip";
+    int code = 400;
+    uint8_t hdr[30];
 
-    char buf[512];
-    size_t left = req->content_len;
-    int stalls = 0;
-    while (left > 0) {
-        int r = httpd_req_recv(req, buf, left < sizeof(buf) ? left : sizeof(buf));
-        if (r == HTTPD_SOCK_ERR_TIMEOUT) {
-            // A slow phone is not a failure, but a vanished one must not hold
-            // the socket open for ever.
-            if (++stalls > 6) break;
-            continue;
+    for (;;) {
+        if (recv_exact(req, hdr, 4) != 0) { why = "body ended early"; break; }
+
+        const uint32_t sig = le32(hdr);
+        // The central directory is the natural end of the entries. It is not
+        // parsed: the local headers already carried everything needed.
+        if (sig == ZIP_CENTRAL_SIG || sig == ZIP_END_SIG) break;
+        if (sig != ZIP_LOCAL_SIG) break;
+        if (recv_exact(req, hdr + 4, 26) != 0) { why = "body ended early"; break; }
+
+        if (le16(hdr + 8) != 0) { why = "archive must be stored, not deflated"; break; }
+
+        const uint32_t size = le32(hdr + 18);
+        const uint16_t name_len = le16(hdr + 26);
+        const uint16_t extra_len = le16(hdr + 28);
+
+        if (size == 0) { why = "empty entry"; break; }
+        if (size > UI_ENTRY_MAX) { why = "entry too large"; break; }
+        if (name_len == 0 || name_len >= UI_NAME_MAX) { why = "bad entry name"; break; }
+
+        char name[UI_NAME_MAX];
+        if (recv_exact(req, (uint8_t *)name, name_len) != 0) { why = "body ended early"; break; }
+        name[name_len] = '\0';
+
+        uint8_t skip[64];
+        for (uint16_t left = extra_len; left > 0; ) {
+            const size_t take = left < sizeof(skip) ? left : sizeof(skip);
+            if (recv_exact(req, skip, take) != 0) { why = "body ended early"; break; }
+            left = (uint16_t)(left - take);
         }
-        if (r <= 0) break;
-        stalls = 0;
-        if (fwrite(buf, 1, r, f) != (size_t)r) break;
-        left -= r;
+
+        const static_asset_t *asset = asset_by_file(name);
+        if (!asset) {
+            ESP_LOGW(TAG, "archive entry '%s' refused: not a UI file", name);
+            why = "unknown file in archive";
+            break;
+        }
+        if (count == UI_ENTRY_COUNT) { why = "too many files"; break; }
+
+        bool dup = false;
+        for (size_t i = 0; i < count; i++) dup = dup || entries[i].name == asset->file;
+        if (dup) { why = "duplicate entry"; break; }
+
+        FILE *f = ui_fs_open_temp(asset->file);
+        if (!f) { why = "cannot write"; code = 500; break; }
+
+        uint32_t left = size;
+        bool wrote = true;
+        while (left > 0) {
+            uint8_t buf[512];
+            const size_t take = left < sizeof(buf) ? left : sizeof(buf);
+            if (recv_exact(req, buf, take) != 0) { why = "upload interrupted"; code = 408; wrote = false; break; }
+            if (fwrite(buf, 1, take, f) != take) { why = "cannot write"; code = 500; wrote = false; break; }
+            left -= (uint32_t)take;
+        }
+        if (!wrote) { ui_fs_discard(asset->file, f); break; }
+
+        entries[count].name = asset->file;
+        entries[count].f = f;
+        count++;
     }
 
-    if (left != 0) {
-        ui_fs_discard(name, f);
-        ESP_LOGW(TAG, "%s: upload interrupted, %u bytes missing", name, (unsigned)left);
-        httpd_resp_send_err(req, HTTPD_408_REQ_TIMEOUT, "upload interrupted");
-        return ESP_FAIL;
-    }
-    if (ui_fs_commit(name, f) != ESP_OK) {
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "cannot store");
-        return ESP_FAIL;
+    if (code == 400 && why && strcmp(why, "not a stored zip") != 0 && count > 0) {
+        // A later entry failed: nothing has been published yet, so drop the
+        // whole set rather than blend two versions.
+        for (size_t i = 0; i < count; i++) ui_fs_discard(entries[i].name, entries[i].f);
+        count = 0;
     }
 
-    display_request_refresh();     // the file changed; if it is on screen, show it
-    ESP_LOGI(TAG, "%s: %u bytes stored on the device", name, (unsigned)req->content_len);
+    if (count == 0) {
+        return upload_refuse(req, "400 Bad Request", code, why);
+    }
+
+    // Past this point the archive is complete. The rename is the moment the new
+    // UI goes live.
+    for (size_t i = 0; i < count; i++) {
+        if (ui_fs_commit(entries[i].name, entries[i].f) != ESP_OK) {
+            for (size_t j = i + 1; j < count; j++) ui_fs_discard(entries[j].name, entries[j].f);
+            return upload_refuse(req, "500 Internal Server Error", 500, "cannot store");
+        }
+    }
+
+    drain_body(req, UI_ARCHIVE_MAX);   // the central directory, so the answer lands
+    display_request_refresh();
+    ESP_LOGI(TAG, "%u files stored from one archive", (unsigned)count);
+
+    char msg[64];
+    snprintf(msg, sizeof(msg), "%u files stored", (unsigned)count);
     httpd_resp_set_type(req, "text/plain");
-    return httpd_resp_sendstr(req, "stored");
+    return httpd_resp_sendstr(req, msg);
 }
 
 // POST /ui/reset?name=<whitelisted> deletes one stored file; ?all=1 deletes

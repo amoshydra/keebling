@@ -2,7 +2,7 @@
 // Development server for the web UI.
 //
 // The UI normally comes off the device, which means a BOOT-replug-power-cycle
-// round trip for every CSS tweak. This serves `main/web` from disk and proxies
+// round trip for every CSS tweak. This serves `main/web/dist`, the built UI, and proxies
 // everything else - the REST endpoints and the WebSocket - to a running device,
 // so the page still looks same-origin to the browser: no CORS, no token
 // changes, no mixed-origin localStorage.
@@ -20,7 +20,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.resolve(HERE, '..', 'main', 'web');
+// The built output, so what is reviewed is exactly what the device would ship.
+// Run `pnpm build` (or `pnpm watch`) first.
+const ROOT = path.resolve(HERE, '..', 'main', 'web', 'dist');
 
 function arg(name, fallback) {
   const i = process.argv.indexOf(`--${name}`);
@@ -65,7 +67,7 @@ function deviceHeaders(req, extra = {}) {
   return out;
 }
 
-// Serve a file from main/web if it exists, otherwise let the device answer.
+// Serve a file from main/web/dist if it exists, otherwise let the device answer.
 function localFile(pathname) {
   const rel = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
   const file = path.join(ROOT, rel);
@@ -82,7 +84,7 @@ const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
   // The device serves uploaded UI files from its filesystem; those are not on
   // disk here, so they have to come from the device. Everything else in
-  // main/web wins.
+  // the built UI wins.
   const file = req.method === 'GET' ? localFile(url.pathname) : null;
   if (file) {
     res.writeHead(200, {
