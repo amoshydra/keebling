@@ -1499,6 +1499,22 @@ function init() {
       if (btn) openPage(btn.dataset.page);
     });
     kbPagesEl.addEventListener('scroll', refreshStripEdges, { passive: true });
+    // A wheel has only one axis on a mouse, and it is the wrong one. Redirect
+    // it sideways, but only while the strip can still move that way: at an end
+    // the page keeps the scroll, which is what a reader expects.
+    kbPagesEl.addEventListener('wheel', (e) => {
+      const el = e.currentTarget;
+      if (el.scrollWidth <= el.clientWidth) return;
+
+      // A trackpad already reports the axis it means; a mouse wheel does not.
+      const raw = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+      if (!raw) return;
+      const delta = e.deltaMode === 1 ? raw * 16 : e.deltaMode === 2 ? raw * el.clientWidth : raw;
+
+      const before = el.scrollLeft;
+      el.scrollLeft = before + delta;
+      if (el.scrollLeft !== before) e.preventDefault();
+    }, { passive: false });
     // A rotation or a resize changes how much of the row fits.
     window.addEventListener('resize', refreshStripEdges);
   }

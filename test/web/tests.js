@@ -3069,6 +3069,56 @@ __webTests.push({
 
 __webTests.push({
   page: 'control',
+  name: 'the strip scrolls with a wheel, and only while it can',
+  fn: async () => {
+    // A hidden slot has no width, so the strip has to be open for this.
+    const slot = document.getElementById('kbd');
+    const wasOpen = slot.classList.contains('show');
+    slot.classList.add('show');
+
+    const el = document.getElementById('kbPages');
+    const made = [];
+    // Six more labels is more than the row can hold at phone width, which is
+    // the only way to exercise overflow before profiles can add pages.
+    for (let i = 0; i < 6; i++) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'kbpage';
+      b.dataset.page = 'zz' + i;
+      b.textContent = 'Extra';
+      el.appendChild(b);
+      made.push(b);
+    }
+    try {
+      __assert(getComputedStyle(el).overflowX === 'auto',
+        `overflow-x is ${getComputedStyle(el).overflowX}`);
+      __assert(el.scrollWidth > el.clientWidth,
+        `the strip did not overflow: ${el.scrollWidth} <= ${el.clientWidth} ` +
+        `(viewport ${innerWidth}, strip ${document.getElementById('kbStrip').clientWidth})`);
+
+      const ev = new WheelEvent('wheel', { deltaY: 120, bubbles: true, cancelable: true });
+      el.dispatchEvent(ev);
+      await __sleep(40);
+      __assert(el.scrollLeft > 0, 'a wheel event did not scroll the strip sideways');
+      __assert(ev.defaultPrevented, 'the wheel was not taken, so the page scrolled instead');
+
+      // At the far end the strip stops taking the wheel, so the page keeps it.
+      el.scrollLeft = el.scrollWidth;
+      await __sleep(40);
+      const end = new WheelEvent('wheel', { deltaY: 120, bubbles: true, cancelable: true });
+      el.dispatchEvent(end);
+      __assert(!end.defaultPrevented, 'the wheel is still swallowed at the end of the strip');
+    } finally {
+      for (const b of made) b.remove();
+      el.scrollLeft = 0;
+      el.dispatchEvent(new Event('scroll'));
+      if (!wasOpen) slot.classList.remove('show');
+    }
+  },
+});
+
+__webTests.push({
+  page: 'control',
   name: 'slash types slash, and Shift makes it a question mark',
   fn: async () => {
     const slot = document.getElementById('kbd');

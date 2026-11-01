@@ -582,9 +582,26 @@ textarea { font-family: ui-monospace, SFMono-Regular, monospace; resize: vertica
   align-items: center;
   gap: 2px;
   overflow-x: auto;
-  scrollbar-width: none;
+  overflow-y: hidden;
+  /* A swipe that reaches the end of the strip must not turn into a back
+     navigation, which is what a horizontal overscroll does on Android. */
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+  /* A mouse cannot swipe, so the bar is the affordance it gets; pad.js also
+     sends the wheel sideways so a plain wheel scrolls the pages. */
+  scrollbar-width: thin;
+  scrollbar-color: #3a3a3a transparent;
 }
-#kbPages::-webkit-scrollbar { display: none; }
+#kbPages::-webkit-scrollbar { height: 6px; }
+#kbPages::-webkit-scrollbar-track { background: transparent; }
+#kbPages::-webkit-scrollbar-thumb { background: #3a3a3a; border-radius: 3px; }
+
+/* A finger swipes, and a bar under a thumb is only noise: on a touch screen
+   the fade is the affordance and the bar goes away. */
+@media (pointer: coarse) {
+  #kbPages { scrollbar-width: none; }
+  #kbPages::-webkit-scrollbar { display: none; }
+}
 
 /* A fade at an end only while there is something past it. The mask dissolves
    the words into the panel; nothing is covered, so no page looks disabled. */
