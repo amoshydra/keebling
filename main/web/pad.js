@@ -49,7 +49,6 @@ let escHintEl = null;
 let pulseEl = null;
 let lostSubEl = null;
 let kbd = null;
-let kbSourceEl = null;
 let kbBuiltEl = null;
 let kbCaptureEl = null;
 let captureField = null;
@@ -688,7 +687,10 @@ const PHONE_QUERY = '(max-width: 620px)';
 // reached from a row of buttons; the strip inside the slot replaces that.
 const PANES = ['built', 'media', 'text'];
 let kbPane = 'built';
-let kbModesEl = null;
+let kbPagesEl = null;
+let kbToolSourceEl = null;
+let kbToolTextEl = null;
+let litPage = null;          // what the strip marked last, so it only scrolls on change
 
 function setPane(name) {
   kbPane = PANES.includes(name) ? name : 'built';
@@ -697,14 +699,69 @@ function setPane(name) {
   const built = kbPane === 'built';
   if (kbBuiltEl) kbBuiltEl.hidden = !built || kbSource === 'system';
   if (kbCaptureEl) kbCaptureEl.hidden = !built || kbSource !== 'system';
-  if (kbSourceEl) kbSourceEl.hidden = !built;
-  if (kbModesEl) {
-    for (const btn of kbModesEl.querySelectorAll('button')) {
-      const on = btn.dataset.pane === kbPane;
-      btn.classList.toggle('on', on);
-      btn.setAttribute('aria-selected', on ? 'true' : 'false');
-    }
+  refreshStrip();
+}
+
+// Which page the slot is showing, as the strip names it. Anything that is not
+// a keyboard page or the media keys is null: the text box and the phone's
+// keyboard replace the slot, so no page is current while they are up.
+function currentPage() {
+  if (kbPane === 'media') return 'media';
+  if (kbPane !== 'built' || kbSource !== 'built') return null;
+  return keyPage;
+}
+
+function refreshStrip() {
+  if (kbToolSourceEl) {
+    const on = kbSource === 'system';
+    kbToolSourceEl.classList.toggle('on', on);
+    kbToolSourceEl.setAttribute('aria-pressed', on ? 'true' : 'false');
   }
+  if (kbToolTextEl) {
+    const on = kbPane === 'text';
+    kbToolTextEl.classList.toggle('on', on);
+    kbToolTextEl.setAttribute('aria-pressed', on ? 'true' : 'false');
+  }
+  if (!kbPagesEl) return;
+
+  const now = currentPage();
+  for (const btn of kbPagesEl.querySelectorAll('button[data-page]')) {
+    const on = btn.dataset.page === now;
+    btn.classList.toggle('on', on);
+    btn.setAttribute('aria-selected', on ? 'true' : 'false');
+  }
+
+  // Bring the live page back into view when it changed from somewhere else -
+  // a profile, the Deck, or a page key on a future page - not on every repaint,
+  // which would fight a finger that is scrolling the strip.
+  if (now && now !== litPage) {
+    const btn = kbPagesEl.querySelector(`button[data-page="${now}"]`);
+    if (btn && btn.scrollIntoView) btn.scrollIntoView({ inline: 'nearest', block: 'nearest' });
+  }
+  litPage = now;
+  refreshStripEdges();
+}
+
+// A fade belongs only at an end that has something past it.
+function refreshStripEdges() {
+  if (!kbPagesEl) return;
+  const el = kbPagesEl;
+  const right = el.scrollWidth - el.clientWidth - el.scrollLeft;
+  el.classList.toggle('more-left', el.scrollLeft > 1);
+  el.classList.toggle('more-right', right > 1);
+}
+
+// A page is a place you type: picking one always lands on the built-in
+// keyboard, because the phone's keyboard has no pages to show.
+function openPage(page) {
+  if (page === 'media') {
+    setPane('media');
+    return;
+  }
+  if (kbSource !== 'built') setKeyboardSource('built');
+  keyPage = page;
+  buildKeyboard();
+  setPane('built');
 }
 
 function togglePanel(el) {
@@ -843,15 +900,11 @@ function setKeyboardSource(src) {
   if (next !== kbSource) releaseAll();      // a switch must not strand a held key
   kbSource = next;
   try { localStorage.setItem(KB_SOURCE_KEY, next); } catch (_) {}
-  if (kbSourceEl) {
-    for (const btn of kbSourceEl.querySelectorAll('button')) {
-      const on = btn.dataset.src === next;
-      btn.classList.toggle('on', on);
-      btn.setAttribute('aria-selected', on ? 'true' : 'false');
-    }
-  }
   if (next !== 'system' && captureField) captureField.blur();
   setPane(kbPane);
+  // Arriving at the phone's keyboard is a tap, so the IME may be raised here;
+  // the field has to be focused inside the gesture.
+  if (next === 'system' && kbPane === 'built') focusCapture();
 }
 
 function captureMods(e) {
@@ -977,12 +1030,6 @@ function onAnyPointerDown() {
   lastPointerDownAt = performance.now();
 }
 
-function onSourceClick(e) {
-  const btn = e.target.closest ? e.target.closest('button[data-src]') : null;
-  if (!btn) return;
-  setKeyboardSource(btn.dataset.src);
-}
-
 // ---------------------------------------------------------------- physical keyboard
 // The help sheet is modal: nothing typed while it is open should reach the
 // host, and Escape dismisses it rather than going to the device.
@@ -1018,7 +1065,6 @@ function onKeyUp(e) {
 //
 //   ['KeyQ', 'q', 'Q']                     label, and its shifted twin
 //   ['ShiftLeft', '⇧', null, 'wide']       a named key, wider than the rest
-//   ['p:sym', '123', 'wide']               switch page, never reaches the host
 //   ['Slash', '?', null, 'wide', true]     always sent with Shift
 //
 // Ten keys a row on the letter page: at 390px that is a 36px key, which is the
@@ -1028,10 +1074,8 @@ function onKeyUp(e) {
 const FN_PAGE = [
   [['F1'],['F2'],['F3'],['F4'],['F5'],['F6']],
   [['F7'],['F8'],['F9'],['F10'],['F11'],['F12']],
-  [['Escape','Esc'],['Tab','Tab'],['Home','Home'],['End','End'],
-   ['PageUp','PgUp'],['PageDown','PgDn']],
-  [['p:abc','ABC',null,'wide'],['p:kp','Num',null,'wide'],['Home','Home'],
-   ['End','End'],['PageUp','PgUp'],['PageDown','PgDn']],
+  [['Home','Home'],['End','End'],['PageUp','PgUp'],['PageDown','PgDn'],
+   ['Insert','Ins'],['Delete','Del']],
 ];
 
 // A real keypad, with Keypad usages rather than the number row. The host reads
@@ -1043,7 +1087,7 @@ const KP_PAGE = [
   [['Numpad7','7'],['Numpad8','8'],['Numpad9','9'],['NumpadAdd','+']],
   [['Numpad4','4'],['Numpad5','5'],['Numpad6','6'],['NumpadEnter','⏎']],
   [['Numpad1','1'],['Numpad2','2'],['Numpad3','3'],['Backspace','DEL']],
-  [['Numpad0','0'],['NumpadDecimal','.'],['p:abc','ABC'],['p:fn','Fn']],
+  [['Numpad0','0'],['NumpadDecimal','.'],['Tab','Tab'],['Enter','⏎']],
 ];
 
 function keyPages() {
@@ -1105,18 +1149,6 @@ function addKeyboardRow(kbd, row) {
     const k = document.createElement('div');
     k.className = 'k ' + (extra || '');
     k.dataset.code = code;
-
-    if (code.startsWith('p:')) {
-      k.classList.add('pagekey');
-      k.textContent = label;
-      k.addEventListener('pointerdown', (e) => {
-        e.preventDefault();
-        keyPage = code.slice(2);
-        buildKeyboard();
-      });
-      rowEl.appendChild(k);
-      continue;
-    }
 
     if (alt) {
       k.dataset.label = label;
@@ -1408,9 +1440,12 @@ function init() {
   refreshCaptureUi();
 
   keyPage = 'abc';
+  litPage = null;
   applyHostLayout();
   buildMedia();
-  kbModesEl = document.getElementById('kbModes');
+  kbPagesEl = document.getElementById('kbPages');
+  kbToolSourceEl = document.getElementById('kbToolSource');
+  kbToolTextEl = document.getElementById('kbToolText');
   ledsEl = document.getElementById('kbLeds');
   if (ledsEl) { ledsEl.hidden = true; ledsEl.textContent = ''; }
   clearInterval(ledTimer);
@@ -1427,17 +1462,45 @@ function init() {
   }
   kbd.addEventListener('contextmenu', preventContextMenu);
 
-  kbSourceEl = document.getElementById('kbSource');
   kbBuiltEl = document.getElementById('kbBuilt');
   kbCaptureEl = document.getElementById('kbCapture');
   captureField = document.getElementById('kbCaptureField');
   captureComposing = false;
   setKeyboardSource(storedKeyboardSource());
-  if (kbSourceEl) {
-    // pointerdown fires before the keyboard dismissal can reshape the page
-    // under the finger, which is what swallowed the first tap.
-    kbSourceEl.addEventListener('pointerdown', onSourceClick);
-    kbSourceEl.addEventListener('click', onSourceClick);
+  // Android can swallow the click when the keyboard dismisses and the layout
+  // moves under the finger, and this tool is exactly the one that raises the
+  // IME - so it acts on pointerdown. The click that follows would toggle it
+  // straight back, hence the guard; a keyboard activation has no pointerdown
+  // and still gets through.
+  const bindTool = (btn, action) => {
+    if (!btn) return;
+    let fromPointer = false;
+    btn.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      fromPointer = true;
+      action();
+      setTimeout(() => { fromPointer = false; }, 500);
+    });
+    btn.addEventListener('click', () => {
+      if (fromPointer) return;
+      action();
+    });
+  };
+
+  bindTool(kbToolSourceEl, () => {
+    setKeyboardSource(kbSource === 'system' ? 'built' : 'system');
+  });
+  bindTool(kbToolTextEl, () => {
+    setPane(kbPane === 'text' ? 'built' : 'text');
+  });
+  if (kbPagesEl) {
+    kbPagesEl.addEventListener('click', (e) => {
+      const btn = e.target.closest ? e.target.closest('button[data-page]') : null;
+      if (btn) openPage(btn.dataset.page);
+    });
+    kbPagesEl.addEventListener('scroll', refreshStripEdges, { passive: true });
+    // A rotation or a resize changes how much of the row fits.
+    window.addEventListener('resize', refreshStripEdges);
   }
   const captureOpen = document.getElementById('kbCaptureOpen');
   if (captureOpen) {
@@ -1481,12 +1544,6 @@ function init() {
   // assigned rather than added: a listener per mount would stack up.
   const releaseBtn = document.getElementById('bRelease');
   if (releaseBtn) releaseBtn.onclick = releaseAll;
-  if (kbModesEl) {
-    kbModesEl.addEventListener('click', (e) => {
-      const btn = e.target.closest ? e.target.closest('button[data-pane]') : null;
-      if (btn) setPane(btn.dataset.pane);
-    });
-  }
   document.getElementById('typeClear').addEventListener('click', onTypeClear);
   document.getElementById('typeStop').addEventListener('click', onTypeStop);
   document.getElementById('typeGo').addEventListener('click', onTypeGo);
@@ -1630,7 +1687,10 @@ function destroy() {
   helpCloseBtn = null;
   helpOpenBtn = null;
   kbd = null;
-  kbSourceEl = null;
+  kbPagesEl = null;
+  kbToolSourceEl = null;
+  kbToolTextEl = null;
+  litPage = null;
   kbBuiltEl = null;
   kbCaptureEl = null;
   captureField = null;

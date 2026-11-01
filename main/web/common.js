@@ -225,8 +225,8 @@ export const LAYOUT_ROWS = {
       [['Minus','-','_'],['Equal','=','+'],['BracketLeft','[','{'],
        ['BracketRight',']','}'],['Backslash','\\','|'],['Semicolon',';',':'],
        ['Quote',"'",'"'],['Backquote','`','~'],['Slash','/','?']],
-      [['p:abc','ABC',null,'wide'],['Comma',',','<'],['Period','.','>'],
-       ['Space','space',null,'space'],['p:fn','Fn',null,'wide'],['Enter','⏎',null,'wide']],
+      [['Comma',',','<'],['Period','.','>'],
+       ['Space','space',null,'space'],['Enter','⏎',null,'wide']],
     ],
   },
   uk: {
@@ -240,25 +240,22 @@ export const LAYOUT_ROWS = {
       [['Minus','-','_'],['Equal','=','+'],['BracketLeft','[','{'],
        ['BracketRight',']','}'],['Semicolon',';',':'],['Quote',"'",'@'],
        ['Backquote','`','¬'],['NonUSHash','#','~'],['Slash','/','?']],
-      [['p:abc','ABC',null,'wide'],['Comma',',','<'],['Period','.','>'],
-       ['Space','space',null,'space'],['p:fn','Fn',null,'wide'],['Enter','⏎',null,'wide']],
+      [['Comma',',','<'],['Period','.','>'],
+       ['Space','space',null,'space'],['Enter','⏎',null,'wide']],
     ],
   },
 };
 
 // The letter page is the same physical board for both: a UK keyboard is a US
 // keyboard with different punctuation, so only the symbol page differs.
-// A remote is used for short interactions while looking at the host: a URL, a
-// path, a port number, a chord, an arrow key. So the two rows a phone keyboard
-// hides - digits and arrows - are on the letter page, because a page switch is
-// the most expensive thing this keyboard can ask for.
+//
+// Five rows, like the board in front of you. Digits and arrows used to sit on
+// this page because a page switch meant hunting for a key that only existed on
+// the page you were leaving; the strip under the pad made switching free, so
+// the typing surface is a keyboard again rather than everything at once.
 LAYOUT_ROWS.us.abc = [
   [['Escape','Esc'],['Tab','Tab'],['ControlLeft','Ctrl',null,'mod'],
-   ['AltLeft','Alt',null,'mod'],['MetaLeft','Cmd',null,'mod'],
-   ['p:fn','Fn',null,'mod']],
-  [['Digit1','1','!'],['Digit2','2','@'],['Digit3','3','#'],['Digit4','4','$'],
-   ['Digit5','5','%'],['Digit6','6','^'],['Digit7','7','&'],['Digit8','8','*'],
-   ['Digit9','9','('],['Digit0','0',')']],
+   ['AltLeft','Alt',null,'mod'],['MetaLeft','Cmd',null,'mod']],
   [['KeyQ','q','Q'],['KeyW','w','W'],['KeyE','e','E'],['KeyR','r','R'],['KeyT','t','T'],
    ['KeyY','y','Y'],['KeyU','u','U'],['KeyI','i','I'],['KeyO','o','O'],['KeyP','p','P']],
   [['KeyA','a','A'],['KeyS','s','S'],['KeyD','d','D'],['KeyF','f','F'],['KeyG','g','G'],
@@ -269,9 +266,8 @@ LAYOUT_ROWS.us.abc = [
   // One key, like the real board: slash, with the question mark as its shifted
   // legend. A dedicated "?" key here read as a slash key and could only ever
   // produce a question mark.
-  [['p:sym','?123',null,'wide'],['Comma',','],['Space','space',null,'space'],
+  [['Comma',','],['Space','space',null,'space'],
    ['Period','.'],['Slash','/','?'],['Enter','⏎',null,'wide']],
-  [['ArrowLeft','←'],['ArrowUp','↑'],['ArrowDown','↓'],['ArrowRight','→']],
 ];
 LAYOUT_ROWS.uk.abc = LAYOUT_ROWS.us.abc;
 
@@ -305,7 +301,6 @@ export function layoutTextMap() {
   for (const page of [layout.abc, layout.sym]) {
     for (const row of page) {
       for (const [code, label, alt] of row) {
-        if (String(code).startsWith('p:')) continue;
         if (label) add(label, code, false);
         if (alt) add(alt, code, true);
       }

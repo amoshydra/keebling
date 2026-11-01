@@ -2760,19 +2760,20 @@ __webTests.push({
     slot.classList.add('show');
     const type = document.getElementById('type');
     const media = document.getElementById('mediaPanel');
-    const pick = (pane) => document.querySelector(`#kbModes [data-pane="${pane}"]`).click();
+    const page = (name) => document.querySelector(`#kbPages [data-page="${name}"]`).click();
+    const tool = (id) => document.getElementById(id).click();
 
-    pick('media');
-    __assert(media.classList.contains('show'), 'the media pane did not open');
+    page('media');
+    __assert(media.classList.contains('show'), 'the media page did not open');
     __assert(!type.classList.contains('show'), 'the text pane stayed open');
 
-    pick('text');
-    __assert(type.classList.contains('show'), 'the text pane did not open');
-    __assert(!media.classList.contains('show'), 'the media pane stayed open');
+    tool('kbToolText');
+    __assert(type.classList.contains('show'), 'the text tool did not open the paste box');
+    __assert(!media.classList.contains('show'), 'the media page stayed open');
 
-    pick('built');
+    page('abc');
     __assert(!type.classList.contains('show') && !media.classList.contains('show'),
-      'the keyboard pane did not come back');
+      'the keyboard page did not come back');
     slot.classList.remove('show');
   },
 });
@@ -2953,8 +2954,7 @@ __webTests.push({
     // The picture follows the map: the key labelled # sends NonUSHash.
     const slot = document.getElementById('kbd');
     slot.classList.add('show');
-    document.querySelector('#kbBuilt .k[data-code="p:sym"]')
-      .dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    document.querySelector('#kbPages [data-page="sym"]').click();
     const hashKey = [...document.querySelectorAll('#kbBuilt .k')]
       .find((k) => k.dataset.code === 'NonUSHash');
     __assert(hashKey && hashKey.querySelector('.p').textContent === '#',
@@ -3024,11 +3024,7 @@ __webTests.push({
     // is Home. A numpad built from the number row would be a lie.
     const slot = document.getElementById('kbd');
     slot.classList.add('show');
-    document.querySelector('#kbBuilt .k[data-code="p:fn"]')
-      .dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
-    const num = document.querySelector('#kbBuilt .k[data-code="p:kp"]');
-    __assert(num, 'the Fn page does not lead to the keypad');
-    num.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    document.querySelector('#kbPages [data-page="kp"]').click();
 
     const cap = __capture();
     const seven = document.querySelector('#kbBuilt .k[data-code="Numpad7"]');
@@ -3039,23 +3035,33 @@ __webTests.push({
     __assert(press && press[2] === 0x5F,
       `keypad 7 sent 0x${press && press[2].toString(16)}, expected 0x5f (KP7)`);
 
-    document.querySelector('#kbBuilt .k[data-code="p:abc"]')
-      .dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    document.querySelector('#kbPages [data-page="abc"]').click();
     slot.classList.remove('show');
   },
 });
 
 __webTests.push({
   page: 'control',
-  name: 'digits and arrows are on the letter page',
+  name: 'the letter page is five rows, and the rest are pages',
   fn: async () => {
-    // The two rows a phone keyboard hides are the two a remote reaches for
-    // most; a page switch is the most expensive thing this keyboard can ask.
+    // A phone keyboard is four rows because that is what a thumb can read.
+    // Digits and arrows used to sit here; the strip made switching free, so
+    // the typing surface is a keyboard again.
     const slot = document.getElementById('kbd');
     slot.classList.add('show');
-    for (const code of ['Digit1', 'Digit0', 'ArrowLeft', 'ArrowRight']) {
+    document.querySelector('#kbPages [data-page="abc"]').click();
+
+    const rows = document.querySelectorAll('#kbBuilt .krow');
+    __assert(rows.length === 5, `the letter page has ${rows.length} rows`);
+    for (const code of ['Digit1', 'ArrowLeft']) {
+      __assert(!document.querySelector(`#kbBuilt .k[data-code="${code}"]`),
+        `${code} is still crammed onto the letter page`);
+    }
+
+    document.querySelector('#kbPages [data-page="sym"]').click();
+    for (const code of ['Digit1', 'Digit0']) {
       __assert(document.querySelector(`#kbBuilt .k[data-code="${code}"]`),
-        `${code} is not on the letter page`);
+        `${code} is not on the ?123 page`);
     }
     slot.classList.remove('show');
   },
@@ -3067,6 +3073,7 @@ __webTests.push({
   fn: async () => {
     const slot = document.getElementById('kbd');
     slot.classList.add('show');
+    document.querySelector('#kbPages [data-page="abc"]').click();
     const slash = () => document.querySelector('#kbBuilt .k[data-code="Slash"]');
     const shift = () => document.querySelector('#kbBuilt .k[data-code="ShiftLeft"]');
 
@@ -3106,15 +3113,14 @@ __webTests.push({
       .filter((k) => !k.textContent.trim())
       .map((k) => k.dataset.code);
 
+    document.querySelector('#kbPages [data-page="abc"]').click();
     __assert(document.querySelectorAll('#kbBuilt .k').length >= 30,
       'the letter page is missing most of its keys');
     __assert(!blank().length, `unlabelled on the letter page: ${blank().join(', ')}`);
 
-    for (const page of ['p:sym', 'p:fn', 'p:abc']) {
-      const sw = document.querySelector(`#kbBuilt .k[data-code="${page}"]`);
-      __assert(sw, `no ${page} key on this page`);
-      sw.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
-      __assert(!blank().length, `unlabelled after ${page}: ${blank().join(', ')}`);
+    for (const page of ['sym', 'fn', 'kp', 'abc']) {
+      document.querySelector(`#kbPages [data-page="${page}"]`).click();
+      __assert(!blank().length, `unlabelled on ${page}: ${blank().join(', ')}`);
     }
   },
 });
@@ -3129,17 +3135,23 @@ __webTests.push({
     __assert(built && capture, 'the keyboard slot has no two halves');
 
     // Normalise: a previous run of this test leaves the choice persisted.
-    document.querySelector('#kbSource button[data-src="built"]').click();
+    const tool = document.getElementById('kbToolSource');
+    PadView.setKeyboardSource('built');
     __assert(!built.hidden && capture.hidden, 'the slot did not start on the built-in keyboard');
 
-    const system = document.querySelector('#kbSource button[data-src="system"]');
-    system.click();
-    __assert(built.hidden && !capture.hidden, 'the switch did not swap the slot');
-    __assert(system.classList.contains('on'), 'the switch does not mark the chosen source');
+    tool.click();
+    __assert(built.hidden && !capture.hidden, 'the tool did not swap the slot');
+    __assert(tool.classList.contains('on'), 'the tool does not mark the phone keyboard as live');
+    __assert(tool.getAttribute('aria-pressed') === 'true', 'the tool does not report its state');
     __assert(localStorage.getItem('esp32remote.keyboardSource') === 'system',
       'the choice was not remembered for next time');
 
-    document.querySelector('#kbSource button[data-src="built"]').click();
+    // While the phone's keyboard is up, no page is current: the slot is not
+    // showing one.
+    __assert(!document.querySelector('#kbPages .kbpage.on'),
+      'a page is still marked while the phone keyboard is live');
+
+    tool.click();
     __assert(!built.hidden && capture.hidden, 'switching back did not restore the built-in keys');
   },
 });
@@ -3218,7 +3230,7 @@ __webTests.push({
     // An IME can move focus itself for its own Tab key even though the keydown
     // was cancelled. The caret has to come back, or the next key goes to a
     // button instead of the host.
-    document.querySelector('#kbModes [data-pane="media"]').focus();
+    document.getElementById('kbToolText').focus();
     __assert(document.activeElement !== field, 'the field kept focus, so this proves nothing');
     await __sleep(30);
     __assert(document.activeElement === field,
@@ -3289,13 +3301,12 @@ __webTests.push({
   name: 'the switch acts on a tap, not only on a click',
   fn: async () => {
     // Android can swallow the click when the keyboard dismisses and the layout
-    // moves under the finger, so the switch has to act on pointerdown.
-    const system = document.querySelector('#kbSource button[data-src="system"]');
-    const built = document.querySelector('#kbSource button[data-src="built"]');
-    built.click();
-    system.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    // moves under the finger, so the tool has to act on pointerdown.
+    const tool = document.getElementById('kbToolSource');
+    PadView.setKeyboardSource('built');
+    tool.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
     __assert(PadView.keyboardSource === 'system', 'a tap did not switch the source');
-    built.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    tool.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
     __assert(PadView.keyboardSource === 'built', 'a tap did not switch back');
   },
 });

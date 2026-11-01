@@ -115,10 +115,24 @@
        keyboard, the phone's own keyboard, media keys and typed text. The strip
        picks which, so they stop being sibling pages you navigate between. -->
   <div id="kbd">
-    <div id="kbModes" role="tablist" aria-label="Key input">
-      <button type="button" role="tab" data-pane="built"><svg data-icon="keyboard" class="ico"></svg>Keyboard</button>
-      <button type="button" role="tab" data-pane="media"><svg data-icon="music" class="ico"></svg>Media</button>
-      <button type="button" role="tab" data-pane="text"><svg data-icon="clipboard" class="ico"></svg>Text</button>
+    <!-- One strip: two pinned tools, then the pages. The tools are not places
+         you type - picking one replaces the whole slot - so they are drawn as
+         square icon buttons and the pages are drawn as words. That keeps
+         navigation from looking like another row of keys, and lets the page
+         row scroll under a fade when there are more pages than fit. -->
+    <div id="kbStrip">
+      <div class="kbtool">
+        <button type="button" id="kbToolSource" aria-label="Your keyboard" aria-pressed="false"><svg data-icon="keyboard" class="ico"></svg></button>
+        <button type="button" id="kbToolText" aria-label="Paste text" aria-pressed="false"><svg data-icon="clipboard" class="ico"></svg></button>
+      </div>
+      <div class="kbsep" aria-hidden="true"></div>
+      <div id="kbPages" role="tablist" aria-label="Key pages">
+        <button type="button" role="tab" class="kbpage" data-page="abc">ABC</button>
+        <button type="button" role="tab" class="kbpage" data-page="sym">?123</button>
+        <button type="button" role="tab" class="kbpage" data-page="fn">Fn</button>
+        <button type="button" role="tab" class="kbpage" data-page="kp">Num</button>
+        <button type="button" role="tab" class="kbpage" data-page="media">Media</button>
+      </div>
     </div>
 
   <div class="panel" id="type">
@@ -134,14 +148,10 @@
       the foreground while typing &mdash; browsers throttle timers in background tabs.</p>
   </div>
 
-  <!-- The keyboard slot. Two keyboards can fill it and only one can be showing,
-       so the switch is the first thing in it rather than a setting buried in
-       Setup: it describes the phone you are holding, not the device. The choice
+  <!-- The keyboard slot. Picking the phone's own keyboard replaces everything
+       the built-in one draws, so it is a tool in the strip rather than a second
+       row: it describes the phone you are holding, not the device. The choice
        is remembered per browser. -->
-    <div id="kbSource" role="tablist" aria-label="Keyboard source">
-      <button type="button" role="tab" data-src="built"><svg data-icon="keyboard" class="ico"></svg>Built-in</button>
-      <button type="button" role="tab" data-src="system"><svg data-icon="smartphone" class="ico"></svg>Your keyboard</button>
-    </div>
     <div id="kbBuilt"></div>
     <!-- What the host says its lock keys are doing. Empty and hidden when they
          are all off, so it costs nothing in the normal case. -->
