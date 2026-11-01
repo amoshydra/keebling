@@ -92,8 +92,9 @@ the network can't be reached, it runs its own access point instead.
      password, and save. The device restarts and joins it; the LCD then shows
      `STA: <ssid>` and its address.
 4. Open the device's address and paste the code when prompted.
-5. Tap the pad to capture the pointer. Your mouse now drives the host.
-   **Esc** releases.
+5. Tap the pad to capture the pointer. Your mouse and keyboard now drive the
+   host — physical keys are forwarded only while the pad is captured.
+   **Esc** releases both.
 
 The code is remembered in `localStorage`, so step 4 is a one-time thing per
 browser. You can also skip it entirely with

@@ -124,7 +124,7 @@ function refreshCaptureUi() {
   pad.classList.toggle('link-down', captured && !wsReady);
   if (escHintEl) {
     escHintEl.textContent = wsReady
-      ? 'Mouse captured — Esc releases it'
+      ? 'Mouse and keyboard captured — Esc releases it'
       : 'Link lost — Esc releases the mouse';
   }
 }
@@ -1044,6 +1044,11 @@ function onKeyDown(e) {
   }
   if (e.key === 'Escape' && captured) return;    // let the browser exit capture
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  // A physical key goes to the host only while the pad has the pointer. Without
+  // capture the page is just a page: keystrokes belong to the browser, and
+  // sending them anyway means a stray key lands on the host with nothing on
+  // screen saying it would. The capture hint is what says the keyboard is held.
+  if (!captured) return;
   e.preventDefault();
   if (e.repeat || held.has(e.code)) return;      // HID reports are snapshots
   held.add(e.code);
@@ -1053,6 +1058,9 @@ function onKeyDown(e) {
 function onKeyUp(e) {
   if (helpVisible()) return;
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  // Losing capture runs releaseAll(), so a release that arrives afterwards has
+  // nothing to lift and must not be sent either.
+  if (!captured) return;
   e.preventDefault();
   held.delete(e.code);
   sendKeyboard();

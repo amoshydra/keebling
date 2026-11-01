@@ -552,6 +552,49 @@ __webTests.push({
 
 __webTests.push({
   page: 'control',
+  name: 'host keys are forwarded only while the pad is captured',
+  fn: async () => {
+    const help = document.getElementById('help');
+    if (help && !help.hidden) document.getElementById('helpClose').click();
+
+    __resetInput();
+    const cap = __capture();
+    PadView.captured = false;
+    try {
+      // Not captured: a key typed at the page must stay in the browser. The
+      // old handler sent it anyway, so a stray keystroke landed on the host
+      // with nothing on screen saying it would.
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', code: 'KeyA' }));
+      window.dispatchEvent(new KeyboardEvent('keyup', { key: 'a', code: 'KeyA' }));
+      await __sleep(10);
+      __assert(cap.length === 0,
+        `an uncaptured key sent ${cap.length} reports to the host`);
+      __assert(PadView.held.size === 0, 'an uncaptured key was left held');
+
+      // Captured: the same key goes out, and the capture hint says what is
+      // being captured - otherwise "captured" only ever meant the mouse.
+      PadView.captured = true;
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', code: 'KeyA' }));
+      await __sleep(10);
+      const presses = cap.filter((r) => r[0] === 2 && r[2] === 4);
+      __assert(presses.length === 1,
+        `a captured key sent ${presses.length} press reports, expected 1`);
+
+      const hint = document.getElementById('escHint');
+      __assert(getComputedStyle(hint).display !== 'none',
+        'the capture hint is not visible while captured');
+      __assert(/keyboard/i.test(hint.textContent),
+        `the capture hint does not mention the keyboard: "${hint.textContent}"`);
+    } finally {
+      window.dispatchEvent(new KeyboardEvent('keyup', { key: 'a', code: 'KeyA' }));
+      PadView.captured = false;
+      __resetInput();
+    }
+  },
+});
+
+__webTests.push({
+  page: 'control',
   name: 'a latched modifier looks different from a pressed key',
   fn: async () => {
     __resetInput();
@@ -3579,11 +3622,17 @@ __webTests.push({
     PadView.wsReady = false;
 
     // Back on the pad, the listener must be attached once: a duplicate would
-    // send both a press and two release reports.
+    // send both a press and two release reports. Physical keys only leave the
+    // page while captured, so take the pointer first.
     await __goView('control', '#/');
     const cap = __capture();
-    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', code: 'KeyA' }));
-    window.dispatchEvent(new KeyboardEvent('keyup', { key: 'a', code: 'KeyA' }));
+    PadView.captured = true;
+    try {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', code: 'KeyA' }));
+      window.dispatchEvent(new KeyboardEvent('keyup', { key: 'a', code: 'KeyA' }));
+    } finally {
+      PadView.captured = false;
+    }
     const presses = cap.filter((r) => r[0] === 2 && r[2] === 4).length;
     const releases = cap.filter((r) => r[0] === 2 && r[2] === 0).length;
     __assert(presses === 1, `${presses} key press reports after remounting, expected 1`);

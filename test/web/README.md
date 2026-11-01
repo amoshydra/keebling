@@ -47,7 +47,9 @@ the phone viewport.
 
 **Control page**
 - the saved code is restored on the bare URL, so no prompt appears
-- keyboard reports keep pre-existing held keys when typing over them
+- keyboard reports keep pre-existing held keys when typing over them, and
+  physical keys are forwarded only while the pad is captured (the capture hint
+  names the keyboard, and an uncaptured key sends nothing)
 - the US QWERTY character map, and that non-ASCII is refused
 - one-finger tap → left click; two-finger tap → right click
 - one-finger drag moves; three-finger drag presses, drags and releases

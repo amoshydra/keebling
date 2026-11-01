@@ -292,14 +292,23 @@ textarea { font-family: ui-monospace, SFMono-Regular, monospace; resize: vertica
 #escHint {
   display: none;
   position: absolute;
-  bottom: 10px;
-  left: 0; right: 0;
-  text-align: center;
-  color: var(--dim);
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, .09);
+  border: 1px solid rgba(255, 255, 255, .14);
+  color: var(--ink);
   font-size: 12px;
+  white-space: nowrap;
   pointer-events: none;
 }
 #pad.captured #escHint { display: block; }
+/* Pointer lock hides the cursor, so the floating L/M/R buttons cannot be
+   clicked while captured. They used to sit on top of the capture hint at the
+   bottom of the pad; with them gone the hint is the one thing down there. */
+#pad.captured #mouseButtons { display: none; }
 
 /* Pointer mode, top-left of the pad where the thumb is not working. */
 #padMode {
