@@ -1,0 +1,1158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Keebling — layout editor</title>
+<style>
+  /* ---------------------------------------------------------------- system
+     One accent, three text weights, an 8px rhythm. Panels are separated by a
+     hairline rather than a shadow; only floating things cast one. */
+  :root {
+    --bg: #0a0a0b;
+    --panel: #101012;
+    --panel-2: #16161a;
+    --raised: #1c1c21;
+    --line: rgba(255, 255, 255, .07);
+    --line-2: rgba(255, 255, 255, .12);
+    --ink: #ececf1;
+    --dim: #8d8d97;
+    --faint: #5c5c66;
+    --accent: #6ea8fe;
+    --accent-soft: rgba(110, 168, 254, .14);
+    --danger: #f0716a;
+    --r-sm: 8px;
+    --r-md: 10px;
+    --r-lg: 14px;
+    --r-xl: 22px;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 13px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    display: flex; flex-direction: column;
+  }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  button {
+    background: transparent; border: 1px solid var(--line); border-radius: var(--r-md);
+    padding: 7px 12px; color: var(--ink); cursor: pointer;
+    transition: background .12s, border-color .12s, color .12s;
+  }
+  button:hover { background: rgba(255,255,255,.04); border-color: var(--line-2); }
+  button:active { background: rgba(255,255,255,.07); }
+  button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 1px;
+  }
+  button.primary { background: var(--accent); border-color: transparent; color: #08131f; font-weight: 600; }
+  button.primary:hover { background: #7fb4ff; }
+  button.quiet { border-color: transparent; color: var(--dim); }
+  button.quiet:hover { color: var(--ink); background: rgba(255,255,255,.05); }
+  button.danger { color: var(--danger); border-color: transparent; }
+  button.danger:hover { background: rgba(240,113,106,.1); }
+  button[disabled] { opacity: .34; pointer-events: none; }
+  input[type=text], input[type=number], select, textarea {
+    background: var(--bg); border: 1px solid var(--line); border-radius: var(--r-sm);
+    padding: 8px 10px; width: 100%;
+  }
+  input[type=number] { -moz-appearance: textfield; }
+  textarea { resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
+
+  .eyebrow {
+    font-size: 10px; letter-spacing: .09em; text-transform: uppercase;
+    color: var(--faint); font-weight: 600;
+  }
+
+  /* ---------------------------------------------------------------- top bar */
+  .topbar {
+    flex: 0 0 auto; height: 54px; display: flex; align-items: center; gap: 10px;
+    padding: 0 14px; border-bottom: 1px solid var(--line); background: var(--panel);
+  }
+  .back { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 999px;
+          color: var(--dim); text-decoration: none; font-size: 15px; }
+  .back:hover { background: rgba(255,255,255,.06); color: var(--ink); }
+  .brand { font-weight: 650; letter-spacing: -.01em; }
+  .brand { padding-right: 12px; border-right: 1px solid var(--line); }
+  @media (max-width: 760px) { .brand { border: 0; padding: 0; } }
+  .brand .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+                background: var(--accent); margin-right: 8px; vertical-align: 1px; }
+  .spacer { flex: 1; }
+
+  .seg { display: flex; padding: 2px; gap: 2px; background: var(--bg);
+         border: 1px solid var(--line); border-radius: 10px; }
+  .seg button { border: 0; padding: 5px 12px; border-radius: 8px; color: var(--dim);
+                font-size: 12px; }
+  .seg button[aria-pressed="true"] { background: var(--raised); color: var(--ink); }
+
+  .group { display: flex; gap: 2px; }
+  .group button { border-color: transparent; color: var(--dim); width: 34px;
+                  padding: 5px 0; font-size: 16px; line-height: 1; }
+  .group button:hover { color: var(--ink); }
+
+  /* ---------------------------------------------------------------- layout */
+  .workspace { flex: 1; min-height: 0; display: grid; grid-template-columns: 208px minmax(0,1fr) 328px; }
+  
+  
+
+  /* left rail */
+  .rail { border-right: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+  .rail-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 14px 8px; }
+  .rail-list { flex: 1; overflow: auto; padding: 0 8px 8px; display: flex; flex-direction: column; gap: 2px; }
+  .pg { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: var(--r-md);
+        cursor: pointer; color: var(--dim); }
+  .pg:hover { background: rgba(255,255,255,.04); color: var(--ink); }
+  .pg[aria-current="true"] { background: var(--accent-soft); color: var(--ink); }
+  .pg .n { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pg .c { font-size: 11px; color: var(--faint); }
+  .rail-foot { padding: 10px 14px 14px; border-top: 1px solid var(--line); }
+
+  /* canvas */
+  .canvas { min-width: 0; display: flex; flex-direction: column; min-height: 0; background:
+            radial-gradient(120% 90% at 50% 0%, #121216 0%, var(--bg) 60%); }
+  .canvas-bar { display: flex; align-items: center; gap: 10px; padding: 12px 16px; }
+  .canvas-bar .title { font-weight: 600; }
+  .canvas-bar .meta { color: var(--faint); font-size: 11.5px; }
+  .stage { flex: 1; min-height: 0; overflow: auto; display: flex; justify-content: center;
+           align-items: flex-start; padding: 4px 16px 24px; }
+
+  /* the artboard: the device, and nothing else */
+  .artboard {
+    width: 390px; max-width: 100%; border-radius: var(--r-xl); overflow: hidden;
+    background: #111; border: 1px solid var(--line-2);
+    box-shadow: 0 30px 70px rgba(0,0,0,.55), 0 2px 0 rgba(255,255,255,.03) inset;
+    display: flex; flex-direction: column; height: 660px;
+  }
+  .status { height: 38px; flex: 0 0 auto; display: flex; align-items: center; gap: 8px;
+            padding: 0 14px; background: #151515; font-size: 12px; color: #c4c4c4; }
+  .status .led { width: 7px; height: 7px; border-radius: 50%; background: #4caf50; }
+  .status .rel { margin-left: auto; font-size: 10.5px; color: #ff9d94;
+                 background: rgba(179,38,30,.16); border: 1px solid rgba(179,38,30,.4);
+                 border-radius: 999px; padding: 4px 9px; }
+
+  .padarea { flex: 1; min-height: 0; display: grid; place-items: center;
+             color: #3a3a40; font-size: 11px; letter-spacing: .04em; }
+  .slot { flex: 0 0 auto; background: #151515; padding: 8px; display: flex;
+          flex-direction: column; gap: 6px; }
+  .strip { display: flex; align-items: center; gap: 8px; height: 38px; flex: 0 0 auto; }
+  .tools { display: flex; gap: 4px; }
+  .tool { width: 32px; height: 32px; border-radius: 9px; background: #191919;
+          border: 1px solid #272727; color: #8d8d8d; display: grid; place-items: center; font-size: 12px; }
+  .vline { width: 1px; height: 18px; background: #2b2b2b; }
+  .tabs-strip { display: flex; gap: 2px; overflow: hidden; }
+  .tchip { height: 28px; padding: 0 10px; border-radius: 8px; display: flex; align-items: center;
+           font-size: 11.5px; color: #8a8a8a; white-space: nowrap; }
+  .tchip[aria-current="true"] { background: #23364d; color: #dce9f7; font-weight: 600;
+                                box-shadow: inset 0 0 0 1px #365b83; }
+
+  .page { display: flex; flex-direction: column; }
+  .rowline { display: grid; grid-template-columns: repeat(var(--cols), minmax(0, 1fr)); position: relative; }
+  .keycap {
+    position: relative; border-radius: 8px; background: #232323; border: 1px solid #303030;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    min-width: 0; overflow: hidden; font-size: 12px; font-weight: 600; line-height: 1.1;
+    transition: filter .12s;
+  }
+  .keycap .alt { font-size: 8.5px; font-weight: 400; color: #9aa7b3; }
+  .keycap.spacer { background: transparent; border-color: transparent; }
+  .c-blue { background: #1b3350; border-color: #2d5075; }
+  .c-amber { background: #3a2a14; border-color: #5c431f; }
+  .c-red { background: #3a1614; border-color: #5c2320; }
+  .c-green { background: #1a3324; border-color: #2c5137; }
+
+  .tabs { height: 52px; flex: 0 0 auto; display: grid; grid-template-columns: repeat(4, 1fr);
+          align-items: center; border-top: 1px solid #222; background: #151515;
+          font-size: 10px; color: #7a7a7a; text-align: center; }
+  .tabs .on { color: #eee; }
+
+  /* editing chrome, outside the layout */
+  body[data-mode="edit"] .keycap { cursor: pointer; }
+  body[data-mode="edit"] .keycap:hover { filter: brightness(1.12); }
+  body[data-mode="edit"] .keycap[data-sel="1"] { outline: 2px solid var(--accent); outline-offset: -1px; }
+  body[data-mode="edit"] .keycap.spacer[data-sel="1"] { outline-color: #a0873f; }
+  body[data-mode="edit"] .keycap.spacer {
+    background: repeating-linear-gradient(45deg, #171717, #171717 5px, #141414 5px, #141414 10px);
+    border: 1px dashed #2e2e2e;
+  }
+  .grip {
+    position: absolute; left: -17px; top: 0; bottom: 0; width: 15px; display: none;
+    align-items: center; justify-content: center; color: #4a4a52; font-size: 13px;
+    cursor: pointer; border-radius: 6px;
+  }
+  body[data-mode="edit"] .grip { display: flex; }
+  .grip:hover { color: var(--ink); background: rgba(255,255,255,.05); }
+  body[data-mode="edit"] .rowline { margin-left: 17px; }
+
+  .handle {
+    position: absolute; right: 0; top: 50%; transform: translateY(-50%);
+    width: 10px; height: 34px; border-radius: 5px; background: var(--accent);
+    cursor: ew-resize; display: none; box-shadow: 0 0 0 2px var(--bg);
+  }
+  body[data-mode="edit"] .keycap[data-sel="1"] .handle { display: block; }
+
+  /* ---------------------------------------------------------------- inspector */
+  .inspector { border-left: 1px solid var(--line); background: var(--panel);
+               overflow: auto; display: flex; flex-direction: column; }
+  .inspector-head { padding: 14px 16px 14px; border-bottom: 1px solid var(--line); }
+  .inspector-head h2 { margin: 3px 0 0; font-size: 15px; font-weight: 650; line-height: 1.25; }
+  .inspector-body { padding: 14px 16px 24px; display: flex; flex-direction: column; gap: 16px; }
+  .formrow { display: flex; flex-direction: column; gap: 6px; }
+  .formrow > label { font-size: 11.5px; color: var(--dim); }
+  .inline { display: flex; align-items: center; gap: 6px; }
+  .inline .num { width: 52px; text-align: center; }
+  .stepper { display: flex; align-items: center; border: 1px solid var(--line);
+             border-radius: var(--r-md); overflow: hidden; }
+  .stepper button { border: 0; border-radius: 0; width: 30px; padding: 7px 0; color: var(--dim); }
+  .stepper button:hover { color: var(--ink); background: rgba(255,255,255,.05); }
+  .stepper .val { min-width: 34px; text-align: center; font-variant-numeric: tabular-nums; }
+  .swatches { display: flex; gap: 7px; }
+  .swatches button { width: 26px; height: 26px; padding: 0; border-radius: 8px; border: 1px solid rgba(0,0,0,.4); }
+  .swatches button[aria-pressed="true"] { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent); }
+  .sw-none { background: #2b2b2b; } .sw-blue { background: #1b3350; }
+  .sw-amber { background: #3a2a14; } .sw-red { background: #3a1614; }
+  .sw-green { background: #1a3324; }
+  .hint { font-size: 11.5px; color: var(--faint); line-height: 1.5; }
+  .divider { height: 1px; background: var(--line); }
+
+  /* ---------------------------------------------------------------- sheets */
+  .sheet {
+    position: fixed; z-index: 30; background: var(--panel); border-top: 1px solid var(--line-2);
+    box-shadow: 0 -24px 60px rgba(0,0,0,.6);
+    left: 50%; transform: translate(-50%, 110%); transition: transform .2s ease;
+    bottom: 0; width: min(560px, 100vw); border-radius: var(--r-lg) var(--r-lg) 0 0;
+    padding: 10px 16px 20px; max-height: 76vh; overflow: auto;
+  }
+  .sheet[data-open="1"] { transform: translate(-50%, 0); }
+  .sheet .handlebar { width: 36px; height: 4px; border-radius: 2px; background: var(--line-2);
+                      margin: 2px auto 12px; }
+  .sheet h3 { margin: 0 0 10px; font-size: 14px; }
+  .steps { display: flex; flex-direction: column; gap: 4px; margin-top: 12px; }
+  .step { display: flex; gap: 10px; align-items: baseline; font-size: 12px;
+          background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--r-md);
+          padding: 7px 10px; }
+  .step .n { flex: 0 0 16px; color: var(--faint); font-variant-numeric: tabular-nums; }
+  .step .k { flex: 0 0 58px; color: var(--accent); font-size: 9.5px; letter-spacing: .07em;
+             text-transform: uppercase; }
+  .step .v { flex: 1; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .step.bad { border-color: rgba(240,113,106,.5); background: rgba(240,113,106,.06); }
+  .step.bad .k { color: var(--danger); }
+  .step.bad .v { color: #ffb3ae; }
+  .tokens { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 10px; }
+  .tokens button { font-size: 11px; padding: 4px 8px; border-radius: 7px; color: var(--dim); }
+  pre.json { background: var(--bg); border: 1px solid var(--line); border-radius: var(--r-md);
+             padding: 12px; font-size: 11px; line-height: 1.55; overflow: auto; max-height: 60vh;
+             margin: 0; color: #cfe3f5; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+  /* menu */
+  .menu {
+    position: fixed; z-index: 40; top: 52px; right: 14px; min-width: 190px;
+    background: var(--raised); border: 1px solid var(--line-2); border-radius: var(--r-lg);
+    box-shadow: 0 20px 50px rgba(0,0,0,.6); padding: 6px; display: none;
+  }
+  .menu[data-open="1"] { display: block; }
+  .menu button { display: block; width: 100%; text-align: left; border: 0; border-radius: var(--r-sm);
+                 padding: 8px 10px; color: var(--ink); }
+  .menu button:hover { background: rgba(255,255,255,.06); }
+  .menu .sep { height: 1px; background: var(--line); margin: 5px 4px; }
+  .menu .label { padding: 8px 10px 4px; }
+
+  /* ---------------------------------------------------------------- mobile */
+
+  /* ---- responsive (last, so these win over the base rules) ---- */
+@media (max-width: 1080px) { .workspace { grid-template-columns: minmax(0,1fr) 300px; } .rail { display: none; } }
+@media (max-width: 760px) { .workspace { grid-template-columns: 1fr; } .inspector { display: none; } }
+@media (max-width: 760px) {
+    .topbar { height: 50px; padding: 0 10px; gap: 6px; }
+    .brand { display: none; }
+    .workspace { grid-template-columns: 1fr; }
+    .stage { padding: 0; align-items: stretch; }
+    .artboard { width: 100%; height: auto; flex: 1; border: 0; border-radius: 0;
+                box-shadow: none; }
+    .canvas-bar { display: none; }
+    .padarea { display: none; }
+    .canvas { background: var(--bg); }
+    /* the page chips move to the top of the canvas */
+    .mobile-pages { display: flex; gap: 6px; overflow: auto; padding: 8px 10px;
+                    border-bottom: 1px solid var(--line); }
+    .mobile-pages button { white-space: nowrap; font-size: 12px; padding: 5px 10px; }
+
+    /* the inspector becomes a sheet */
+    .inspector {
+      display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 25;
+      border-left: 0; border-top: 1px solid var(--line-2); border-radius: 16px 16px 0 0;
+      max-height: 62vh; transform: translateY(105%); transition: transform .2s ease;
+      box-shadow: 0 -20px 50px rgba(0,0,0,.6);
+    }
+    .inspector[data-open="1"] { transform: translateY(0); }
+    .inspector .grabber { width: 36px; height: 4px; border-radius: 2px; background: var(--line-2);
+                          margin: 8px auto 0; }
+  }
+@media (min-width: 761px) { .mobile-pages { display: none; } .inspector .grabber { display: none; } }
+</style>
+</head>
+<body data-mode="preview">
+
+<div class="topbar">
+  <a class="back" href="../" title="Back to keebling">←</a>
+  <div class="brand"><span class="dot"></span>Keebling</div>
+
+  <div class="seg" id="modeSeg" role="group" aria-label="Mode">
+    <button data-mode="preview" aria-pressed="true">Preview</button>
+    <button data-mode="edit" aria-pressed="false">Edit</button>
+  </div>
+
+  <div class="spacer"></div>
+
+  <div class="group" id="historyGroup">
+    <button id="undo" title="Undo (Ctrl+Z)" aria-label="Undo">↶</button>
+    <button id="redo" title="Redo (Ctrl+Shift+Z)" aria-label="Redo">↷</button>
+  </div>
+  <button class="primary" id="export">Export</button>
+  <button class="quiet" id="more" aria-label="More">⋯</button>
+</div>
+
+<div class="menu" id="menu">
+  <div class="label eyebrow">Start from</div>
+  <button data-template="tv">TV remote</button>
+  <button data-template="media">Media controls</button>
+  <button data-template="qwerty">QWERTY keyboard</button>
+  <div class="sep"></div>
+  <button id="showJson">View JSON</button>
+  <button id="copyJson">Copy JSON</button>
+</div>
+
+<div class="mobile-pages" id="mobilePages"></div>
+
+<div class="workspace">
+  <aside class="rail">
+    <div class="rail-head"><span class="eyebrow">Pages</span>
+      <button class="quiet" id="addPage" aria-label="Add page">+</button></div>
+    <div class="rail-list" id="pages"></div>
+    <div class="rail-foot">
+      <p class="hint">Tap <b>Edit</b> to change anything. Nothing here touches the
+        device — Export gives you the JSON to paste or upload.</p>
+    </div>
+  </aside>
+
+  <section class="canvas">
+    <div class="canvas-bar">
+      <span class="title" id="pageTitle">TV</span>
+      <span class="meta" id="pageMeta">4 columns</span>
+      <span class="spacer"></span>
+      <span class="meta" id="fitNote"></span>
+    </div>
+    <div class="stage">
+      <div class="artboard">
+        <div class="status"><span class="led"></span><span>connected</span>
+          <span class="rel">Release</span></div>
+        <div class="padarea">the pad lives here</div>
+        <div class="slot">
+          <div class="strip">
+            <div class="tools"><div class="tool">⌨</div><div class="tool">📋</div></div>
+            <div class="vline"></div>
+            <div class="tabs-strip" id="strip"></div>
+          </div>
+          <div class="page" id="page"></div>
+        </div>
+        <div class="tabs"><span>Remote</span><span class="on">Keys</span><span>Deck</span><span>Setup</span></div>
+      </div>
+    </div>
+  </section>
+
+  <aside class="inspector" id="inspector">
+    <div class="grabber"></div>
+    <div class="inspector-head">
+      <span class="eyebrow" id="inspectorKind">Page</span>
+      <h2 id="inspectorTitle">TV</h2>
+    </div>
+    <div class="inspector-body" id="inspectorBody"></div>
+  </aside>
+</div>
+
+<div class="sheet" id="scriptSheet">
+  <div class="handlebar"></div>
+  <h3 id="scriptTitle">Script</h3>
+  <textarea id="scriptText" rows="4" spellcheck="false" autocapitalize="none" autocomplete="off"
+            placeholder="{SEARCH}netflix{ENTER}"></textarea>
+  <div class="tokens" id="scriptTokens"></div>
+  <div class="steps" id="scriptSteps"></div>
+  <div class="inline" style="margin-top:14px">
+    <span class="hint" id="scriptNote"></span>
+    <span class="spacer"></span>
+    <button class="primary" id="scriptDone">Done</button>
+  </div>
+</div>
+
+<div class="sheet" id="jsonSheet">
+  <div class="handlebar"></div>
+  <h3>JSON</h3>
+  <pre class="json" id="json"></pre>
+  <div class="inline" style="margin-top:14px">
+    <span class="spacer"></span>
+    <button id="jsonClose">Close</button>
+  </div>
+</div>
+
+<script>
+// ============================================================ keys
+const CODES = {
+  ESC: { page: 7, usage: 0x29, code: 'Escape' }, TAB: { page: 7, usage: 0x2B, code: 'Tab' },
+  ENTER: { page: 7, usage: 0x28, code: 'Enter' }, BKSP: { page: 7, usage: 0x2A, code: 'Backspace' },
+  SPACE: { page: 7, usage: 0x2C, code: 'Space' },
+  DEL: { page: 7, usage: 0x4C, code: 'Delete' }, INS: { page: 7, usage: 0x49, code: 'Insert' },
+  HOME: { page: 7, usage: 0x4A, code: 'Home' }, END: { page: 7, usage: 0x4D, code: 'End' },
+  PGUP: { page: 7, usage: 0x4B, code: 'PageUp' }, PGDN: { page: 7, usage: 0x4E, code: 'PageDown' },
+  UP: { page: 7, usage: 0x52, code: 'ArrowUp' }, DOWN: { page: 7, usage: 0x51, code: 'ArrowDown' },
+  LEFT: { page: 7, usage: 0x50, code: 'ArrowLeft' }, RIGHT: { page: 7, usage: 0x4F, code: 'ArrowRight' },
+};
+const CONSUMERS = {
+  PLAYPAUSE: { page: 12, usage: 0x00CD, code: 'MediaPlayPause' },
+  NEXTTRACK: { page: 12, usage: 0x00B5, code: 'MediaTrackNext' },
+  PREVTRACK: { page: 12, usage: 0x00B6, code: 'MediaTrackPrevious' },
+  STOP: { page: 12, usage: 0x00B7, code: 'MediaStop' },
+  VOLUMEUP: { page: 12, usage: 0x00E9, code: 'AudioVolumeUp' },
+  VOLUMEDOWN: { page: 12, usage: 0x00EA, code: 'AudioVolumeDown' },
+  MUTE: { page: 12, usage: 0x00E2, code: 'AudioVolumeMute' },
+  SEARCH: { page: 12, usage: 0x0221, code: 'BrowserSearch' },
+  BROWSERHOME: { page: 12, usage: 0x0223, code: 'BrowserHome' },
+  BROWSERBACK: { page: 12, usage: 0x0224, code: 'BrowserBack' },
+};
+const MODS = {
+  CTRL: { page: 7, usage: 0xE0, code: 'ControlLeft' },
+  SHIFT: { page: 7, usage: 0xE1, code: 'ShiftLeft' },
+  ALT: { page: 7, usage: 0xE2, code: 'AltLeft' },
+  CMD: { page: 7, usage: 0xE3, code: 'MetaLeft' },
+};
+const LETTERS = { q:0x14,w:0x1A,e:0x08,r:0x15,t:0x17,y:0x1C,u:0x18,i:0x0C,o:0x12,p:0x13,
+  a:0x04,s:0x16,d:0x07,f:0x09,g:0x0A,h:0x0B,j:0x0D,k:0x0E,l:0x0F,
+  z:0x1D,x:0x1B,c:0x06,v:0x19,b:0x05,n:0x11,m:0x10 };
+const DIGITS = { 1:0x1E,2:0x1F,3:0x20,4:0x21,5:0x22,6:0x23,7:0x24,8:0x25,9:0x26,0:0x27 };
+const SHIFTED = '!@#$%^&*()';
+
+const TOKENS = { ENTER: CODES.ENTER, TAB: CODES.TAB, ESC: CODES.ESC, BKSP: CODES.BKSP,
+  SPACE: CODES.SPACE, DEL: CODES.DEL, INS: CODES.INS, HOME: CODES.HOME, END: CODES.END,
+  PGUP: CODES.PGUP, PGDN: CODES.PGDN, UP: CODES.UP, DOWN: CODES.DOWN, LEFT: CODES.LEFT,
+  RIGHT: CODES.RIGHT, PLAYPAUSE: CONSUMERS.PLAYPAUSE, MUTE: CONSUMERS.MUTE,
+  VOLUMEUP: CONSUMERS.VOLUMEUP, VOLUMEDOWN: CONSUMERS.VOLUMEDOWN, SEARCH: CONSUMERS.SEARCH,
+  BROWSERHOME: CONSUMERS.BROWSERHOME };
+for (const [ch, usage] of Object.entries(LETTERS)) TOKENS[ch.toUpperCase()] = { page: 7, usage, code: 'Key' + ch.toUpperCase() };
+for (const [d, usage] of Object.entries(DIGITS)) TOKENS[d] = { page: 7, usage, code: 'Digit' + d };
+
+const uid = () => Math.random().toString(36).slice(2, 7);
+const K = (t) => ({ kind: 'key', ...t });
+const key = (label, action, o = {}) => ({ id: uid(), label, alt: o.alt || '', w: o.w || 1,
+                                          colour: o.colour || '', action });
+const spacer = (w) => ({ spacer: w });
+const charKey = (ch) => key(ch, K({ page: 7, usage: LETTERS[ch] || DIGITS[ch], code: 'Key' + ch.toUpperCase() }),
+  { alt: ch in DIGITS ? SHIFTED['1234567890'.indexOf(ch)] : ch.toUpperCase() });
+
+// ============================================================ templates
+const TEMPLATES = {
+  tv: () => ({ id: 'tv', name: 'TV', columns: 4, rows: [
+    { h: 56, gap: 5, align: 'stretch', keys: [spacer(1), key('↑', K(CODES.UP), { w: 2, colour: 'blue' }), spacer(1)] },
+    { h: 56, gap: 5, align: 'stretch', keys: [key('←', K(CODES.LEFT), { colour: 'blue' }),
+      key('OK', K(CODES.ENTER), { w: 2 }), key('→', K(CODES.RIGHT), { colour: 'blue' })] },
+    { h: 56, gap: 5, align: 'stretch', keys: [spacer(1), key('↓', K(CODES.DOWN), { w: 2, colour: 'blue' }), spacer(1)] },
+    { h: 44, gap: 5, align: 'stretch', keys: [key('Back', K(CODES.ESC)), key('Home', K(CONSUMERS.BROWSERHOME)),
+      key('Mute', K(CONSUMERS.MUTE), { colour: 'amber' }),
+      key('Netflix', { kind: 'sequence', blocks: [
+        { action: 'tap', keys: [CONSUMERS.SEARCH] }, { action: 'text', text: 'netflix' },
+        { action: 'delay', ms: 120 }, { action: 'tap', keys: [CODES.ENTER] }] }, { colour: 'red' })] },
+  ] }),
+  media: () => ({ id: 'media', name: 'Media', columns: 4, rows: [
+    { h: 54, gap: 5, align: 'stretch', keys: [key('⏮', K(CONSUMERS.PREVTRACK)),
+      key('⏯', K(CONSUMERS.PLAYPAUSE), { colour: 'green' }), key('⏭', K(CONSUMERS.NEXTTRACK)),
+      key('⏹', K(CONSUMERS.STOP))] },
+    { h: 54, gap: 5, align: 'stretch', keys: [key('Vol −', K(CONSUMERS.VOLUMEDOWN), { colour: 'amber' }),
+      key('Mute', K(CONSUMERS.MUTE), { colour: 'amber' }), key('Vol +', K(CONSUMERS.VOLUMEUP), { colour: 'amber' }),
+      spacer(1)] },
+  ] }),
+  qwerty: () => ({ id: 'kb', name: 'QWERTY', columns: 12, rows: [
+    { h: 40, gap: 4, align: 'stretch', keys: [key('Esc', K(CODES.ESC)), key('Tab', K(CODES.TAB)),
+      ...'1234567890'.split('').map(charKey)] },
+    { h: 40, gap: 4, align: 'stretch', keys: 'qwertyuiop'.split('').map(charKey).concat([spacer(2)]) },
+    { h: 40, gap: 4, align: 'stretch', keys: 'asdfghjkl'.split('').map(charKey)
+      .concat([spacer(1), key('⏎', K(CODES.ENTER), { w: 2 })]) },
+    { h: 40, gap: 4, align: 'stretch', keys: [key('⇧', K(PAGE_MOD('SHIFT')), { w: 2, colour: 'blue' }),
+      ...'zxcvbnm'.split('').map(charKey), key('DEL', K(CODES.BKSP), { w: 3 })] },
+    { h: 40, gap: 4, align: 'stretch', keys: [key('Ctrl', K(PAGE_MOD('CTRL')), { w: 2 }),
+      key('Alt', K(PAGE_MOD('ALT')), { w: 2 }), key('space', K(CODES.SPACE), { w: 5 }),
+      key('/', K({ page: 7, usage: 0x38, code: 'Slash' }), { alt: '?' }),
+      key('⏎', K(CODES.ENTER), { w: 2, colour: 'green' })] },
+  ] }),
+};
+function PAGE_MOD(name) { return MODS[name]; }
+
+// ============================================================ model
+let deck = { pages: [] };
+let activeId = '';
+let mode = 'preview';
+let sel = null;          // { row, key }
+let rowOpen = -1;
+
+const $ = (id) => document.getElementById(id);
+const pageObj = () => deck.pages.find((p) => p.id === activeId);
+const usedCols = (r) => r.keys.reduce((n, it) => n + (it.spacer || it.w || 1), 0);
+
+// ============================================================ history
+let history = [], hindex = -1, lastPush = 0;
+
+function pushHistory() {
+  const snap = JSON.stringify(pageObj());
+  if (history[hindex] === snap) return;
+  const now = Date.now();
+  if (now - lastPush < 400 && hindex > 0) history[hindex] = snap;
+  else {
+    history = history.slice(0, hindex + 1);
+    history.push(snap);
+    if (history.length > 80) history.shift();
+    hindex = history.length - 1;
+  }
+  lastPush = now;
+}
+function paintHistory() {
+  $('undo').disabled = hindex <= 0;
+  $('redo').disabled = hindex >= history.length - 1;
+}
+function undo() { if (hindex > 0) { hindex--; restore(); } }
+function redo() { if (hindex < history.length - 1) { hindex++; restore(); } }
+function restore() {
+  const p = pageObj();
+  const next = JSON.parse(history[hindex]);
+  Object.assign(p, next);
+  sel = null; rowOpen = -1;
+  render();
+}
+
+// ============================================================ scripts
+function parseScript(text) {
+  const blocks = [], errors = [];
+  let i = 0;
+  const text$ = (t) => {
+    if (!t) return;
+    const last = blocks[blocks.length - 1];
+    if (last && last.action === 'text') last.text += t;
+    else blocks.push({ action: 'text', text: t });
+  };
+  while (i < text.length) {
+    if (text[i] !== '{') {
+      let j = text.indexOf('{', i); if (j < 0) j = text.length;
+      text$(text.slice(i, j).replace(/}}/g, '}'));
+      i = j; continue;
+    }
+    if (text[i + 1] === '{') { text$('{'); i += 2; continue; }
+    const close = text.indexOf('}', i);
+    if (close < 0) { errors.push({ token: text.slice(i) }); text$(text.slice(i)); break; }
+    const token = text.slice(i + 1, close).trim();
+    i = close + 1;
+
+    const rep = /^repeat:(\d+)$/i.exec(token);
+    if (rep) {
+      let depth = 1, j = i;
+      while (j < text.length) {
+        if (/^\{repeat:/i.test(text.slice(j))) depth++;
+        const end = /^\{\/repeat\}/i.exec(text.slice(j));
+        if (end) { depth--; if (!depth) break; j += end[0].length; continue; }
+        j++;
+      }
+      const inner = text.slice(i, j);
+      const endm = /^\{\/repeat\}/i.exec(text.slice(j));
+      if (!endm) errors.push({ token: '{REPEAT' });
+      blocks.push({ action: 'repeat', count: Number(rep[1]), blocks: parseScript(inner).blocks });
+      i = endm ? j + endm[0].length : j;
+      continue;
+    }
+    if (/^\/repeat$/i.test(token)) continue;
+
+    const wait = /^wait:(\d+)$/i.exec(token);
+    if (wait) { blocks.push({ action: 'delay', ms: Number(wait[1]) }); continue; }
+
+    if (token.includes('+')) {
+      const parts = token.split('+').map((x) => x.trim().toUpperCase());
+      const kk = TOKENS[parts.pop()];
+      const mods = parts.map((p) => MODS[p]);
+      if (kk && mods.length && mods.every(Boolean)) blocks.push({ action: 'tap', keys: [...mods, kk] });
+      else errors.push({ token: `{${token}}` });
+      continue;
+    }
+    const kk = TOKENS[token.toUpperCase()];
+    if (kk) blocks.push({ action: 'tap', keys: [kk] });
+    else errors.push({ token: `{${token}}` });
+  }
+  return { blocks, errors };
+}
+
+function blocksToText(blocks) {
+  let out = '';
+  const name = (k) => {
+    const hit = Object.entries(TOKENS).find(([, v]) => v.usage === k.usage && v.page === k.page);
+    return hit ? hit[0] : `0x${k.usage.toString(16)}`;
+  };
+  const modOf = (k) => Object.entries(MODS).find(([, v]) => v.usage === k.usage);
+  for (const b of blocks) {
+    if (b.action === 'text') out += b.text.replace(/\{/g, '{{');
+    else if (b.action === 'delay') out += `{WAIT:${b.ms}}`;
+    else if (b.action === 'repeat') out += `{REPEAT:${b.count}}` + blocksToText(b.blocks) + '{/REPEAT}';
+    else {
+      const heads = b.keys.slice(0, -1);
+      const chord = b.keys.length > 1 && heads.every((k) => modOf(k));
+      out += chord ? `{${heads.map((k) => modOf(k)[0]).join('+')}+${name(b.keys[b.keys.length - 1])}}`
+                   : b.keys.map((k) => `{${name(k)}}`).join('');
+    }
+  }
+  return out;
+}
+
+function flatten(blocks, depth = 0, out = []) {
+  for (const b of blocks) {
+    if (b.action === 'repeat') {
+      out.push({ depth, kind: 'repeat', text: `${b.count}× the steps below` });
+      flatten(b.blocks, depth + 1, out);
+    } else if (b.action === 'delay') out.push({ depth, kind: 'wait', text: `${b.ms} ms` });
+    else if (b.action === 'text') out.push({ depth, kind: 'text', text: `“${b.text}”` });
+    else out.push({ depth, kind: b.keys.length > 1 ? 'chord' : 'key',
+                    text: b.keys.map((k) => k.code || `0x${k.usage.toString(16)}`).join(' + ') });
+  }
+  return out;
+}
+
+// ============================================================ render
+function render() {
+  pushHistory();
+  paintHistory();
+  renderPages();
+  renderStrip();
+  renderPage();
+  renderInspector();
+  document.body.dataset.mode = mode;
+  for (const b of $('modeSeg').querySelectorAll('button')) {
+    b.setAttribute('aria-pressed', String(b.dataset.mode === mode));
+  }
+  $('pageTitle').textContent = pageObj() ? pageObj().name : '';
+  $('pageMeta').textContent = pageObj() ? `${pageObj().columns} columns` : '';
+  fitNote();
+}
+
+function renderPages() {
+  const mob = $('mobilePages');
+  if (mob) mob.hidden = deck.pages.length < 2;   // one page is not a choice
+
+  for (const host of [$('pages'), $('mobilePages')]) {
+    if (!host) continue;
+    host.textContent = '';
+    for (const p of deck.pages) {
+      const b = document.createElement('button');
+      if (host.id === 'pages') {
+        b.className = 'pg';
+        b.innerHTML = '<span class="n"></span><span class="c"></span>';
+        b.querySelector('.n').textContent = p.name;
+        b.querySelector('.c').textContent = p.rows.reduce((a, r) => a + r.keys.length, 0);
+      } else {
+        b.textContent = p.name;
+      }
+      b.setAttribute('aria-current', String(p.id === activeId));
+      b.addEventListener('click', () => { activeId = p.id; sel = null; rowOpen = -1; render(); });
+      host.appendChild(b);
+    }
+  }
+}
+
+function renderStrip() {
+  const el = $('strip');
+  el.textContent = '';
+  for (const name of ['ABC', '?123', 'Fn', pageObj() ? pageObj().name : '']) {
+    const c = document.createElement('div');
+    c.className = 'tchip';
+    c.textContent = name;
+    c.setAttribute('aria-current', String(name === (pageObj() ? pageObj().name : '')));
+    el.appendChild(c);
+  }
+}
+
+function renderPage() {
+  const p = pageObj();
+  const el = $('page');
+  el.textContent = '';
+  if (!p) return;
+
+  p.rows.forEach((r, ri) => {
+    const line = document.createElement('div');
+    line.className = 'rowline';
+    line.style.setProperty('--cols', String(p.columns));
+    line.style.gap = r.gap + 'px';
+    line.style.height = r.h + 'px';
+
+    if (mode === 'edit') {
+      const g = document.createElement('div');
+      g.className = 'grip';
+      g.textContent = '⋯';
+      g.setAttribute('role', 'button');
+      g.setAttribute('aria-label', `Row ${ri + 1} settings`);
+      g.addEventListener('click', (e) => {
+        e.stopPropagation();
+        rowOpen = rowOpen === ri ? -1 : ri;
+        sel = null;
+        render();
+      });
+      line.appendChild(g);
+    }
+
+    r.keys.forEach((it, ki) => {
+      const isSpacer = !!it.spacer;
+      const cell = document.createElement('div');
+      cell.className = 'keycap' + (isSpacer ? ' spacer' : '') + (it.colour ? ' c-' + it.colour : '');
+      cell.style.gridColumn = `span ${isSpacer ? it.spacer : (it.w || 1)}`;
+      const selected = sel && sel.row === ri && sel.key === ki;
+      cell.dataset.sel = selected ? '1' : '0';
+
+      if (!isSpacer) {
+        const lb = document.createElement('span');
+        lb.textContent = it.label || '·';
+        cell.appendChild(lb);
+        if (it.alt) {
+          const a = document.createElement('span');
+          a.className = 'alt';
+          a.textContent = it.alt;
+          cell.appendChild(a);
+        }
+      }
+
+      if (mode === 'edit') {
+        cell.addEventListener('click', (e) => {
+          e.stopPropagation();
+          sel = { row: ri, key: ki }; rowOpen = -1;
+          render();
+        });
+        if (selected) cell.appendChild(resizeHandle(r, it, cell));
+      }
+      line.appendChild(cell);
+    });
+    el.appendChild(line);
+  });
+}
+
+// drag the right edge: columns are the unit, so the handle moves in whole cells
+function resizeHandle(rowObj, item, cell) {
+  const h = document.createElement('div');
+  h.className = 'handle';
+  h.title = 'Drag to change the width';
+
+  h.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const startX = e.clientX;
+    const startW = item.spacer || item.w || 1;
+    const cellW = cell.getBoundingClientRect().width +
+      parseFloat(getComputedStyle(cell.parentElement).gap || '0');
+    try { h.setPointerCapture(e.pointerId); } catch (_) {}
+
+    const move = (ev) => {
+      const delta = Math.round((ev.clientX - startX) / cellW);
+      const next = Math.max(1, Math.min(pageObj().columns, startW + delta));
+      if (item.spacer) item.spacer = next; else item.w = next;
+      renderPage();
+    };
+    const up = () => {
+      h.removeEventListener('pointermove', move);
+      h.removeEventListener('pointerup', up);
+      render();
+    };
+    h.addEventListener('pointermove', move);
+    h.addEventListener('pointerup', up);
+    h.addEventListener('pointercancel', up);
+  });
+  return h;
+}
+
+// ============================================================ inspector
+function renderInspector() {
+  const p = pageObj();
+  const body = $('inspectorBody');
+  const kind = $('inspectorKind');
+  const title = $('inspectorTitle');
+  body.textContent = '';
+
+  const it = sel && p.rows[sel.row] && p.rows[sel.row].keys[sel.key];
+
+  if (rowOpen >= 0 && p.rows[rowOpen]) return renderRowInspector(p.rows[rowOpen], rowOpen);
+  if (it) return renderKeyInspector(it);
+
+  kind.textContent = 'Page';
+  title.textContent = p.name;
+
+  body.appendChild(formRow('Name', textField(p.name, (v) => { p.name = v; renderPages(); renderStrip(); })));
+  body.appendChild(formRow('Columns', stepper(p.columns, 1, 24, (v) => { p.columns = v; renderPage(); })));
+  body.appendChild(divider());
+  body.appendChild(hint('Select a key to edit it. Drag a key\'s right edge to change its width.'));
+}
+
+function renderKeyInspector(it) {
+  const p = pageObj();
+  $('inspectorKind').textContent = it.spacer ? 'Spacer' : 'Key';
+  $('inspectorTitle').textContent = it.spacer ? `${it.spacer} column${it.spacer === 1 ? '' : 's'}` : (it.label || 'Untitled');
+  const body = $('inspectorBody');
+
+  const width = stepper(it.spacer || it.w || 1, 1, p.columns, (v) => {
+    if (it.spacer) it.spacer = v; else it.w = v;
+    renderPage();
+  });
+  body.appendChild(formRow('Width', width));
+
+  if (it.spacer) {
+    body.appendChild(hint('A spacer leaves columns empty. It sends nothing.'));
+    body.appendChild(destructive('Delete spacer', () => {
+      p.rows[sel.row].keys.splice(sel.key, 1); sel = null; render();
+    }));
+    return;
+  }
+
+  body.appendChild(formRow('Label', textField(it.label || '', (v) => { it.label = v; renderPage(); })));
+  body.appendChild(formRow('Shifted legend', textField(it.alt || '', (v) => { it.alt = v; renderPage(); })));
+  body.appendChild(formRow('Colour', swatches(it.colour, (c) => { it.colour = c; renderPage(); renderInspector(); })));
+  body.appendChild(divider());
+
+  const seg = document.createElement('div');
+  seg.className = 'seg';
+  seg.style.alignSelf = 'flex-start';
+  for (const [id, label] of [['key', 'Hold a key'], ['sequence', 'Script']]) {
+    const b = document.createElement('button');
+    b.textContent = label;
+    b.setAttribute('aria-pressed', String(it.action.kind === id));
+    b.addEventListener('click', () => {
+      if (it.action.kind === id) return;
+      if (id === 'key') {
+        it.action = { kind: 'key', ...CODES.ENTER };
+      } else if (it.action.blocks && it.action.blocks.length) {
+        it.action = { kind: 'sequence', blocks: it.action.blocks };
+      } else {
+        it.action = { kind: 'sequence', blocks: [{ action: 'tap', keys: [it.action] }] };
+      }
+      render();
+    });
+    seg.appendChild(b);
+  }
+  body.appendChild(formRow('Action', seg));
+
+  if (it.action.kind === 'key') {
+    const pick = document.createElement('select');
+    for (const [group, list] of [['Keys', CODES], ['Media & browser', CONSUMERS]]) {
+      const g = document.createElement('optgroup');
+      g.label = group;
+      for (const [name, k] of Object.entries(list)) {
+        const o = document.createElement('option');
+        o.value = `${group}:${name}`;
+        o.textContent = `${name} · 0x${k.usage.toString(16)}`;
+        if (it.action.usage === k.usage && it.action.page === k.page) o.selected = true;
+        g.appendChild(o);
+      }
+      pick.appendChild(g);
+    }
+    pick.addEventListener('change', () => {
+      const [group, name] = pick.value.split(':');
+      const k = (group === 'Keys' ? CODES : CONSUMERS)[name];
+      if (k) { it.action = { kind: 'key', ...k }; render(); }
+    });
+    body.appendChild(formRow('Key', pick));
+  } else {
+    const open = document.createElement('button');
+    open.className = 'primary';
+    open.textContent = 'Edit script…';
+    open.addEventListener('click', () => openScript(sel));
+    body.appendChild(open);
+    const blocks = it.action.blocks || [];
+    body.appendChild(hint(blocks.length
+      ? `${blocks.length} block${blocks.length === 1 ? '' : 's'} · ${flatten(blocks).length} steps`
+      : 'This script is empty.'));
+  }
+
+  body.appendChild(divider());
+  body.appendChild(destructive('Delete key', () => {
+    p.rows[sel.row].keys.splice(sel.key, 1); sel = null; render();
+  }));
+}
+
+function renderRowInspector(r, ri) {
+  const p = pageObj();
+  $('inspectorKind').textContent = `Row ${ri + 1} of ${p.rows.length}`;
+  $('inspectorTitle').textContent = `${r.keys.length} item${r.keys.length === 1 ? '' : 's'}`;
+  const body = $('inspectorBody');
+
+  body.appendChild(formRow('Height', pxStepper(r.h, (v) => { r.h = v; renderPage(); })));
+  body.appendChild(formRow('Gap', pxStepper(r.gap, (v) => { r.gap = v; renderPage(); })));
+
+  const align = document.createElement('select');
+  for (const a of ['stretch', 'center', 'start', 'end']) {
+    const o = document.createElement('option');
+    o.value = a; o.textContent = a;
+    if (r.align === a) o.selected = true;
+    align.appendChild(o);
+  }
+  align.addEventListener('change', () => { r.align = align.value; renderPage(); });
+  body.appendChild(formRow('Align', align));
+  body.appendChild(hint('Alignment only matters when the row does not fill its columns.'));
+
+  const free = p.columns - usedCols(r);
+  const addKey = document.createElement('button');
+  addKey.textContent = '+ Key';
+  addKey.addEventListener('click', () => {
+    r.keys.push(key('key', K(CODES.ENTER)));
+    sel = { row: ri, key: r.keys.length - 1 }; rowOpen = -1; render();
+  });
+  const addGap = document.createElement('button');
+  addGap.textContent = '+ Spacer';
+  addGap.addEventListener('click', () => {
+    r.keys.push(spacer(1));
+    sel = { row: ri, key: r.keys.length - 1 }; rowOpen = -1; render();
+  });
+  const fill = document.createElement('button');
+  fill.textContent = `Fill ${free}`;
+  fill.disabled = free <= 0;
+  fill.addEventListener('click', () => { r.keys.push(spacer(free)); render(); });
+
+  const rowActs = document.createElement('div');
+  rowActs.className = 'inline';
+  rowActs.append(addKey, addGap, fill);
+  body.appendChild(rowActs);
+
+  body.appendChild(divider());
+  body.appendChild(destructive('Delete row', () => {
+    p.rows.splice(ri, 1); rowOpen = -1; sel = null; render();
+  }));
+}
+
+// ---- small builders
+function formRow(label, control) {
+  const d = document.createElement('div');
+  d.className = 'formrow';
+  const l = document.createElement('label');
+  l.textContent = label;
+  d.append(l, control);
+  return d;
+}
+function textField(value, onInput) {
+  const i = document.createElement('input');
+  i.type = 'text'; i.value = value;
+  i.addEventListener('input', () => onInput(i.value));
+  return i;
+}
+function stepper(value, min, max, onChange) {
+  const w = document.createElement('div');
+  w.className = 'stepper';
+  const minus = document.createElement('button');
+  minus.textContent = '−'; minus.setAttribute('aria-label', 'Decrease');
+  const val = document.createElement('span');
+  val.className = 'val'; val.textContent = String(value);
+  const plus = document.createElement('button');
+  plus.textContent = '+'; plus.setAttribute('aria-label', 'Increase');
+  const set = (v) => { onChange(Math.max(min, Math.min(max, v))); render(); };
+  minus.addEventListener('click', () => set(value - 1));
+  plus.addEventListener('click', () => set(value + 1));
+  w.append(minus, val, plus);
+  return w;
+}
+function pxStepper(value, onChange) {
+  const wrap = document.createElement('div');
+  wrap.className = 'inline';
+  const s = stepper(value, 24, 120, onChange);
+  const unit = document.createElement('span');
+  unit.className = 'hint'; unit.textContent = 'px';
+  wrap.append(s, unit);
+  return wrap;
+}
+function swatches(current, onPick) {
+  const w = document.createElement('div');
+  w.className = 'swatches';
+  for (const c of ['', 'blue', 'amber', 'red', 'green']) {
+    const b = document.createElement('button');
+    b.className = 'sw-' + (c || 'none');
+    b.title = c || 'no colour';
+    b.setAttribute('aria-pressed', String(current === c));
+    b.addEventListener('click', () => onPick(c));
+    w.appendChild(b);
+  }
+  return w;
+}
+function divider() {
+  const d = document.createElement('div');
+  d.className = 'divider';
+  return d;
+}
+function hint(text) {
+  const p = document.createElement('p');
+  p.className = 'hint';
+  p.textContent = text;
+  return p;
+}
+function destructive(label, fn) {
+  const b = document.createElement('button');
+  b.className = 'danger';
+  b.textContent = label;
+  b.addEventListener('click', fn);
+  return b;
+}
+
+// ============================================================ script sheet
+let scriptAt = null;
+
+function openScript(at) {
+  const it = pageObj().rows[at.row].keys[at.key];
+  scriptAt = at;
+  $('scriptTitle').textContent = `Script — ${it.label || 'key'}`;
+  $('scriptText').value = blocksToText(it.action.blocks || []);
+  paintSteps(it);
+  $('scriptSheet').dataset.open = '1';
+  $('scriptText').focus();
+}
+
+function paintSteps(it) {
+  const { blocks, errors } = parseScript($('scriptText').value);
+  it.action.blocks = blocks;
+  const list = $('scriptSteps');
+  list.textContent = '';
+
+  for (const e of errors) {
+    const row = document.createElement('div');
+    row.className = 'step bad';
+    row.innerHTML = '<span class="n">!</span><span class="k">unknown</span><span class="v"></span>';
+    row.querySelector('.v').textContent = `${e.token} — not a token this device knows`;
+    list.appendChild(row);
+  }
+  const flat = flatten(blocks);
+  flat.forEach((s, i) => {
+    const row = document.createElement('div');
+    row.className = 'step';
+    if (s.depth) row.style.marginLeft = 16 * s.depth + 'px';
+    row.innerHTML = '<span class="n"></span><span class="k"></span><span class="v"></span>';
+    row.querySelector('.n').textContent = String(i + 1);
+    row.querySelector('.k').textContent = s.kind;
+    row.querySelector('.v').textContent = s.text;
+    list.appendChild(row);
+  });
+  if (!flat.length && !errors.length) list.appendChild(hint('Nothing to run yet — type a token or some text.'));
+  $('scriptNote').textContent = `${blocks.length} block${blocks.length === 1 ? '' : 's'}` +
+    (errors.length ? ` · ${errors.length} problem${errors.length === 1 ? '' : 's'}` : '');
+  renderPage();
+}
+
+// ============================================================ export + fit
+function fitNote() {
+  const stage = document.querySelector('.stage');
+  const art = document.querySelector('.artboard');
+  if (!stage || !art) return;
+  const over = art.scrollHeight > art.clientHeight;
+  $('fitNote').textContent = over ? 'taller than the slot — will scale to fit' : '';
+}
+
+function currentJson() {
+  return JSON.stringify({ app: 'esp32-remote', kind: 'layout', version: 1, pages: deck.pages }, null, 2);
+}
+
+// ============================================================ wiring
+$('modeSeg').addEventListener('click', (e) => {
+  const b = e.target.closest('button[data-mode]');
+  if (!b) return;
+  mode = b.dataset.mode;
+  if (mode === 'preview') { sel = null; rowOpen = -1; }
+  render();
+});
+
+$('undo').addEventListener('click', undo);
+$('redo').addEventListener('click', redo);
+
+$('more').addEventListener('click', (e) => {
+  e.stopPropagation();
+  const m = $('menu');
+  m.dataset.open = m.dataset.open === '1' ? '0' : '1';
+});
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('#menu') && !e.target.closest('#more')) $('menu').dataset.open = '0';
+});
+
+document.querySelectorAll('[data-template]').forEach((b) => {
+  b.addEventListener('click', () => {
+    const t = TEMPLATES[b.dataset.template]();
+    deck.pages = [t];
+    activeId = t.id;
+    sel = null; rowOpen = -1; hindex = -1; history = [];
+    $('menu').dataset.open = '0';
+    render();
+  });
+});
+
+$('addPage').addEventListener('click', () => {
+  const name = prompt('Page name', 'Page');
+  if (!name) return;
+  const p = { id: 'p' + uid(), name, columns: 4, rows: [{ h: 50, gap: 5, align: 'stretch', keys: [] }] };
+  deck.pages.push(p);
+  activeId = p.id;
+  sel = null; rowOpen = -1;
+  render();
+});
+
+$('export').addEventListener('click', () => {
+  const blob = new Blob([currentJson()], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'deck.json';
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+
+$('showJson').addEventListener('click', () => {
+  $('json').textContent = currentJson();
+  $('jsonSheet').dataset.open = '1';
+  $('menu').dataset.open = '0';
+});
+$('jsonClose').addEventListener('click', () => { $('jsonSheet').dataset.open = '0'; });
+$('copyJson').addEventListener('click', async () => {
+  await navigator.clipboard.writeText(currentJson());
+  $('menu').dataset.open = '0';
+});
+
+$('scriptText').addEventListener('input', () => {
+  if (!scriptAt) return;
+  const it = pageObj().rows[scriptAt.row].keys[scriptAt.key];
+  paintSteps(it);
+});
+
+for (const t of ['ENTER', 'TAB', 'ESC', 'LEFT', 'RIGHT', 'UP', 'DOWN', 'CTRL+C', 'CTRL+ALT+DEL',
+                 'SEARCH', 'VOLUMEUP', 'MUTE', 'WAIT:200', 'REPEAT:3', '/REPEAT']) {
+  const b = document.createElement('button');
+  b.textContent = t;
+  b.addEventListener('click', () => {
+    const ta = $('scriptText');
+    const at = ta.selectionStart ?? ta.value.length;
+    ta.value = ta.value.slice(0, at) + `{${t}}` + ta.value.slice(at);
+    ta.focus();
+    ta.dispatchEvent(new Event('input'));
+  });
+  $('scriptTokens').appendChild(b);
+}
+
+$('scriptDone').addEventListener('click', () => {
+  $('scriptSheet').dataset.open = '0';
+  render();
+});
+
+document.addEventListener('keydown', (e) => {
+  const inField = e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName);
+  const mod = e.ctrlKey || e.metaKey;
+  if (mod && e.key.toLowerCase() === 'z' && !inField) {
+    e.preventDefault();
+    e.shiftKey ? redo() : undo();
+  } else if (e.key === 'Escape') {
+    $('scriptSheet').dataset.open = '0';
+    $('jsonSheet').dataset.open = '0';
+    $('menu').dataset.open = '0';
+    if (sel || rowOpen >= 0) { sel = null; rowOpen = -1; render(); }
+  }
+});
+
+// boot
+const first = TEMPLATES.tv();
+deck.pages = [first];
+activeId = first.id;
+render();
+</script>
+</body>
+</html>
