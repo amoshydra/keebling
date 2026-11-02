@@ -317,6 +317,7 @@
   <button data-template="media">Media controls</button>
   <button data-template="qwerty">QWERTY keyboard</button>
   <div class="sep"></div>
+  <button id="openFile">Open a file…</button>
   <button id="showJson">View JSON</button>
   <button id="copyJson">Copy JSON</button>
 </div>
@@ -473,24 +474,36 @@ const TEMPLATES = {
     { h: 40, gap: 4, align: 'stretch', keys: 'qwertyuiop'.split('').map(charKey).concat([spacer(2)]) },
     { h: 40, gap: 4, align: 'stretch', keys: 'asdfghjkl'.split('').map(charKey)
       .concat([spacer(1), key('⏎', K(CODES.ENTER), { w: 2 })]) },
-    { h: 40, gap: 4, align: 'stretch', keys: [key('⇧', K(PAGE_MOD('SHIFT')), { w: 2, colour: 'blue' }),
+    { h: 40, gap: 4, align: 'stretch', keys: [key('⇧', { kind: 'modifier', code: 'ShiftLeft' }, { w: 2, colour: 'blue' }),
       ...'zxcvbnm'.split('').map(charKey), key('DEL', K(CODES.BKSP), { w: 3 })] },
-    { h: 40, gap: 4, align: 'stretch', keys: [key('Ctrl', K(PAGE_MOD('CTRL')), { w: 2 }),
-      key('Alt', K(PAGE_MOD('ALT')), { w: 2 }), key('space', K(CODES.SPACE), { w: 5 }),
+    { h: 40, gap: 4, align: 'stretch', keys: [key('Ctrl', { kind: 'modifier', code: 'ControlLeft' }, { w: 2 }),
+      key('Alt', { kind: 'modifier', code: 'AltLeft' }, { w: 2 }), key('space', K(CODES.SPACE), { w: 5 }),
       key('/', K({ page: 7, usage: 0x38, code: 'Slash' }), { alt: '?' }),
       key('⏎', K(CODES.ENTER), { w: 2, colour: 'green' })] },
   ] }),
 };
-function PAGE_MOD(name) { return MODS[name]; }
 
 // ============================================================ model
-let deck = { pages: [] };
+// The strip is an ordered list of ids, the four built-ins plus any page the
+// user made. A page can be placed first; the built-ins cannot be removed.
+const BUILTIN_STRIP = [
+  { id: 'abc', name: 'ABC' }, { id: 'sym', name: '?123' },
+  { id: 'fn', name: 'Fn' }, { id: 'kp', name: 'Num' },
+];
+let deck = { pages: [], strip: [] };
 let activeId = '';
 let mode = 'preview';
 let sel = null;          // { row, key }
 let rowOpen = -1;
 
 const $ = (id) => document.getElementById(id);
+const stripEntries = () => deck.strip.map((id) => {
+  if (id.startsWith('page:')) {
+    const p = deck.pages.find((x) => x.id === id.slice(5));
+    return p ? { id, name: p.name } : null;
+  }
+  return BUILTIN_STRIP.find((b) => b.id === id) || null;
+}).filter(Boolean);
 const pageObj = () => deck.pages.find((p) => p.id === activeId);
 const usedCols = (r) => r.keys.reduce((n, it) => n + (it.spacer || it.w || 1), 0);
 
@@ -660,11 +673,11 @@ function renderPages() {
 function renderStrip() {
   const el = $('strip');
   el.textContent = '';
-  for (const name of ['ABC', '?123', 'Fn', pageObj() ? pageObj().name : '']) {
+  for (const entry of stripEntries()) {
     const c = document.createElement('div');
     c.className = 'tchip';
-    c.textContent = name;
-    c.setAttribute('aria-current', String(name === (pageObj() ? pageObj().name : '')));
+    c.textContent = entry.name;
+    c.setAttribute('aria-current', String(entry.id === 'page:' + activeId));
     el.appendChild(c);
   }
 }
@@ -783,6 +796,8 @@ function renderInspector() {
   body.appendChild(formRow('Name', textField(p.name, (v) => { p.name = v; renderPages(); renderStrip(); })));
   body.appendChild(formRow('Columns', stepper(p.columns, 1, 24, (v) => { p.columns = v; renderPage(); })));
   body.appendChild(divider());
+  body.appendChild(stripEditor());
+  body.appendChild(divider());
   body.appendChild(hint('Select a key to edit it. Drag a key\'s right edge to change its width.'));
 }
 
@@ -811,27 +826,23 @@ function renderKeyInspector(it) {
   body.appendChild(formRow('Colour', swatches(it.colour, (c) => { it.colour = c; renderPage(); renderInspector(); })));
   body.appendChild(divider());
 
-  const seg = document.createElement('div');
-  seg.className = 'seg';
-  seg.style.alignSelf = 'flex-start';
-  for (const [id, label] of [['key', 'Hold a key'], ['sequence', 'Script']]) {
-    const b = document.createElement('button');
-    b.textContent = label;
-    b.setAttribute('aria-pressed', String(it.action.kind === id));
-    b.addEventListener('click', () => {
-      if (it.action.kind === id) return;
-      if (id === 'key') {
-        it.action = { kind: 'key', ...CODES.ENTER };
-      } else if (it.action.blocks && it.action.blocks.length) {
-        it.action = { kind: 'sequence', blocks: it.action.blocks };
-      } else {
-        it.action = { kind: 'sequence', blocks: [{ action: 'tap', keys: [it.action] }] };
-      }
-      render();
-    });
-    seg.appendChild(b);
+  const kindSel = document.createElement('select');
+  for (const [id, label] of [['key', 'Hold a key'], ['modifier', 'Modifier (latches)'],
+                             ['sequence', 'Script'], ['page', 'Go to page']]) {
+    const o = document.createElement('option');
+    o.value = id; o.textContent = label;
+    if (it.action.kind === id) o.selected = true;
+    kindSel.appendChild(o);
   }
-  body.appendChild(formRow('Action', seg));
+  kindSel.addEventListener('change', () => {
+    const kind = kindSel.value;
+    if (kind === 'key') it.action = { kind: 'key', ...CODES.ENTER };
+    else if (kind === 'modifier') it.action = { kind: 'modifier', code: 'ShiftLeft' };
+    else if (kind === 'page') it.action = { kind: 'page', to: deck.pages[0].id };
+    else it.action = { kind: 'sequence', blocks: it.action.blocks || [] };
+    render();
+  });
+  body.appendChild(formRow('Action', kindSel));
 
   if (it.action.kind === 'key') {
     const pick = document.createElement('select');
@@ -853,7 +864,38 @@ function renderKeyInspector(it) {
       if (k) { it.action = { kind: 'key', ...k }; render(); }
     });
     body.appendChild(formRow('Key', pick));
-  } else {
+  }
+
+  if (it.action.kind === 'modifier') {
+    const pick = document.createElement('select');
+    for (const [name, k] of Object.entries(MODS)) {
+      const o = document.createElement('option');
+      o.value = name; o.textContent = name;
+      if (it.action.code === k.code) o.selected = true;
+      pick.appendChild(o);
+    }
+    pick.addEventListener('change', () => {
+      it.action = { kind: 'modifier', code: MODS[pick.value].code };
+      render();
+    });
+    body.appendChild(formRow('Modifier', pick));
+    body.appendChild(hint('Tapping it latches the modifier for the next key, ' +
+      'which is the only way to type a capital with one finger.'));
+  }
+
+  if (it.action.kind === 'page') {
+    const pick = document.createElement('select');
+    for (const pg of deck.pages) {
+      const o = document.createElement('option');
+      o.value = pg.id; o.textContent = pg.name;
+      if (it.action.to === pg.id) o.selected = true;
+      pick.appendChild(o);
+    }
+    pick.addEventListener('change', () => { it.action = { kind: 'page', to: pick.value }; render(); });
+    body.appendChild(formRow('Page', pick));
+  }
+
+  if (it.action.kind === 'sequence') {
     const open = document.createElement('button');
     open.className = 'primary';
     open.textContent = 'Edit script…';
@@ -918,6 +960,54 @@ function renderRowInspector(r, ri) {
   body.appendChild(destructive('Delete row', () => {
     p.rows.splice(ri, 1); rowOpen = -1; sel = null; render();
   }));
+}
+
+// The strip is where a page lives on the device: four built-ins that cannot be
+// removed, and any page, ordered. A page first means it opens by default.
+function stripEditor() {
+  const wrap = document.createElement('div');
+  wrap.className = 'formrow';
+  const lab = document.createElement('label');
+  lab.textContent = 'Strip order';
+  wrap.appendChild(lab);
+
+  const list = document.createElement('div');
+  list.style.display = 'flex';
+  list.style.flexDirection = 'column';
+  list.style.gap = '4px';
+
+  stripEntries().forEach((entry, i) => {
+    const row = document.createElement('div');
+    row.className = 'inline';
+    row.style.justifyContent = 'space-between';
+
+    const name = document.createElement('span');
+    name.textContent = entry.name;
+    name.style.fontSize = '12px';
+    row.appendChild(name);
+
+    const acts = document.createElement('span');
+    acts.className = 'inline';
+    for (const [glyph, delta, label] of [['↑', -1, 'Move up'], ['↓', 1, 'Move down']]) {
+      const b = document.createElement('button');
+      b.className = 'quiet';
+      b.textContent = glyph;
+      b.title = label;
+      b.style.padding = '2px 7px';
+      b.disabled = (delta < 0 && i === 0) || (delta > 0 && i === deck.strip.length - 1);
+      b.addEventListener('click', () => {
+        const to = i + delta;
+        [deck.strip[i], deck.strip[to]] = [deck.strip[to], deck.strip[i]];
+        render();
+      });
+      acts.appendChild(b);
+    }
+    row.appendChild(acts);
+    list.appendChild(row);
+  });
+
+  wrap.appendChild(list);
+  return wrap;
 }
 
 // ---- small builders
@@ -1044,7 +1134,8 @@ function fitNote() {
 }
 
 function currentJson() {
-  return JSON.stringify({ app: 'esp32-remote', kind: 'layout', version: 1, pages: deck.pages }, null, 2);
+  return JSON.stringify({ app: 'keebling', kind: 'layout', version: 1,
+                          strip: deck.strip, pages: deck.pages }, null, 2);
 }
 
 // ============================================================ wiring
@@ -1070,12 +1161,8 @@ document.addEventListener('click', (e) => {
 
 document.querySelectorAll('[data-template]').forEach((b) => {
   b.addEventListener('click', () => {
-    const t = TEMPLATES[b.dataset.template]();
-    deck.pages = [t];
-    activeId = t.id;
-    sel = null; rowOpen = -1; hindex = -1; history = [];
     $('menu').dataset.open = '0';
-    render();
+    bootWith(TEMPLATES[b.dataset.template]());
   });
 });
 
@@ -1084,6 +1171,7 @@ $('addPage').addEventListener('click', () => {
   if (!name) return;
   const p = { id: 'p' + uid(), name, columns: 4, rows: [{ h: 50, gap: 5, align: 'stretch', keys: [] }] };
   deck.pages.push(p);
+  deck.strip.push('page:' + p.id);
   activeId = p.id;
   sel = null; rowOpen = -1;
   render();
@@ -1097,6 +1185,36 @@ $('export').addEventListener('click', () => {
   a.click();
   URL.revokeObjectURL(a.href);
 });
+
+const filePicker = document.createElement('input');
+filePicker.type = 'file';
+filePicker.accept = 'application/json,.json';
+filePicker.hidden = true;
+document.body.appendChild(filePicker);
+
+filePicker.addEventListener('change', async () => {
+  const file = filePicker.files && filePicker.files[0];
+  filePicker.value = '';
+  if (!file) return;
+  try {
+    const data = JSON.parse(await file.text());
+    if (data.app !== 'keebling' || data.kind !== 'layout' || !Array.isArray(data.pages) || !data.pages.length) {
+      throw new Error('not a keebling layout');
+    }
+    deck.pages = data.pages;
+    deck.strip = Array.isArray(data.strip) && data.strip.length
+      ? data.strip
+      : ['abc', 'sym', 'fn', 'kp', ...data.pages.map((p) => 'page:' + p.id)];
+    activeId = deck.pages[0].id;
+    sel = null; rowOpen = -1;
+    $('menu').dataset.open = '0';
+    render();
+  } catch (e) {
+    alert(`That file could not be opened: ${e.message}. Nothing was changed.`);
+  }
+});
+
+$('openFile').addEventListener('click', () => filePicker.click());
 
 $('showJson').addEventListener('click', () => {
   $('json').textContent = currentJson();
@@ -1134,6 +1252,20 @@ $('scriptDone').addEventListener('click', () => {
   render();
 });
 
+function forgetPage(id) {
+  deck.pages = deck.pages.filter((p) => p.id !== id);
+  deck.strip = deck.strip.filter((x) => x !== 'page:' + id);
+  if (!deck.pages.length) {
+    const fresh = { id: 'p' + uid(), name: 'Page', columns: 4,
+                    rows: [{ h: 50, gap: 5, align: 'stretch', keys: [] }] };
+    deck.pages.push(fresh);
+    deck.strip.push('page:' + fresh.id);
+  }
+  activeId = deck.pages[0].id;
+  sel = null; rowOpen = -1;
+  render();
+}
+
 document.addEventListener('keydown', (e) => {
   const inField = e.target && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName);
   const mod = e.ctrlKey || e.metaKey;
@@ -1148,11 +1280,16 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-// boot
-const first = TEMPLATES.tv();
-deck.pages = [first];
-activeId = first.id;
-render();
+// boot: the four built-ins, then the template's own page
+function bootWith(template) {
+  deck.pages = [template];
+  deck.strip = ['abc', 'sym', 'fn', 'kp', 'page:' + template.id];
+  activeId = template.id;
+  sel = null; rowOpen = -1;
+  history = []; hindex = -1;
+  render();
+}
+bootWith(TEMPLATES.tv());
 </script>
 </body>
 </html>
