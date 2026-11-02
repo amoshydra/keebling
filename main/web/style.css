@@ -1079,3 +1079,30 @@ input[type=checkbox], input[type=radio] { width: 18px; height: 18px; }
 .review-group.locked .review-head { color: #8a8a8a; }
 .review-problem { color: var(--warn); font-size: 12.5px; margin-top: 8px; }
 #uiProgress { width: 100%; height: 6px; margin-top: 12px; }
+
+/* Two kinds of deck button; the switch reads as a pair of choices, not tabs. */
+.segmented { display: flex; gap: 4px; }
+.segmented button {
+  flex: 1 1 0;
+  height: 36px;
+  border-radius: 8px;
+  background: #202020;
+  color: #8c8c8c;
+  font-size: 12.5px;
+}
+.segmented button.on {
+  background: #23364d;
+  color: #dce9f7;
+  box-shadow: inset 0 0 0 1px #365b83;
+}
+select#editKey {
+  width: 100%;
+  height: 40px;
+  border-radius: 8px;
+  background: #202020;
+  border: 1px solid #2c2c2c;
+  color: #ddd;
+  font-size: 13px;
+  padding: 0 10px;
+}
+.macro.keybutton .run { letter-spacing: .5px; }

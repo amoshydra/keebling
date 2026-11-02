@@ -67,7 +67,11 @@ async function buildOnce() {
       collapseWhitespace: true,
       conservativeCollapse: true,
       removeComments: true,
-      removeRedundantAttributes: true,
+      // Not removeRedundantAttributes: it strips type="text" from inputs
+      // because it is the default, and the stylesheet selects on
+      // input[type=text] - every field then renders with the browser's white
+      // default. The attribute is redundant to a parser and load-bearing to CSS.
+      removeRedundantAttributes: false,
       useShortDoctype: true,
       minifyCSS: true,
       minifyJS: true,

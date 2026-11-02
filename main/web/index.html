@@ -459,6 +459,13 @@
                autocomplete="off" autocapitalize="none" placeholder="Open Chrome">
       </div>
       <div class="field">
+        <span>Type</span>
+        <div id="editKind" class="segmented" role="group" aria-label="Button type">
+          <button type="button" data-kind="script" class="on">Script</button>
+          <button type="button" data-kind="key">Hold a key</button>
+        </div>
+      </div>
+      <div class="field">
         <span>Colour</span>
         <div id="editColours" class="swatches" role="group" aria-label="Button colour">
           <button type="button" data-colour="grey" aria-label="Grey"></button>
@@ -468,24 +475,31 @@
           <button type="button" data-colour="green" aria-label="Green"></button>
         </div>
       </div>
-      <div class="field">
+      <div class="field" id="editHoldField">
         <label style="font-size:13px;display:flex;gap:10px;align-items:center">
           <input type="checkbox" id="editHold">
           <span>Run while held, stop on release</span>
         </label>
       </div>
-      <div class="field">
+      <div class="field" id="editKeyField" hidden>
+        <span>Key</span>
+        <select id="editKey"></select>
+        <p class="note">The key stays down while your finger is, so the host
+          repeats it — the difference between an arrow key and a macro that
+          presses it once.</p>
+      </div>
+      <div class="field" id="editStepsField">
         <span>Steps</span>
         <textarea id="editSteps" rows="3" spellcheck="false" autocapitalize="none"
                   autocomplete="off" placeholder="{SEARCH}chrome{ENTER}"></textarea>
       </div>
-      <details>
+      <details id="editInsert">
         <summary class="note" style="cursor:pointer">Insert a token</summary>
         <div class="chips" id="chips"></div>
       </details>
       <div class="note" id="parsePreview" style="margin-top:10px"></div>
       <div class="row" style="margin-top:12px">
-        <button id="editSave" class="primary">Save macro</button>
+        <button id="editSave" class="primary">Save button</button>
         <button id="editCancel">Cancel</button>
       </div>
     </section>

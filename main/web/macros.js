@@ -14,7 +14,7 @@
 // init(), and destroy() has to stop the socket, the heartbeat and any run.
 
 
-import { appSettings, saveSettingsToDevice, token } from './common.js';
+import { HID_KEYS, appSettings, saveSettingsToDevice, token } from './common.js';
 import { describeMacroStep, parseMacro, refreshMacroText, runMacro } from './macro.js';
 
 export const MacrosView = (() => {
@@ -101,9 +101,57 @@ function send(bytes) {
 // Same heartbeat as the control page: the device releases everything held when
 // it stops hearing from a browser. Both this timer and the pagehide listener
 // are owned by init() and stopped by destroy().
-function onPageHide() { send(new Uint8Array([0x05])); }
+function onPageHide() {
+  releaseAllKeys();
+  send(new Uint8Array([0x05]));
+}
 
 // ---------------------------------------------------------------- model
+// A deck button is either a script or a held key. The difference is what the
+// host sees: a script is a burst of press/release pairs, a key stays down, so
+// the host repeats it - held arrows, a held volume key, a game's WASD.
+//
+// Kept as two kinds rather than one DSL because holding is not expressible as
+// a sequence: the duration is the finger's, not the macro's.
+const KEY_CHOICES = [
+  ['ArrowUp', '↑ Up'], ['ArrowDown', '↓ Down'], ['ArrowLeft', '← Left'], ['ArrowRight', '→ Right'],
+  ['Enter', '⏎ Enter'], ['Escape', 'Esc'], ['Tab', 'Tab'], ['Space', 'Space'],
+  ['Backspace', 'Backspace'], ['Delete', 'Delete'], ['Home', 'Home'], ['End', 'End'],
+  ['PageUp', 'Page Up'], ['PageDown', 'Page Down'],
+];
+
+// Consumer Control usages, as {SEARCH}-style names would only confuse here.
+const CONSUMER_CHOICES = [
+  [0x00CD, 'Play / pause'], [0x00B5, 'Next track'], [0x00B6, 'Previous track'],
+  [0x00B7, 'Stop'], [0x00E9, 'Volume up'], [0x00EA, 'Volume down'], [0x00E2, 'Mute'],
+  [0x0223, 'Browser home'], [0x0224, 'Browser back'], [0x0225, 'Browser forward'],
+];
+
+function sanitizeKey(k) {
+  if (!k || typeof k !== 'object') return null;
+  if (k.kind === 'key' && typeof k.code === 'string' && HID_KEYS[k.code]) {
+    return { kind: 'key', code: k.code };
+  }
+  if (k.kind === 'consumer') {
+    const usage = Number(k.usage);
+    if (Number.isFinite(usage) && usage > 0 && usage <= 0xFFFF) {
+      return { kind: 'consumer', usage: usage | 0 };
+    }
+  }
+  return null;
+}
+
+// The label a held key shows, from whichever catalogue it came from.
+function keyName(k) {
+  if (!k) return '';
+  if (k.kind === 'key') {
+    const hit = KEY_CHOICES.find(([code]) => code === k.code);
+    return hit ? hit[1] : k.code;
+  }
+  const hit = CONSUMER_CHOICES.find(([usage]) => usage === k.usage);
+  return hit ? hit[1] : `0x${Number(k.usage).toString(16)}`;
+}
+
 let macros = [];
 let confirmDelete = null;      // index waiting for a second tap on Delete
 
@@ -120,8 +168,9 @@ function sanitizeMacros(list) {
       colour: COLOURS.includes(m.colour) ? m.colour : '',
       page: String(m.page || DEFAULT_PAGE),
       hold: !!m.hold,
+      key: sanitizeKey(m.key),
     }))
-    .filter((m) => m.name || m.steps);
+    .filter((m) => m.name || m.steps || m.key);
   return { kept, dropped: raw.length - kept.length };
 }
 
@@ -394,6 +443,60 @@ function deletePage() {
 // A deck button: the whole tile is the target, so a thumb does not have to find
 // a small "run". Editing is a mode rather than a long press, because a long
 // press cannot be discovered and cannot be done with a keyboard.
+// What the host is told while a held-key button is down. Reports are state,
+// not events: one on press, one clearing it on release, and the host supplies
+// the repeat.
+const heldCodes = new Set();
+let heldConsumer = 0;
+
+function sendHeldKeys() {
+  const report = new Uint8Array(8);
+  report[0] = 0x02;
+  [...heldCodes].slice(0, 6).forEach((usage, i) => { report[2 + i] = usage; });
+  send(report);
+  // The bar is not shown for a held key: there is nothing to run or to stop,
+  // and a progress bar under a finger that is already doing the work is noise.
+}
+
+function sendHeldConsumer() {
+  send(new Uint8Array([0x03, heldConsumer & 0xFF, (heldConsumer >> 8) & 0xFF]));
+}
+
+function pressKey(k) {
+  if (!wsReady) {
+    runBarRefused('Not connected', 'Reload this page; the deck needs the socket.');
+    return false;
+  }
+  if (k.kind === 'consumer') {
+    heldConsumer = k.usage;
+    sendHeldConsumer();
+  } else {
+    heldCodes.add(HID_KEYS[k.code]);
+    sendHeldKeys();
+  }
+  return true;
+}
+
+function releaseKey(k) {
+  if (k.kind === 'consumer') {
+    if (heldConsumer !== k.usage) return;
+    heldConsumer = 0;
+    sendHeldConsumer();
+  } else {
+    if (!heldCodes.delete(HID_KEYS[k.code])) return;
+    sendHeldKeys();
+  }
+}
+
+// A view that unmounts mid-hold must not leave a key down on the host.
+function releaseAllKeys() {
+  if (!heldCodes.size && !heldConsumer) return;
+  heldCodes.clear();
+  heldConsumer = 0;
+  sendHeldKeys();
+  sendHeldConsumer();
+}
+
 function deckTile(m, i) {
   const parsed = parseMacro(m.steps);
   const tile = el('div', 'macro');
@@ -401,10 +504,29 @@ function deckTile(m, i) {
   if (m.colour) tile.classList.add('c-' + m.colour);
   if (editMode) tile.classList.add('editing');
 
-  const run = el('button', 'run', 'Run');
+  const run = el('button', 'run', m.key ? 'Hold' : 'Run');
   run.title = editMode ? `Edit ${macroTitle(m, i)}` : `Run ${macroTitle(m, i)}`;
   run.disabled = running && !editMode;
-  if (m.hold && !editMode) {
+
+  if (m.key) {
+    tile.classList.add('hold', 'keybutton');
+    if (!editMode) {
+      const down = (e) => {
+        e.preventDefault();
+        // Take the pointer, so a finger that slides off still gets its release
+        // here rather than leaving the key down.
+        try { run.setPointerCapture(e.pointerId); } catch (_) {}
+        pressKey(m.key);
+      };
+      const up = () => releaseKey(m.key);
+      run.addEventListener('pointerdown', down);
+      for (const t of ['pointerup', 'pointercancel', 'lostpointercapture']) {
+        run.addEventListener(t, up);
+      }
+    } else {
+      run.addEventListener('click', () => openEditor(i));
+    }
+  } else if (m.hold && !editMode) {
     // Hold to run, release to stop. The macro carries its own {REPEAT} when it
     // is meant to loop, so there is no second loop here to get out of step.
     tile.classList.add('hold');
@@ -423,8 +545,8 @@ function deckTile(m, i) {
 
   tile.appendChild(run);
   tile.appendChild(el('span', 'name', macroTitle(m, i)));
-  tile.appendChild(el('span', 'src', m.steps || '(empty)'));
-  if (parsed.errors.length) {
+  tile.appendChild(el('span', 'src', m.key ? `${keyName(m.key)} · held` : (m.steps || '(empty)')));
+  if (!m.key && parsed.errors.length) {
     tile.appendChild(el('div', 'bad',
       parsed.errors.map((e) => `${e.token}: ${e.message}`).join(' · ')));
   }
@@ -444,7 +566,7 @@ function deckTile(m, i) {
       actionButton('Delete', () => { confirmDelete = i; render(); }),
     );
   }
-  if (m.hold) tile.appendChild(el('span', 'holdtag', 'HOLD'));
+  if (m.hold || m.key) tile.appendChild(el('span', 'holdtag', 'HOLD'));
   tile.appendChild(acts);
   // In edit mode the overlay is hidden, so the tile itself opens the editor -
   // the same thing the overlay does when it is visible.
@@ -487,6 +609,8 @@ let editorOpen = false;
 let editIndex = -1;
 let editColour = '';
 let editHold = false;
+let editKind = 'script';       // 'script' | 'key'
+let editKey = null;            // { kind, code|usage } when editKind is 'key'
 let editPage = DEFAULT_PAGE;
 let deckPages = [DEFAULT_PAGE];
 let activePage = DEFAULT_PAGE;
@@ -498,16 +622,77 @@ function openEditor(index) {
   nameEl.value = m.name;
   editColour = COLOURS.includes(m.colour) ? m.colour : '';
   editHold = !!m.hold;
+  editKind = m.key ? 'key' : 'script';
+  editKey = m.key ? { ...m.key } : { kind: 'key', code: 'ArrowUp' };
   const holdBox = document.getElementById('editHold');
   if (holdBox) holdBox.checked = editHold;
   editPage = index >= 0 ? (macros[index].page || DEFAULT_PAGE) : activePage;
   paintColourSwatches();
   stepsEl.value = m.steps;
-  editorTitleEl.textContent = index >= 0 ? 'Edit macro' : 'New macro';
+  paintKind();
+  editorTitleEl.textContent = index >= 0 ? 'Edit button' : 'New button';
   editorEl.classList.add('show');
   showSaveNote('');
   updatePreview();
   editorEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+// Builds the key picker once, then keeps the two views of it in step.
+function buildKeyChoices() {
+  const pick = document.getElementById('editKey');
+  if (!pick || pick.dataset.built) return;
+  pick.dataset.built = '1';
+
+  const keys = document.createElement('optgroup');
+  keys.label = 'Keys';
+  for (const [code, label] of KEY_CHOICES) {
+    const o = document.createElement('option');
+    o.value = 'key:' + code;
+    o.textContent = label;
+    keys.appendChild(o);
+  }
+
+  const media = document.createElement('optgroup');
+  media.label = 'Media & browser';
+  for (const [usage, label] of CONSUMER_CHOICES) {
+    const o = document.createElement('option');
+    o.value = 'consumer:' + usage;
+    o.textContent = label;
+    media.appendChild(o);
+  }
+
+  pick.append(keys, media);
+  pick.addEventListener('change', () => {
+    const [kind, value] = pick.value.split(':');
+    editKey = kind === 'consumer' ? { kind, usage: Number(value) } : { kind, code: value };
+  });
+}
+
+function paintKind() {
+  buildKeyChoices();
+  const seg = document.getElementById('editKind');
+  if (seg) {
+    for (const b of seg.querySelectorAll('button[data-kind]')) {
+      b.classList.toggle('on', b.dataset.kind === editKind);
+    }
+  }
+  const keyField = document.getElementById('editKeyField');
+  const stepsField = document.getElementById('editStepsField');
+  const insert = document.getElementById('editInsert');
+  const isKey = editKind === 'key';
+  if (keyField) keyField.hidden = !isKey;
+  if (stepsField) stepsField.hidden = isKey;
+  if (insert) insert.hidden = isKey;
+  // Holding a button is its own behaviour: the hold checkbox belongs to scripts.
+  const holdField = document.getElementById('editHoldField');
+  if (holdField) holdField.hidden = isKey;
+
+  const pick = document.getElementById('editKey');
+  if (pick && editKey) {
+    pick.value = editKey.kind === 'consumer'
+      ? `consumer:${editKey.usage}`
+      : `key:${editKey.code}`;
+  }
 }
 
 function paintColourSwatches() {
@@ -526,17 +711,25 @@ function closeEditor() {
 }
 
 async function saveEditor() {
-  if (!stepsEl.value.trim()) {
+  if (editKind === 'key') {
+    if (!editKey) {
+      showSaveNote('Not saved: no key chosen.', true);
+      return;
+    }
+  } else if (!stepsEl.value.trim()) {
     showSaveNote('Not saved: the macro has no steps.', true);
     return;
   }
   const next = macros.slice();
   const entry = {
     name: nameEl.value.trim(),
-    steps: stepsEl.value,
+    steps: editKind === 'key' ? '' : stepsEl.value,
     colour: editColour,
     page: editPage,
-    hold: editHold,
+    // A held key is held by definition; the flag only means something to a
+    // script, and a stale one would show a HOLD tag on the wrong button.
+    hold: editKind === 'key' ? false : editHold,
+    key: editKind === 'key' ? editKey : null,
   };
   if (editIndex >= 0) next[editIndex] = entry;
   else next.push(entry);
@@ -547,8 +740,15 @@ async function saveEditor() {
 // Live parse of what is in the box, so a bad token is named before the run
 // rather than during it.
 function updatePreview() {
-  const parsed = parseMacro(stepsEl.value);
   previewEl.textContent = '';
+  if (editKind === 'key') {
+    const label = keyName(editKey);
+    previewEl.appendChild(el('div', 'plan',
+      `${label}: sent the moment it is pressed and cleared on release, so the host repeats it.`));
+    updateMeter();
+    return;
+  }
+  const parsed = parseMacro(stepsEl.value);
 
   for (const e of parsed.errors) {
     previewEl.appendChild(el('div', 'err', `${e.token} (character ${e.index + 1}): ${e.message}`));
@@ -769,6 +969,16 @@ async function init() {
   document.getElementById('macroAdd').addEventListener('click', () => openEditor(-1));
   const holdBox = document.getElementById('editHold');
   if (holdBox) holdBox.addEventListener('change', () => { editHold = holdBox.checked; });
+  const kindRow = document.getElementById('editKind');
+  if (kindRow) {
+    kindRow.addEventListener('click', (e) => {
+      const b = e.target.closest ? e.target.closest('button[data-kind]') : null;
+      if (!b) return;
+      editKind = b.dataset.kind === 'key' ? 'key' : 'script';
+      paintKind();
+      updatePreview();
+    });
+  }
   const colourRow = document.getElementById('editColours');
   if (colourRow) {
     colourRow.addEventListener('click', (e) => {
@@ -811,7 +1021,10 @@ function destroy() {
   clearTimeout(reconnectTimer);
   reconnectTimer = null;
 
-  // Release anything the device may still be holding before the socket goes.
+  // Release anything the device may still be holding before the socket goes:
+  // a held key from the deck included.
+  heldCodes.clear();
+  heldConsumer = 0;
   send(new Uint8Array([0x05]));
 
   if (ws) {

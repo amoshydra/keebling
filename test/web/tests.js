@@ -3625,6 +3625,142 @@ __webTests.push({
 });
 
 
+// ---------------------------------------------------------------- deck: held keys
+async function __addKeyButton(code, name) {
+  document.getElementById('macroAdd').click();
+  await __sleep(50);
+  document.querySelector('#editKind [data-kind="key"]').click();
+  const pick = document.getElementById('editKey');
+  pick.value = code;
+  pick.dispatchEvent(new Event('change', { bubbles: true }));
+  document.getElementById('editName').value = name;
+  document.getElementById('editSave').click();
+  await __sleep(200);
+}
+
+const __keyTile = (name) => [...document.querySelectorAll('.macro')]
+  .find((t) => t.querySelector('.name').textContent === name);
+
+__webTests.push({
+  page: 'macros',
+  name: 'the editor fields keep the app styles, not the browser default',
+  fn: async () => {
+    // The stylesheet selects on input[type=text]. A minifier that drops the
+    // attribute "because it is the default" leaves every field white.
+    document.getElementById('macroAdd').click();
+    await __sleep(80);
+    const bg = getComputedStyle(document.getElementById('editName')).backgroundColor;
+    __assert(bg !== 'rgb(255, 255, 255)', 'the name field fell back to the browser default');
+    __assert(document.getElementById('editName').getAttribute('type') === 'text',
+      'type=text was stripped from the built page');
+    document.getElementById('editCancel').click();
+  },
+});
+
+__webTests.push({
+  page: 'macros',
+  name: 'a deck button can be a held key, not only a script',
+  fn: async () => {
+    await __addKeyButton('key:ArrowUp', 'Held up');
+
+    const tile = __keyTile('Held up');
+    __assert(tile, 'the button was not added');
+    __assert(tile.classList.contains('keybutton'), 'the tile is not marked as a key');
+    __assert(tile.querySelector('.holdtag'), 'the tile does not say HOLD');
+    __assert(tile.querySelector('.src').textContent.includes('held'),
+      `the tile says "${tile.querySelector('.src').textContent}"`);
+
+    const stored = JSON.parse(localStorage.getItem('esp32remote.macros'));
+    const entry = stored.find((m) => m.name === 'Held up');
+    __assert(entry && entry.key && entry.key.kind === 'key' && entry.key.code === 'ArrowUp',
+      `stored: ${JSON.stringify(entry)}`);
+    __assert(entry.steps === '', `a key button stored steps: ${JSON.stringify(entry.steps)}`);
+  },
+});
+
+__webTests.push({
+  page: 'macros',
+  name: 'holding a key button holds the key, and releasing clears it',
+  fn: async () => {
+    await __addKeyButton('key:ArrowDown', 'Held down');
+    const tile = __keyTile('Held down');
+    const cap = __macroCapture();
+
+    const run = tile.querySelector('.run');
+    run.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 1 }));
+    await __sleep(50);
+
+    const down = cap.filter((r) => r[0] === 2 && r[2] !== 0);
+    __assert(down.length === 1, `press sent ${JSON.stringify(cap)}`);
+    __assert(down[0][2] === 0x51, `pressed 0x${down[0][2].toString(16)}, expected 0x51 (ArrowDown)`);
+    // One report, not a stream: the host repeats a held key by itself.
+    __assert(down[0].slice(3).every((b) => b === 0), `the report is not a single key: ${down[0]}`);
+
+    run.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 1 }));
+    await __sleep(50);
+    const cleared = cap.slice(-1)[0];
+    __assert(cleared[0] === 2 && cleared[2] === 0,
+      `release sent ${JSON.stringify(cleared)}, expected an empty keyboard report`);
+  },
+});
+
+__webTests.push({
+  page: 'macros',
+  name: 'a media key on the deck is a consumer report, held and cleared',
+  fn: async () => {
+    await __addKeyButton('consumer:226', 'Held mute');   // 0xE2, Mute
+    const tile = __keyTile('Held mute');
+    const cap = __macroCapture();
+
+    const run = tile.querySelector('.run');
+    run.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 2 }));
+    await __sleep(50);
+    const down = cap.filter((r) => r[0] === 3 && (r[1] || r[2]));
+    __assert(down.length === 1 && down[0][1] === 0xE2 && down[0][2] === 0,
+      `press sent ${JSON.stringify(cap)}`);
+
+    run.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 2 }));
+    await __sleep(50);
+    const last = cap.slice(-1)[0];
+    __assert(last[0] === 3 && last[1] === 0 && last[2] === 0,
+      `release sent ${JSON.stringify(last)}`);
+
+    const stored = JSON.parse(localStorage.getItem('esp32remote.macros'));
+    const entry = stored.find((m) => m.name === 'Held mute');
+    __assert(entry.key.kind === 'consumer' && entry.key.usage === 0xE2,
+      `stored: ${JSON.stringify(entry.key)}`);
+  },
+});
+
+__webTests.push({
+  page: 'macros',
+  name: 'leaving the deck releases a key that is still held',
+  fn: async () => {
+    await __addKeyButton('key:ArrowLeft', 'Held left');
+    const tile = __keyTile('Held left');
+    const cap = __macroCapture();
+
+    const run = tile.querySelector('.run');
+    run.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 3 }));
+    await __sleep(50);
+    const press = cap.find((r) => r[0] === 2 && r[2] === 0x50);
+    __assert(press, `the press was not sent: ${JSON.stringify(cap)}`);
+
+    // Navigate away without a pointerup: the finger was still down when the
+    // view went, which is the case that would otherwise leave a key stuck on
+    // the host.
+    location.hash = '#/';
+    await __sleep(300);
+
+    // Release-all is the device's own primitive (input_release_all): it clears
+    // the keyboard, the consumer usage and the mouse in one message, so the
+    // page does not have to know which of them was held.
+    const after = cap.slice(cap.indexOf(press) + 1);
+    __assert(after.some((r) => r[0] === 5),
+      `no release-all after the hold: ${JSON.stringify(cap)}`);
+  },
+});
+
 // ---------------------------------------------------------------- navigation
 // The four views are templates in one shell; changing the hash mounts one and
 // unmounts the other. These tests drive the router exactly as a user does.
