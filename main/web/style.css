@@ -9,12 +9,12 @@
   --ink: #eee;
   --dim: #888;
   --line: #333;
-  /* #1976d2 puts --ink at 3.9:1 on a primary button, under the 4.5:1 that
-     14px white text needs. This shade clears it at 4.9:1 and still reads as
-     blue rather than navy. */
-  --accent: #1565c0;
+  /* Amber is the brand accent. Primary buttons use dark ink rather than white:
+     #1b1308 on #f2a93b clears 4.5:1 with room to spare, where white on amber
+     does not. Coral is the warning colour so it stays distinct from amber. */
+  --accent: #f2a93b;
   --danger: #b3261e;
-  --warn: #ffb74d;
+  --warn: #ff8a65;
 }
 
 /* Nothing in this UI is meant to be selected, dragged or scrolled by the
@@ -99,7 +99,7 @@ button {
   -webkit-tap-highlight-color: transparent;
 }
 button:active { background: #555; }
-button.primary { background: var(--accent); }
+button.primary { background: var(--accent); color: #1b1308; }
 button.danger { background: var(--danger); }
 button:disabled { opacity: .45; }
 
@@ -712,9 +712,10 @@ textarea { font-family: ui-monospace, SFMono-Regular, monospace; resize: vertica
 .k.space { flex: 5; font-size: 12px; color: #9d9d9d; }
 .k.pagekey { background: #333; color: #cfcfcf; }
 .k.mod { background: #3a3a3a; }
-.k.active { background: var(--accent); }
+.k.active { background: var(--accent); color: #1b1308; }
+.k.active .a { color: rgba(27, 19, 8, .62); }
 /* Latched is not the same as pressed: it persists after your finger leaves and
-   changes what the *next* key does. Amber against the blue pressed state, with
+   changes what the *next* key does. Coral against the amber pressed state, with
    a dashed ring, is a different shape and colour rather than a shade of one. */
 .k.latched {
   background: var(--warn);
@@ -745,8 +746,8 @@ textarea { font-family: ui-monospace, SFMono-Regular, monospace; resize: vertica
   -webkit-tap-highlight-color: transparent;
 }
 .m small { display: block; font-size: 9px; color: #999; margin-top: 5px; }
-.m.active { background: var(--accent); }
-.m.active small { color: #ddd; }
+.m.active { background: var(--accent); color: #1b1308; }
+.m.active small { color: rgba(27, 19, 8, .65); }
 
 /* Phone: the slot takes the height its content needs and the pad gives way.
    These caps dated from when the keyboard sat above a row of controls and had

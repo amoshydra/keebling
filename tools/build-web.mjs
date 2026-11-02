@@ -32,7 +32,10 @@ const PAGES = ['index.html', 'recover.html'];
 // come from the binary. Shipping it inside the archive made every upload fail
 // whole, which is the behaviour the archive is for - and a fine way to find out.
 const SERVED = ['index.html', 'style.css', 'app.js'];
-const ASSETS = ['app.js', 'style.css', ...PAGES];
+// Built-in only: the PWA manifest and home-screen icons. They are not in the
+// upload bundle, so a UI upload cannot leave the install metadata missing.
+const STATIC = ['manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'icon-180.png'];
+const ASSETS = [...STATIC, 'app.js', 'style.css', ...PAGES];
 
 const kb = (n) => `${(n / 1024).toFixed(1)} KB`;
 
@@ -79,6 +82,8 @@ async function buildOnce() {
       ignoreCustomFragments: [],
     })));
   }
+
+  for (const name of STATIC) out.set(name, await fs.readFile(path.join(SRC, name)));
 
   let total = 0;
   for (const [name, body] of out) {

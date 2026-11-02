@@ -199,7 +199,7 @@ export function startStub(port = 0) {
         if (!needAuth()) return;
         return json({
           product: device.settings.usb_product || 'Keebling',
-          manufacturer: device.settings.usb_manufacturer || 'ESP32',
+          manufacturer: device.settings.usb_manufacturer || 'amoshydra',
           serial: '44:1B:F6:ED:88:EC',
           interface: device.settings.usb_interface || 'Keyboard Mouse Media',
           endpoint_size: 16,

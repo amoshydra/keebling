@@ -29,4 +29,8 @@ idf_component_register(
         "web/dist/style.css"
         "web/dist/app.js"
         "web/dist/recover.html"
+        "web/dist/manifest.webmanifest"
+        "web/dist/icon-192.png"
+        "web/dist/icon-512.png"
+        "web/dist/icon-180.png"
 )

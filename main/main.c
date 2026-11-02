@@ -131,6 +131,7 @@ static void show_status_screen(void) {
     display_clear();
 
     display_status(LCD_LINE_TITLE, "Keebling");
+    display_mark(LCD_W - 32, 0);
 
     if (wifi_mgr_state() == WIFI_MGR_STA) {
         char l[40];

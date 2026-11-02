@@ -25,6 +25,10 @@ void display_status(int line, const char *text);
 // Draw text at an absolute pixel position (used beside the boot QR).
 void display_text(int x, int y, const char *text);
 
+// Draw the 32x16 googly-dongle mark at (x, y), top-left. Mutates and flushes
+// the framebuffer like display_text(); safe to call from the tick task.
+void display_mark(int x, int y);
+
 // Clear from x to the end of `line`, then draw - safe for redrawing.
 void display_text_line(int x, int line, const char *text);
 

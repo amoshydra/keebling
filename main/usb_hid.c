@@ -52,7 +52,7 @@ static const uint8_t pointer_report_descriptor[] = {
 // no public setter to change one afterwards.
 static const char s_lang[2] = {0x09, 0x04};   // English (0x0409)
 static char s_product[SETTINGS_HID_NAME_MAX + 1] = "Keebling";
-static char s_manufacturer[SETTINGS_HID_NAME_MAX + 1] = "ESP32";
+static char s_manufacturer[SETTINGS_HID_NAME_MAX + 1] = "amoshydra";
 // Interface label. Most single-interface keyboards omit this (index 0) because
 // the class code already says what it is; devices with several HID interfaces
 // name each one so the host can tell them apart. Ours is one interface

@@ -41,6 +41,14 @@ extern const unsigned char style_css_start[]     asm("_binary_style_css_start");
 extern const unsigned char style_css_end[]       asm("_binary_style_css_end");
 extern const unsigned char app_js_start[]        asm("_binary_app_js_start");
 extern const unsigned char app_js_end[]          asm("_binary_app_js_end");
+extern const unsigned char manifest_webmanifest_start[] asm("_binary_manifest_webmanifest_start");
+extern const unsigned char manifest_webmanifest_end[]   asm("_binary_manifest_webmanifest_end");
+extern const unsigned char icon_192_png_start[]  asm("_binary_icon_192_png_start");
+extern const unsigned char icon_192_png_end[]    asm("_binary_icon_192_png_end");
+extern const unsigned char icon_512_png_start[]  asm("_binary_icon_512_png_start");
+extern const unsigned char icon_512_png_end[]    asm("_binary_icon_512_png_end");
+extern const unsigned char icon_180_png_start[]  asm("_binary_icon_180_png_start");
+extern const unsigned char icon_180_png_end[]    asm("_binary_icon_180_png_end");
 
 // The archive cap belongs with the asset table: the listing advertises it and
 // the upload enforces it, and the two must not drift apart.
@@ -62,14 +70,18 @@ typedef struct {
 // This table is also the upload whitelist: only names that appear here can be
 // written, so a request cannot invent a path. "/" and "/index.html" are the
 // same file; the listing endpoint collapses them.
-// Three files, because the UI is built into a bundle. The source files this
-// table used to name no longer exist on the device; a request for one of them
-// is a stale page, and a 404 is the honest answer.
+// The UI bundle plus the PWA manifest and home-screen icons. The source files
+// this table used to name no longer exist on the device; a request for one of
+// them is a stale page, and a 404 is the honest answer.
 static const static_asset_t s_assets[] = {
-    { "/",              "text/html",              "index.html", index_html_start, index_html_end },
-    { "/index.html",    "text/html",              "index.html", index_html_start, index_html_end },
-    { "/style.css",     "text/css",               "style.css",  style_css_start,  style_css_end },
-    { "/app.js",        "application/javascript", "app.js",     app_js_start,     app_js_end },
+    { "/",                      "text/html",                "index.html",          index_html_start,          index_html_end },
+    { "/index.html",            "text/html",                "index.html",          index_html_start,          index_html_end },
+    { "/style.css",             "text/css",                 "style.css",           style_css_start,           style_css_end },
+    { "/app.js",                "application/javascript",   "app.js",              app_js_start,              app_js_end },
+    { "/manifest.webmanifest",  "application/manifest+json", "manifest.webmanifest", manifest_webmanifest_start, manifest_webmanifest_end },
+    { "/icon-192.png",          "image/png",                "icon-192.png",        icon_192_png_start,        icon_192_png_end },
+    { "/icon-512.png",          "image/png",                "icon-512.png",        icon_512_png_start,        icon_512_png_end },
+    { "/icon-180.png",          "image/png",                "icon-180.png",        icon_180_png_start,        icon_180_png_end },
 };
 #define ASSET_COUNT (sizeof(s_assets) / sizeof(s_assets[0]))
 

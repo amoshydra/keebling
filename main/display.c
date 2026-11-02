@@ -309,6 +309,50 @@ void display_status(int line, const char *text) {
     xSemaphoreGive(s_fb_lock);
 }
 
+// Filled primitives for the tiny brand mark. Caller holds s_fb_lock.
+static void fill_rect(int x, int y, int w, int h, uint16_t color) {
+    for (int yy = y; yy < y + h; yy++) {
+        if (yy < 0 || yy >= LCD_H) continue;
+        for (int xx = x; xx < x + w; xx++) {
+            if (xx < 0 || xx >= LCD_W) continue;
+            size_t off = (size_t)(yy * LCD_W + xx) * 2;
+            s_fb[off] = color >> 8;
+            s_fb[off + 1] = color & 0xFF;
+        }
+    }
+}
+
+static void fill_circle(int cx, int cy, int r, uint16_t color) {
+    for (int yy = -r; yy <= r; yy++) {
+        for (int xx = -r; xx <= r; xx++) {
+            if (xx * xx + yy * yy <= r * r) fill_rect(cx + xx, cy + yy, 1, 1, color);
+        }
+    }
+}
+
+void display_mark(int x, int y) {
+    if (!s_ok || !s_fb_lock) return;
+
+    // Brand RGB565: cream shell, PCB green, black LCD, white eyes, silver plug.
+    const uint16_t cream  = 0xF739;
+    const uint16_t green  = 0x5CCD;
+    const uint16_t screen = 0x0882;
+    const uint16_t eye    = 0xFFFF;
+    const uint16_t plug   = 0xCE37;
+
+    xSemaphoreTake(s_fb_lock, portMAX_DELAY);
+    fill_rect(x, y + 5, 4, 6, plug);
+    fill_rect(x + 4, y + 4, 28, 12, cream);
+    fill_rect(x + 7, y + 6, 22, 8, green);
+    fill_rect(x + 9, y + 7, 18, 6, screen);
+    fill_circle(x + 15, y + 3, 3, eye);
+    fill_circle(x + 24, y + 3, 3, eye);
+    fill_circle(x + 16, y + 4, 1, screen);
+    fill_circle(x + 25, y + 4, 1, screen);
+    flush_locked();
+    xSemaphoreGive(s_fb_lock);
+}
+
 void display_text(int x, int y, const char *text) {
     if (!s_ok || !s_fb_lock || !text) return;
     xSemaphoreTake(s_fb_lock, portMAX_DELAY);
