@@ -839,7 +839,7 @@ on('backupFile', 'change', async (e) => {
     setBackupNote('That file is not readable as JSON.', true);
     return;
   }
-  if (!b || b.app !== 'keebling' || b.version !== BACKUP_VERSION) {
+  if (!b || (b.app !== 'keebling' && b.app !== 'esp32-remote') || b.version !== BACKUP_VERSION) {
     setBackupNote('Not a backup from this project, or from a version this page does ' +
                   'not understand. Nothing was changed.', true);
     return;
