@@ -17,16 +17,16 @@ login screen, in recovery mode, in a BIOS, on a machine whose own keyboard is br
 
 ## Website
 
-The landing page and brand sheet live in `site/`.
+The landing page lives in `site/`; the firmware is in `main/`, the device web UI
+in `main/web/`, and the brand sheet is the design artifact at `site/brand.html`.
 
 ```bash
 python3 -m http.server -d site 8080
 ```
 
-Then open <http://localhost:8080/>. Pushes to `main` deploy that folder with
-GitHub Actions (`.github/workflows/pages.yml`). The site is relative, so it also
-works from `https://amoshydra.github.io/keebling/` once the repository is renamed
-to `keebling`.
+Then open <http://localhost:8080/>. Pushes to `main` deploy the landing page with
+GitHub Actions (`.github/workflows/pages.yml`); the brand sheet and OG source stay
+in the repository but are not part of the public site.
 
 ## Hardware
 
