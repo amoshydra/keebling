@@ -238,6 +238,16 @@ export function startStub(port = 0) {
 
       // Mirrors the /ui/* endpoints in main/web_server.c: the whitelist, the
       // size cap and the refusal statuses.
+      case '/network':
+        if (!needAuth()) return;
+        return json({
+          state: 'joined',
+          ssid: 'home-wifi',
+          ip: '192.168.1.42',
+          ap_ip: '',
+          clients: 0,
+        });
+
       case '/ui/files':
         if (!needAuth()) return;
         return json({

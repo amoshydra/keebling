@@ -3625,6 +3625,24 @@ __webTests.push({
 });
 
 
+__webTests.push({
+  page: 'settings',
+  name: 'the network section shows what the device is actually joined to',
+  fn: async () => {
+    // It used to say "unknown" for ever: the word was in the markup and no
+    // code ever replaced it.
+    for (let i = 0; i < 40; i++) {
+      const t = document.getElementById('netState').textContent;
+      if (t.includes('home-wifi')) break;
+      await __sleep(50);
+    }
+    const text = document.getElementById('netState').textContent;
+    __assert(text.includes('home-wifi'), `the network line says: ${text}`);
+    __assert(text.includes('192.168.1.42'), `the network line says: ${text}`);
+    __assert(!text.includes('unknown'), `the network line still says: ${text}`);
+  },
+});
+
 // ---------------------------------------------------------------- deck: held keys
 async function __addKeyButton(code, name) {
   document.getElementById('macroAdd').click();

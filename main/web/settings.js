@@ -141,6 +141,33 @@ on('forgetCode', 'click', () => {
 });
 
 // ---------------------------------------------------------------- network
+// The network section used to say "unknown" for ever: the value was a
+// placeholder in the markup and nothing ever filled it. The device is the only
+// thing that knows.
+async function refreshNetwork() {
+  const out = document.getElementById('netState');
+  if (!out) return;
+  try {
+    const r = await apiFetch('/network');
+    if (!r.ok) {
+      out.textContent = `Could not read the network state (HTTP ${r.status}).`;
+      return;
+    }
+    const d = await r.json();
+    if (d.state === 'joined') {
+      out.textContent = `Joined “${d.ssid || '(unknown)'}” · ${d.ip || 'no address'}`;
+    } else if (d.state === 'connecting') {
+      out.textContent = 'Connecting to the saved network…';
+    } else {
+      const n = Number(d.clients) || 0;
+      out.textContent = `Access point · ${d.ap_ip || 'no address'} · ` +
+        `${n} client${n === 1 ? '' : 's'} connected`;
+    }
+  } catch (_) {
+    out.textContent = 'The device is unreachable.';
+  }
+}
+
 on('wifiScan', 'click', async () => {
   const list = document.getElementById('wifiList');
   list.textContent = 'scanning…';
@@ -1034,6 +1061,7 @@ function setupSections() {
 
 function showSetupPage(page) {
   setupPage = page && SETUP_ROWS.some((r) => r.page === page) ? page : '';
+  if (setupPage === 'network') refreshNetwork();
   for (const section of setupSections()) {
     // With no page chosen every section is hidden and the list stands alone.
     section.hidden = setupPage ? section.dataset.page !== setupPage : true;
@@ -1105,8 +1133,9 @@ async function init() {
   if (!saveNote) return;          // unmounted while the device was answering
   saveNote.textContent = '';
 
-  // Best-effort: the device's own view of the network, from its logs.
+  // Best-effort: the device's own view of the network.
   setStatus('connected', 'on');
+  refreshNetwork();
 }
 
 function destroy() {

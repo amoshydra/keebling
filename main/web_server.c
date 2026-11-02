@@ -348,6 +348,44 @@ static esp_err_t state_handler(httpd_req_t *req) {
     return httpd_resp_sendstr(req, out);
 }
 
+// GET /network - what the WiFi is doing, for the setup page. The device knows
+// this from its own state machine; the browser cannot guess it, which is why
+// the page used to say "unknown" for ever.
+static esp_err_t network_handler(httpd_req_t *req) {
+    if (!req_authorised(req)) {
+        httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "forbidden");
+        return ESP_FAIL;
+    }
+
+    const wifi_mgr_state_t st = wifi_mgr_state();
+    const char *state = st == WIFI_MGR_STA ? "joined"
+                      : st == WIFI_MGR_CONNECTING ? "connecting"
+                      : "access-point";
+
+    cJSON *root = cJSON_CreateObject();
+    if (!root) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "oom");
+        return ESP_FAIL;
+    }
+    cJSON_AddStringToObject(root, "state", state);
+    cJSON_AddStringToObject(root, "ssid", wifi_mgr_joined_ssid());
+    cJSON_AddStringToObject(root, "ip", wifi_mgr_ip());
+    cJSON_AddStringToObject(root, "ap_ip", wifi_mgr_ap_ip());
+    cJSON_AddNumberToObject(root, "clients", wifi_mgr_client_count());
+
+    char *json = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (!json) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "oom");
+        return ESP_FAIL;
+    }
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    esp_err_t r = httpd_resp_sendstr(req, json);
+    free(json);
+    return r;
+}
+
 static esp_err_t hid_handler(httpd_req_t *req) {
     if (!req_authorised(req)) {
         httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "forbidden");
@@ -1407,6 +1445,7 @@ esp_err_t web_server_start(void) {
         { .uri = "/scan",       .method = HTTP_GET,  .handler = scan_handler },
         { .uri = "/logs",       .method = HTTP_GET,  .handler = logs_handler },
         { .uri = "/hid",        .method = HTTP_GET,  .handler = hid_handler },
+        { .uri = "/network",    .method = HTTP_GET,  .handler = network_handler },
         { .uri = "/state",      .method = HTTP_GET,  .handler = state_handler },
         { .uri = "/save",       .method = HTTP_POST, .handler = save_handler },
         { .uri = "/forget",     .method = HTTP_POST, .handler = forget_handler },
