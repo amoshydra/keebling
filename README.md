@@ -23,7 +23,7 @@ The landing page and brand sheet live in `site/`.
 python3 -m http.server -d site 8080
 ```
 
-Then open <http://localhost:8080/>. Pushes to `master` deploy that folder with
+Then open <http://localhost:8080/>. Pushes to `main` deploy that folder with
 GitHub Actions (`.github/workflows/pages.yml`). The site is relative, so it also
 works from `https://amoshydra.github.io/keebling/` once the repository is renamed
 to `keebling`.
