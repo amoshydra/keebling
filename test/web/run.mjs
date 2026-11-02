@@ -353,7 +353,7 @@ try {
 
   // The restore's device half: the form showing a new value is not evidence the
   // device was told, and this is the payload the restore produced.
-  report(lastSettings.usb_product === 'Restored Name',
+  report(lastSettings.usb_product === 'Legacy Restore',
     'the restored settings reached the device',
     `last payload carried usb_product ${JSON.stringify(lastSettings.usb_product)}`);
 

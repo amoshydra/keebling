@@ -1059,6 +1059,37 @@ __webTests.push({
 
 __webTests.push({
   page: 'settings',
+  name: 'a pre-rename backup still restores',
+  fn: async () => {
+    const payload = {
+      app: 'esp32-remote',
+      version: 1,
+      device: { usb_product: 'Legacy Restore', screen_timeout_s: 30 },
+      macros: [{ name: 'Legacy Macro', steps: '{ENTER}' }],
+    };
+    const input = document.getElementById('backupFile');
+    const dt = new DataTransfer();
+    dt.items.add(new File([JSON.stringify(payload)], 'legacy.json',
+      { type: 'application/json' }));
+    input.files = dt.files;
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+    await __sleep(400);
+
+    __assert(document.getElementById('usbProduct').value === 'Legacy Restore',
+      `the form shows ${document.getElementById('usbProduct').value}`);
+    __assert(document.getElementById('screenTimeout').value === '30',
+      `the timeout is ${document.getElementById('screenTimeout').value}`);
+
+    const stored = JSON.parse(localStorage.getItem('esp32remote.macros') || '[]');
+    __assert(stored.some((m) => m.name === 'Legacy Macro'), `macros: ${JSON.stringify(stored)}`);
+
+    const note = document.getElementById('backupNote').textContent;
+    __assert(note.includes('device settings restored'), `note: ${note}`);
+  },
+});
+
+__webTests.push({
+  page: 'settings',
   name: 'a file that is not a backup changes nothing',
   fn: async () => {
     const before = document.getElementById('usbProduct').value;
