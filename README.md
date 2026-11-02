@@ -37,6 +37,9 @@ in the repository but are not part of the public site.
 | Connector | USB Type-A male — needs a USB-A→USB-C adapter for a USB-C-only host |
 | Button | BOOT (GPIO0) — see *Button gestures* |
 
+> LILYGO and T-Dongle-S3 are trademarks of their respective owners. Keebling is
+> an independent project and is not affiliated with or endorsed by LILYGO.
+
 ### T-Dongle-S3 hardware notes
 
 These cost us real debugging time; they are not obvious from the ST7735 datasheet:

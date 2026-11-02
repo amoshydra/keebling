@@ -549,6 +549,17 @@ footer { padding: 56px 0 76px; }
 .foot-links { display: flex; gap: 22px; flex-wrap: wrap; }
 .foot-links a { font-family: var(--mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
 .foot-links a:hover { color: var(--amber); }
+.legal {
+  margin-top: 30px;
+  padding-top: 22px;
+  border-top: 1px solid var(--line);
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1.7;
+  letter-spacing: .02em;
+  color: var(--dim);
+  max-width: 760px;
+}
 
 /* --------------------------------------------------------------- reveal */
 .reveal { opacity: 0; transform: translateY(16px); transition: opacity .7s ease, transform .7s ease; }
