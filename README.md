@@ -1,3 +1,5 @@
+<p align="center"><img src="site/assets/favicon.svg" width="72" height="72" alt="Keebling"></p>
+
 # Keebling — USB HID bridge controlled from a browser
 
 > A baby keyboard that lives in your USB port.
