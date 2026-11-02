@@ -1059,6 +1059,32 @@ function setupSections() {
   return wrap ? [...wrap.querySelectorAll('section[data-page]')] : [];
 }
 
+// The section is part of the URL, so Back leaves a section before it leaves
+// Setup, and a link can point at one directly.
+function pageFromHash() {
+  const m = /^#\/(?:setup|settings)\/([a-z0-9-]+)/.exec(location.hash);
+  return m ? m[1] : '';
+}
+
+// Keep whichever of the two Setup paths the user arrived by. Switching to the
+// canonical one would be a different route to the router, which remounts the
+// whole view and throws the form away - for a section change that only needs
+// to swap which part is visible.
+function setupBase() {
+  const m = /^#(\/(?:setup|settings))/.exec(location.hash);
+  return m ? m[1] : '/setup';
+}
+
+function goToPage(page) {
+  const base = setupBase();
+  const want = page ? `#${base}/${page}` : `#${base}`;
+  if (location.hash === want) {
+    showSetupPage(page);
+    return;
+  }
+  location.hash = want;      // the router hears it and calls show()
+}
+
 function showSetupPage(page) {
   setupPage = page && SETUP_ROWS.some((r) => r.page === page) ? page : '';
   if (setupPage === 'network') refreshNetwork();
@@ -1090,7 +1116,7 @@ function renderSetupList() {
     const value = typeof row.value === 'function' ? row.value() : '';
     if (value) b.appendChild(h('span', 'vl', value));
     b.appendChild(h('span', 'ch', '\u203A'));
-    b.addEventListener('click', () => showSetupPage(row.page));
+    b.addEventListener('click', () => goToPage(row.page));
     list.appendChild(b);
   }
 }
@@ -1121,9 +1147,9 @@ async function init() {
     });
   }
   renderSetupList();
-  showSetupPage('');
+  showSetupPage(pageFromHash());
   const setupBack = document.getElementById('setupBack');
-  if (setupBack) setupBack.addEventListener('click', () => showSetupPage(''));
+  if (setupBack) setupBack.addEventListener('click', () => goToPage(''));
   probeAttach();
   screenImageBytes = null;
   screenImageSource = null;
@@ -1161,6 +1187,8 @@ function destroy() {
 return {
   init,
   destroy,
+  // Called by the router when only the section changed, not the view.
+  show(page) { showSetupPage(page || ''); },
   packScreenImage,
   screenImageValid,
   renderScreenImage,

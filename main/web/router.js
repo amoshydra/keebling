@@ -49,16 +49,31 @@ export const Router = (() => {
     '/setup': 'setup', '/settings': 'setup', '/ui': 'setup',
   };
 
-  let current = null;      // the route path currently mounted
+  // A route may carry a section: "/setup/network" is the Setup view showing one
+  // of its pages. Only the views that own sections accept one, so a stray
+  // "/keys/anything" is still an unknown route.
+  const NESTED = new Set(['/setup', '/settings']);
+
+  function splitPath(path) {
+    const parts = path.split('/').filter(Boolean);
+    if (!parts.length) return { base: '/', sub: '' };
+    return { base: '/' + parts[0], sub: parts.slice(1).join('/') };
+  }
+
+  let current = null;      // the base route currently mounted
   let started = false;
 
   function pathFromHash() {
     let path = location.hash.replace(/^#/, '');
     if (!path) return '/';
     if (path[0] !== '/') path = '/' + path;
+
+    const { base, sub } = splitPath(path);
     // Unknown hashes fall back to the control view. The hash is left alone so
     // the address bar shows what was asked for, and Back still works.
-    return Object.prototype.hasOwnProperty.call(ROUTES, path) ? path : '/';
+    if (!Object.prototype.hasOwnProperty.call(ROUTES, base)) return '/';
+    if (sub && !NESTED.has(base)) return '/';
+    return sub ? `${base}/${sub}` : base;
   }
 
   function markActive(path) {
@@ -105,7 +120,19 @@ export const Router = (() => {
   }
 
   function route() {
-    mount(pathFromHash());
+    const path = pathFromHash();
+    const { base, sub } = splitPath(path);
+
+    // Moving between sections of the same view is not a remount: the settings
+    // form is a live document with a debounce, and tearing it down would throw
+    // away what was typed and re-fetch everything from the device.
+    const view = ROUTES[base] && ROUTES[base].view();
+    if (current === base && view && typeof view.show === 'function') {
+      markActive(base);
+      view.show(sub);
+      return;
+    }
+    mount(base);
   }
 
   async function start() {

@@ -199,6 +199,8 @@ try {
     { page: 'control', url: `${base}/?token=${CODE}`, reloadFirst: true, metrics: PHONE },
     // A stored stylesheet before the settings pass, so its reset-all button has
     // something to undo.
+    // A section is a route of its own, so it survives a reload and a link.
+    { page: 'settings-section', url: `${base}/?token=${CODE}#/setup/network`, metrics: DESKTOP },
     { page: 'settings', url: `${base}/?token=${CODE}#/settings`, metrics: DESKTOP,
       storedUiFiles: { 'style.css': '/* uploaded before the settings pass */' } },
     { page: 'macros', url: `${base}/?token=${CODE}#/macros`, metrics: PHONE,

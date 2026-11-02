@@ -860,6 +860,8 @@ __webTests.push({
     __assert(open().length === 0, 'sections are showing behind the list');
 
     rows[0].click();
+    // Opening a section is a hash change now, so it lands on the next tick.
+    await __sleep(50);
     __assert(list.hidden, 'the list stayed visible after opening a section');
     const shown = open();
     // A page can own more than one section (Diagnostics owns the probe), so the
@@ -870,6 +872,7 @@ __webTests.push({
     // Every row has to open something, or the list has a dead entry.
     for (const row of rows) {
       row.click();
+      await __sleep(50);
       const opened = open();
       __assert(opened.length > 0, `${row.dataset.page} opened nothing`);
       __assert(opened.every((sec) => sec.dataset.page === row.dataset.page),
@@ -877,8 +880,48 @@ __webTests.push({
     }
 
     document.getElementById('setupBack').click();
+    await __sleep(50);
     __assert(!list.hidden, 'back did not return to the list');
     __assert(open().length === 0, 'the section stayed open behind the list');
+    __assert(/#\/settings$/.test(location.hash) || /#\/setup$/.test(location.hash),
+      `back left the hash at ${location.hash}`);
+  },
+});
+
+__webTests.push({
+  page: 'settings-section',
+  name: 'a section opens from its own URL',
+  fn: async () => {
+    await __sleep(300);
+    const open = [...document.querySelectorAll('#view section[data-page]')]
+      .filter((sec) => !sec.hidden);
+    __assert(open.length > 0, 'nothing is open on arrival at #/setup/network');
+    __assert(open.every((sec) => sec.dataset.page === 'network'),
+      `opened: ${open.map((sec) => sec.dataset.page).join(',')}`);
+    __assert(document.getElementById('setupList').hidden,
+      'the section list is showing behind the section');
+
+    // Back from here is the list, and the hash follows it.
+    document.getElementById('setupBack').click();
+    await __sleep(100);
+    __assert(!document.getElementById('setupList').hidden, 'Back did not reach the list');
+    __assert(/^#\/(setup|settings)$/.test(location.hash),
+      `back left the hash at ${location.hash}`);
+  },
+});
+
+__webTests.push({
+  page: 'settings',
+  name: 'a section is a history entry, so the browser Back leaves it',
+  fn: async () => {
+    document.querySelector('.setuprow[data-page="network"]').click();
+    await __sleep(100);
+    __assert(location.hash.endsWith('/network'), `the hash is ${location.hash}`);
+
+    history.back();
+    await __sleep(250);
+    __assert(!document.getElementById('setupList').hidden,
+      'the browser Back did not return to the section list');
   },
 });
 
