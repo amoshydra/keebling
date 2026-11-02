@@ -111,7 +111,7 @@ static void draw_qr_panel(void) {
     // which printed a perfectly plausible address that nothing answered.
     const int x = display_qr_right() + 2;
 
-    display_text_line(x, 0, "ESP32 Remote");
+    display_text_line(x, 0, "Keebling");
     if (wifi_mgr_state() == WIFI_MGR_STA) {
         char l[16];
         snprintf(l, sizeof(l), "STA %.9s", wifi_mgr_joined_ssid());
@@ -130,7 +130,7 @@ static void draw_qr_panel(void) {
 static void show_status_screen(void) {
     display_clear();
 
-    display_status(LCD_LINE_TITLE, "ESP32 Remote");
+    display_status(LCD_LINE_TITLE, "Keebling");
 
     if (wifi_mgr_state() == WIFI_MGR_STA) {
         char l[40];
@@ -363,11 +363,11 @@ static void tick_task(void *arg) {
 
 void app_main(void) {
     log_buffer_init();   // capture logs for the web UI from here on
-    ESP_LOGI(TAG, "ESP32 Remote starting");
+    ESP_LOGI(TAG, "Keebling starting");
 
     // --- Display first, so we can report progress on it (non-fatal) ---
     display_init();
-    display_status(LCD_LINE_TITLE, "ESP32 Remote");
+    display_status(LCD_LINE_TITLE, "Keebling");
 
     // A boot loop is otherwise a black box: the LCD keeps its content across a
     // reset, so the reason and the last step identify where it died.

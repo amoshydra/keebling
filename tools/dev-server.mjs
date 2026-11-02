@@ -8,7 +8,7 @@
 // changes, no mixed-origin localStorage.
 //
 //   node tools/dev-server.mjs --device 192.168.1.50
-//   node tools/dev-server.mjs --device esp-remote.local --port 8080
+//   node tools/dev-server.mjs --device keebling.local --port 8080
 //
 // Then open http://localhost:8080/?token=<code>. Edit a file, reload the page.
 // Only the firmware needs a flash; the UI does not.

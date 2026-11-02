@@ -34,11 +34,11 @@ static void test_access_point_with_client_is_a_url(void) {
 }
 
 static void test_join_payload_when_nothing_is_reachable(void) {
-    CHECK_STR(build("", AP, 0), "WIFI:T:WPA;S:esp-remote;P:" CODE ";;");
+    CHECK_STR(build("", AP, 0), "WIFI:T:WPA;S:keebling;P:" CODE ";;");
 
     // No client, or no address to point one at: there is no URL to open.
-    CHECK_STR(build("", "", 1), "WIFI:T:WPA;S:esp-remote;P:" CODE ";;");
-    CHECK_STR(build("", "", 0), "WIFI:T:WPA;S:esp-remote;P:" CODE ";;");
+    CHECK_STR(build("", "", 1), "WIFI:T:WPA;S:keebling;P:" CODE ";;");
+    CHECK_STR(build("", "", 0), "WIFI:T:WPA;S:keebling;P:" CODE ";;");
 }
 
 static void test_url_predicate_matches_payload(void) {

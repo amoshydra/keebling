@@ -838,7 +838,7 @@ __webTests.push({
     await __sleep(300);
     __assert(__gateHidden(), 'the settings view asked for the code');
     const v = (id) => { const e = document.getElementById(id); return e && (e.type === 'checkbox' ? e.checked : e.value); };
-    __assert(v('usbProduct') === 'ESP32 Remote', `usbProduct = ${v('usbProduct')}`);
+    __assert(v('usbProduct') === 'Keebling', `usbProduct = ${v('usbProduct')}`);
     __assert(v('screenTimeout') === '60', `screenTimeout = ${v('screenTimeout')}`);
     __assert(v('typeSpeed') === '20', `typeSpeed = ${v('typeSpeed')}`);
     __assert(document.getElementById('screenTimeoutVal').textContent === '60 s',
@@ -1011,9 +1011,9 @@ __webTests.push({
       JSON.stringify([{ name: 'Phone Only', steps: '{ENTER}' }]));
 
     const b = SettingsView.collectBackup();
-    __assert(b.app === 'esp32-remote' && b.version === 1,
+    __assert(b.app === 'keebling' && b.version === 1,
       `envelope: ${JSON.stringify({ app: b.app, version: b.version })}`);
-    __assert(b.device && b.device.usb_product === 'ESP32 Remote',
+    __assert(b.device && b.device.usb_product === 'Keebling',
       `device part: ${JSON.stringify(b.device)}`);
     __assert(!('macros' in b.device),
       'the device part still carries a legacy macros key');
@@ -1027,7 +1027,7 @@ __webTests.push({
   name: 'a backup restores into both stores',
   fn: async () => {
     const payload = {
-      app: 'esp32-remote',
+      app: 'keebling',
       version: 1,
       device: { usb_product: 'Restored Name', screen_timeout_s: 45 },
       macros: [{ name: 'From File', steps: '{VOLUMEUP}' }],

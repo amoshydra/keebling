@@ -1,4 +1,6 @@
-# ESP32 Remote — USB HID bridge controlled from a browser
+# Keebling — USB HID bridge controlled from a browser
+
+> A baby keyboard that lives in your USB port.
 
 Plug the ESP32-S3 dongle into a host machine. It enumerates as a **USB keyboard +
 mouse + media keys**. A browser connects to the ESP's WiFi access point and becomes
@@ -12,6 +14,19 @@ USB HID input.
 
 The point of the hardware: **zero software on the target machine.** It works at the
 login screen, in recovery mode, in a BIOS, on a machine whose own keyboard is broken.
+
+## Website
+
+The landing page and brand sheet live in `site/`.
+
+```bash
+python3 -m http.server -d site 8080
+```
+
+Then open <http://localhost:8080/>. Pushes to `master` deploy that folder with
+GitHub Actions (`.github/workflows/pages.yml`). The site is relative, so it also
+works from `https://amoshydra.github.io/keebling/` once the repository is renamed
+to `keebling`.
 
 ## Hardware
 
@@ -39,7 +54,7 @@ from their official repo rather than reimplemented from the datasheet.
 
 ```bash
 . ~/esp/esp-idf/export.sh          # ESP-IDF v5.3.2
-cd esp32-remote
+cd keebling
 idf.py set-target esp32s3          # first time only
 pnpm install                       # first time only: esbuild, html-minifier
 pnpm build                         # bundles and minifies the UI into main/web/dist
@@ -86,7 +101,7 @@ the network can't be reached, it runs its own access point instead.
    device code, and your phone will offer to copy it. The QR stays up for 20
    seconds, then the status screen takes over (power-cycle to see it again).
 3. **Join the device.** Either:
-   - **its own AP** — network `esp-remote`, password is the code, then browse
+   - **its own AP** — network `keebling`, password is the code, then browse
      to `http://192.168.4.1`; or
    - **your own network** — open **📶 Network**, scan, pick your SSID, enter the
      password, and save. The device restarts and joins it; the LCD then shows
@@ -298,7 +313,7 @@ It changes with state, because what is useful changes.
 it — so the only way in is to join the network. The standard Wi-Fi join payload:
 
 ```
-WIFI:T:WPA;S:esp-remote;P:<code>;;
+WIFI:T:WPA;S:keebling;P:<code>;;
 ```
 
 A phone camera understands that, so joining the access point no longer means

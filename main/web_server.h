@@ -4,8 +4,8 @@
 
 // Network identity. Note the SoftAP password is NOT here: it is the random
 // per-device code produced by security.c, so there is exactly one secret.
-#define AP_SSID       "esp-remote"
-#define AP_MDNS_NAME  "esp-remote"    // reachable as esp-remote.local
+#define AP_SSID       "keebling"
+#define AP_MDNS_NAME  "keebling"    // reachable as keebling.local
 
 // Start SoftAP + HTTP server + WebSocket.
 // Requires NVS and security_init() to have run first.

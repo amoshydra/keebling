@@ -51,7 +51,7 @@ static const uint8_t pointer_report_descriptor[] = {
 // because esp_tinyusb copies the pointer array during driver install; there is
 // no public setter to change one afterwards.
 static const char s_lang[2] = {0x09, 0x04};   // English (0x0409)
-static char s_product[SETTINGS_HID_NAME_MAX + 1] = "ESP32 Remote";
+static char s_product[SETTINGS_HID_NAME_MAX + 1] = "Keebling";
 static char s_manufacturer[SETTINGS_HID_NAME_MAX + 1] = "ESP32";
 // Interface label. Most single-interface keyboards omit this (index 0) because
 // the class code already says what it is; devices with several HID interfaces

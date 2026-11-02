@@ -1,5 +1,5 @@
 {
-  "name": "esp32-remote-web",
+  "name": "keebling-web",
   "private": true,
   "type": "module",
   "description": "Build pipeline for the device's web UI. The firmware ships dist/, never the sources.",

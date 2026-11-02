@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Keebling — a baby keyboard that lives in your USB port</title>
+<meta name="description" content="Keebling turns a tiny ESP32-S3 dongle into a keyboard, mouse, and macro deck you drive from any browser. Nothing to install on the target. Works in the BIOS, at the login screen, and on the machine whose keyboard just died.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://amoshydra.github.io/keebling/">
+<meta property="og:title" content="Keebling — a baby keyboard that lives in your USB port">
+<meta property="og:description" content="A WiFi → USB HID bridge for the ESP32-S3. No drivers, no installer, no OS required.">
+<meta property="og:image" content="https://amoshydra.github.io/keebling/assets/og.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- The mark is the dongle itself: clear shell, screen, two googly eyes.
+     The CSS variables let the same symbol work on dark, amber, and light surfaces. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="mark" viewBox="0 0 128 128">
+    <!-- USB-A plug on the left: the assembly never changes -->
+    <rect x="4" y="52" width="26" height="28" rx="3" fill="var(--mark-plug, #c9c4ba)"/>
+    <rect x="26" y="52" width="4" height="28" fill="var(--mark-plug-shadow, #9a958c)"/>
+    <rect x="11" y="59" width="6" height="6" rx="1" fill="var(--mark-plug-hole, #6b6660)"/>
+    <rect x="11" y="68" width="6" height="6" rx="1" fill="var(--mark-plug-hole, #6b6660)"/>
+    <!-- clear shell, PCB, screen -->
+    <rect x="24" y="42" width="96" height="48" rx="18" fill="var(--mark-shell, #d8ebe4)"/>
+    <rect x="30" y="48" width="84" height="36" rx="12" fill="var(--mark-pcb, #5a9a6a)"/>
+    <rect x="40" y="53" width="64" height="26" rx="7" fill="var(--mark-screen, #0e1211)"/>
+    <!-- two googly eyes on top -->
+    <circle cx="64" cy="38" r="12" fill="var(--mark-eye, #f4f7f2)" stroke="var(--mark-eye-edge, #cfd8d2)" stroke-width="1.5"/>
+    <circle cx="86" cy="36" r="11" fill="var(--mark-eye, #f4f7f2)" stroke="var(--mark-eye-edge, #cfd8d2)" stroke-width="1.5"/>
+    <circle cx="68" cy="41" r="4.5" fill="var(--mark-pupil, #1b1a17)"/>
+    <circle cx="83" cy="33" r="4.2" fill="var(--mark-pupil, #1b1a17)"/>
+    <circle cx="66.5" cy="39" r="1.3" fill="var(--mark-glint, #ffffff)"/>
+    <circle cx="81.5" cy="31" r="1.2" fill="var(--mark-glint, #ffffff)"/>
+    <rect x="98" y="79" width="10" height="5" rx="2" fill="var(--mark-button, #e8d5b5)"/>
+  </symbol>
+</svg>
+
+<nav class="nav">
+  <div class="wrap">
+    <a class="brand" href="#top" aria-label="Keebling home">
+      <svg viewBox="0 0 128 128" aria-hidden="true"><use href="#mark"/></svg>
+      keebling
+    </a>
+    <div class="nav-links">
+      <a href="#meet">The keebling</a>
+      <a href="#how">How it works</a>
+      <a href="#deck">The deck</a>
+      <a href="#build">Build</a>
+      <a class="nav-cta" href="brand.html">Brand sheet <span>↗</span></a>
+    </div>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <div class="wrap hero-grid">
+    <div class="hero-copy">
+      <p class="eyebrow"><span class="dot"></span> ESP32-S3 · USB-A DONGLE · WiFi</p>
+      <h1>A baby keyboard<br>that lives in your<br><em>USB port.</em></h1>
+      <p class="lede">Keebling is a USB dongle with two googly eyes and a keyboard inside. Plug it in and it becomes a keyboard, mouse, and macro deck you drive from any browser. Nothing to install on the machine you're fixing — it works at the login screen, in the BIOS, and on the computer whose keyboard just died.</p>
+      <div class="actions">
+        <a class="btn primary" href="#meet">Meet the keebling <span class="arrow">↓</span></a>
+        <a class="btn ghost" href="#build">Build one <span class="arrow">↗</span></a>
+      </div>
+      <p class="fine">macOS · Linux · Windows · BIOS · recovery consoles</p>
+    </div>
+    <div class="hero-art">
+      <div class="frame">
+        <img src="assets/hero-cozy.webp" alt="The Keebling dongle with googly eyes, plugged into a laptop's USB-C port through a silver adapter, on a cozy desk at night.">
+        <div class="hero-status" aria-hidden="true">
+          <span class="dot live"></span>
+          <div><strong>keebling.local</strong><small>connected · 12 ms</small></div>
+          <span class="chip">Release</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<div class="strip">
+  <div class="wrap">
+    <span><b>No drivers</b> on the target</span>
+    <span><b>No installer</b> to run</span>
+    <span><b>No admin rights</b> needed</span>
+    <span><b>No OS</b> required</span>
+  </div>
+</div>
+
+<main>
+
+<section class="section" id="meet">
+  <div class="wrap">
+    <div class="meet reveal">
+      <div class="art-card">
+        <img src="assets/real-front.webp" alt="The actual LILYGO T-Dongle-S3: a clear USB-A dongle with a metal plug, a black LCD screen, and a green PCB inside.">
+        <div class="art-caption"><span>the real thing</span><span>front view · unchanged</span></div>
+      </div>
+      <div class="meet-copy">
+        <p class="kicker">The mascot</p>
+        <h3>It's a keyboard.<br>It's just not there.</h3>
+        <p>The host sees a normal USB keyboard. The thing in the port is the actual T-Dongle-S3: a clear shell, a USB-A plug, and a 0.96-inch LCD. A keebling is what you call a baby keyboard when it hasn't grown into a full desk yet — so it borrows a dongle's body, sticks two googly eyes on top, and gets to work.</p>
+        <div class="traits">
+          <div class="trait"><span class="num">01</span><div><b>Curious</b><p>It peeks out of the port and waits for a page to load. It has no opinions about the operating system.</p></div></div>
+          <div class="trait"><span class="num">02</span><div><b>Quiet</b><p>No agent, no daemon, no tray icon. The host only ever sees a keyboard and a mouse.</p></div></div>
+          <div class="trait"><span class="num">03</span><div><b>Very good at pretending</b><p>It types into the BIOS, the login screen, and the recovery console — the places software can't reach.</p></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="how">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div>
+        <p class="kicker">How it works</p>
+        <h2>One small thing.<br>Three <em>honest</em> hops.</h2>
+      </div>
+      <p>The dongle does the pretending. The browser does the talking. The host never knows there is a network in the middle.</p>
+    </div>
+    <div class="flow reveal">
+      <div class="flow-step"><span class="num">01 / BROWSER</span><h3>Your phone</h3><p>The touchpad, keyboard, and deck. One page, no app store.</p></div>
+      <div class="flow-step"><span class="num">02 / WIFI</span><h3>The link</h3><p>Join its access point, or put it on your own network. WebSocket from there.</p></div>
+      <div class="flow-step"><span class="num">03 / ESP32-S3</span><h3>The dongle</h3><p>A 12-character code pairs the page. The firmware translates input.</p></div>
+      <div class="flow-step"><span class="num">04 / USB HID</span><h3>The plug</h3><p>A composite HID device over USB-A — with a USB-C adapter when the host needs one.</p></div>
+      <div class="flow-step"><span class="num">05 / HOST</span><h3>The machine</h3><p>It sees a keyboard. It does not see the phone, the WiFi, or the deck.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="section deck-section" id="deck">
+  <div class="wrap">
+    <div class="deck-wrap reveal">
+      <div class="deck-copy">
+        <p class="kicker">The deck</p>
+        <h2>Macros with<br><em>a thumb.</em></h2>
+        <p>A grid of buttons you press. Sequences, chords, whole pages of them. Put a whole login in one tile, or a <span class="code">{REPEAT:5}</span> volume ramp that runs while your finger is down.</p>
+        <p>The deck lives in the browser, not on the device. That means megabytes of room for it — and that it belongs to the phone you set it up on.</p>
+      </div>
+      <div class="deck">
+        <div class="deck-top"><span>deck / page 1</span><span><b>Edit</b> · Stop</span></div>
+        <div class="deck-grid">
+          <div class="deck-tile a"><small>sequence</small>Open terminal</div>
+          <div class="deck-tile b"><small>chord</small>Lock screen</div>
+          <div class="deck-tile c"><small>text</small>Paste password</div>
+          <div class="deck-tile d"><small>sequence</small>Reboot to BIOS</div>
+          <div class="deck-tile e"><small>hold</small>Volume up <span class="mono" style="font-size:9px;opacity:.5">REPEAT:5</span></div>
+          <div class="deck-tile f"><small>key</small>Mute</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div>
+        <p class="kicker">Built for the bad days</p>
+        <h2>When the machine<br>won't <em>meet you</em> halfway.</h2>
+      </div>
+      <p>Remote desktop needs an OS, a network, and permission. Keebling needs a USB port.</p>
+    </div>
+    <div class="cards-3 reveal">
+      <article class="card"><span class="big">01 / DEAD KEYBOARD</span><h3>The keyboard is gone.</h3><p>The laptop's keyboard died, or the desktop is under a desk. Plug in the dongle and type from the phone in your hand.</p></article>
+      <article class="card"><span class="big">02 / NO OS</span><h3>The OS won't boot.</h3><p>BIOS, UEFI, recovery, a fresh install, a LUKS prompt. The places where remote desktop has never been.</p></article>
+      <article class="card"><span class="big">03 / NO SOFTWARE</span><h3>You can't install anything.</h3><p>A locked-down machine, a friend's laptop, a rack you don't own. The host sees a keyboard, because it is one.</p></article>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="build">
+  <div class="wrap">
+    <div class="build reveal">
+      <div>
+        <p class="kicker">The build</p>
+        <h2>Small, cheap,<br>and <em>deliberately</em> boring.</h2>
+        <p class="lede" style="font-size:16px;max-width:520px">A LILYGO T-Dongle-S3 does the work: native USB OTG, WiFi, a 160×80 LCD, and one button. The firmware is ESP-IDF. The UI is a bundle the device serves itself.</p>
+        <dl class="specs">
+          <div class="spec"><dt>MCU</dt><dd>ESP32-S3 · 16 MB</dd></div>
+          <div class="spec"><dt>Display</dt><dd>ST7735 160×80</dd></div>
+          <div class="spec"><dt>Plug</dt><dd>USB-A male</dd></div>
+          <div class="spec"><dt>HID</dt><dd>Keyboard + mouse</dd></div>
+          <div class="spec"><dt>Case</dt><dd>clear shell</dd></div>
+          <div class="spec"><dt>Radio</dt><dd>WiFi AP + STA</dd></div>
+          <div class="spec"><dt>Pairing</dt><dd>QR + 12-char code</dd></div>
+          <div class="spec"><dt>Panic</dt><dd>BOOT · 3 s</dd></div>
+        </dl>
+        <p class="fine" style="margin-top:18px">USB-C-only laptop? A USB-C-to-USB-A adapter is the only accessory.</p>
+      </div>
+      <div class="lcd-wrap">
+        <div class="lcd" aria-hidden="true">
+          <div class="lcd-inner">
+            <div class="lcd-copy">
+              <b>keebling</b>
+              <p>STA: home<br>192.168.1.50<br>scan to wake me</p>
+            </div>
+            <div class="qr">
+              <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+              <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+              <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+              <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+              <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+              <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+              <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+            </div>
+          </div>
+        </div>
+        <span class="lcd-label">actual screen · 160 × 80</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap foot">
+    <div>
+      <a class="brand" href="#top"><svg viewBox="0 0 128 128" aria-hidden="true"><use href="#mark"/></svg>keebling</a>
+      <p>A baby keyboard in a dongle's body. Built with an ESP32-S3 and an unreasonable amount of care.</p>
+    </div>
+    <div class="foot-links">
+      <a href="#how">How it works</a>
+      <a href="#build">Build</a>
+      <a href="brand.html">Brand sheet</a>
+      <a href="https://github.com/amoshydra/keebling">GitHub ↗</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+  const io = new IntersectionObserver((entries) => {
+    for (const e of entries) if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
+  }, { threshold: .12 });
+  for (const el of document.querySelectorAll('.reveal')) io.observe(el);
+</script>
+</body>
+</html>

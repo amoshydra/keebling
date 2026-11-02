@@ -69,7 +69,7 @@ export async function apiPost(path, body) {
 // The device stores one JSON blob. The firmware only reads the USB name keys; every
 // other key is the UI's business, so adding one is not a firmware change.
 export const SETTINGS_DEFAULTS = {
-  usb_product: 'ESP32 Remote',      // USB string 2 - the name the host shows
+  usb_product: 'Keebling',           // USB string 2 - the name the host shows
   usb_manufacturer: 'ESP32',        // USB string 1
   usb_interface: 'Keyboard Mouse Media',  // USB string 4 - cosmetic label
   screen_text: '',                  // the third BOOT screen, drawn as 10x26

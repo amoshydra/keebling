@@ -217,7 +217,7 @@ on('wifiSave', 'click', async () => {
 
 on('wifiForget', 'click', async () => {
   if (!confirm('Forget the saved network?\n\nThe device restarts in access-point ' +
-               'mode, so you will need to join "esp-remote" to reach it again.')) return;
+               'mode, so you will need to join "keebling" to reach it again.')) return;
   try { await apiPost('/forget'); } catch (_) {}
   setStatus('restarting…', 'warn');
   setTimeout(() => location.reload(), 8000);
@@ -797,7 +797,7 @@ function collectBackup() {
   delete device.macros;        // a legacy device key; macros are browser-side now
 
   return {
-    app: 'esp32-remote',
+    app: 'keebling',
     version: BACKUP_VERSION,
     exported: new Date().toISOString(),
     device,
@@ -817,7 +817,7 @@ on('backupSave', 'click', () => {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `esp32-remote-${new Date().toISOString().slice(0, 10)}.json`;
+  a.download = `keebling-${new Date().toISOString().slice(0, 10)}.json`;
   a.click();
   URL.revokeObjectURL(url);
   setBackupNote(`Downloaded ${backupSummary(b)}.`);
@@ -839,7 +839,7 @@ on('backupFile', 'change', async (e) => {
     setBackupNote('That file is not readable as JSON.', true);
     return;
   }
-  if (!b || b.app !== 'esp32-remote' || b.version !== BACKUP_VERSION) {
+  if (!b || b.app !== 'keebling' || b.version !== BACKUP_VERSION) {
     setBackupNote('Not a backup from this project, or from a version this page does ' +
                   'not understand. Nothing was changed.', true);
     return;
@@ -1035,7 +1035,7 @@ const SETUP_ROWS = [
   { page: 'screen',  group: 'Everyday',    label: 'Screen',
     value: () => (Number(appSettings.screen_timeout_s) ? `${appSettings.screen_timeout_s}s` : 'always on') },
   { page: 'device',  group: 'Device',      label: 'USB identity',
-    value: () => appSettings.usb_product || 'ESP32 Remote' },
+    value: () => appSettings.usb_product || 'Keebling' },
   { page: 'network', group: 'Device',      label: 'Network',
     value: () => '' },
   { page: 'backup',  group: 'Maintenance', label: 'Backup & restore' },

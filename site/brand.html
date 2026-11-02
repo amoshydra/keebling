@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Keebling — brand sheet 0.1</title>
+<meta name="description" content="Character, mark, palette, voice, and the name lab for Keebling — a baby keyboard that lives in your USB port.">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body class="brand-page">
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="mark" viewBox="0 0 128 128">
+    <!-- USB-A plug on the left: the assembly never changes -->
+    <rect x="4" y="52" width="26" height="28" rx="3" fill="var(--mark-plug, #c9c4ba)"/>
+    <rect x="26" y="52" width="4" height="28" fill="var(--mark-plug-shadow, #9a958c)"/>
+    <rect x="11" y="59" width="6" height="6" rx="1" fill="var(--mark-plug-hole, #6b6660)"/>
+    <rect x="11" y="68" width="6" height="6" rx="1" fill="var(--mark-plug-hole, #6b6660)"/>
+    <!-- clear shell, PCB, screen -->
+    <rect x="24" y="42" width="96" height="48" rx="18" fill="var(--mark-shell, #d8ebe4)"/>
+    <rect x="30" y="48" width="84" height="36" rx="12" fill="var(--mark-pcb, #5a9a6a)"/>
+    <rect x="40" y="53" width="64" height="26" rx="7" fill="var(--mark-screen, #0e1211)"/>
+    <!-- two googly eyes on top -->
+    <circle cx="64" cy="38" r="12" fill="var(--mark-eye, #f4f7f2)" stroke="var(--mark-eye-edge, #cfd8d2)" stroke-width="1.5"/>
+    <circle cx="86" cy="36" r="11" fill="var(--mark-eye, #f4f7f2)" stroke="var(--mark-eye-edge, #cfd8d2)" stroke-width="1.5"/>
+    <circle cx="68" cy="41" r="4.5" fill="var(--mark-pupil, #1b1a17)"/>
+    <circle cx="83" cy="33" r="4.2" fill="var(--mark-pupil, #1b1a17)"/>
+    <circle cx="66.5" cy="39" r="1.3" fill="var(--mark-glint, #ffffff)"/>
+    <circle cx="81.5" cy="31" r="1.2" fill="var(--mark-glint, #ffffff)"/>
+    <rect x="98" y="79" width="10" height="5" rx="2" fill="var(--mark-button, #e8d5b5)"/>
+  </symbol>
+</svg>
+
+<nav class="nav">
+  <div class="wrap">
+    <a class="brand" href="index.html" aria-label="Keebling home">
+      <svg viewBox="0 0 128 128" aria-hidden="true"><use href="#mark"/></svg>
+      keebling
+    </a>
+    <div class="nav-links">
+      <a href="index.html#meet">The keebling</a>
+      <a href="index.html#how">How it works</a>
+      <a href="index.html#build">Build</a>
+      <a class="nav-cta" href="index.html">Landing page <span>↗</span></a>
+    </div>
+  </div>
+</nav>
+
+<header class="brand-hero">
+  <div class="wrap">
+    <div>
+      <p class="eyebrow"><span class="dot"></span> Brand sheet · working draft</p>
+      <h1>A small warm thing<br>in a <em>cold machine.</em></h1>
+      <p class="sub">The character, mark, palette, and voice for Keebling — a baby keyboard in a dongle's body. Plus ten names that live in the same nest. Pick a name, shortlist it, see what sticks.</p>
+    </div>
+    <div class="brand-meta">
+      <b>Keebling</b><br>
+      version 0.1 · nov 2026<br>
+      esp32-s3 · usb-a · wifi
+    </div>
+  </div>
+</header>
+
+<main>
+
+<section class="brand-section">
+  <div class="wrap">
+    <div class="brand-section-head">
+      <div><p class="kicker">01 / The mark</p><h2>A dongle with two eyes.</h2></div>
+      <p>Clear shell, green PCB, a screen, and two googly eyes on top. The plug stays the plug; it is the part that goes into the port. The eyes are the whole mark.</p>
+    </div>
+    <div class="mark-row">
+      <div>
+        <div class="mark-box" style="width:160px;height:170px"><svg viewBox="0 0 128 128" style="width:112px;height:112px"><use href="#mark"/></svg></div>
+        <div class="mark-label">primary · 112 px</div>
+      </div>
+      <div>
+        <div class="mark-box" style="width:110px;height:118px"><svg viewBox="0 0 128 128" style="width:64px;height:64px"><use href="#mark"/></svg></div>
+        <div class="mark-label">small · 64 px</div>
+      </div>
+      <div>
+        <div class="mark-box" style="width:78px;height:84px"><svg viewBox="0 0 128 128" style="width:32px;height:32px"><use href="#mark"/></svg></div>
+        <div class="mark-label">icon · 32 px</div>
+      </div>
+      <div>
+        <div class="mark-box light" style="width:110px;height:118px;--mark-plug:#8a857c;--mark-plug-shadow:#6b6660;--mark-plug-hole:#f4e7cf;--mark-shell:#e8dcc6;--mark-pcb:#c9b28a;--mark-screen:#1b1a17;--mark-eye:#1b1a17;--mark-eye-edge:#33302a;--mark-pupil:#f4e7cf;--mark-glint:#ffffff;--mark-button:#c9b28a"><svg viewBox="0 0 128 128" style="width:64px;height:64px"><use href="#mark"/></svg></div>
+        <div class="mark-label">on cream</div>
+      </div>
+      <div>
+        <div class="mark-box" style="width:110px;height:118px;--mark-plug:#f6efe2;--mark-plug-shadow:#f6efe2;--mark-plug-hole:#0d0e11;--mark-shell:#f6efe2;--mark-pcb:#f6efe2;--mark-screen:#0d0e11;--mark-eye:#f6efe2;--mark-eye-edge:#0d0e11;--mark-pupil:#0d0e11;--mark-glint:#0d0e11;--mark-button:#f6efe2"><svg viewBox="0 0 128 128" style="width:64px;height:64px"><use href="#mark"/></svg></div>
+        <div class="mark-label">one colour</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="brand-section">
+  <div class="wrap">
+    <div class="brand-section-head">
+      <div><p class="kicker">02 / Lockups</p><h2>The wordmark</h2></div>
+      <p>Lowercase always. Nunito 900, tight tracking. The tagline is the only place the "baby keyboard" joke is spelled out.</p>
+    </div>
+    <div class="lockups">
+      <div class="lockup horizontal">
+        <svg viewBox="0 0 128 128" style="width:76px;height:76px"><use href="#mark"/></svg>
+        <div><div class="wordmark">keebling</div><div class="tagline">a baby keyboard</div></div>
+      </div>
+      <div class="lockup">
+        <div class="stack">
+          <svg viewBox="0 0 128 128" style="width:84px;height:84px"><use href="#mark"/></svg>
+          <div class="wordmark" style="font-size:38px">keebling</div>
+          <div class="tagline">a baby keyboard</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="brand-section" id="names">
+  <div class="wrap">
+    <div class="brand-section-head">
+      <div><p class="kicker">03 / The name lab</p><h2>Ten things in the nest.</h2></div>
+      <p>Same character, different name. Click a card to shortlist it — the pick is saved in this browser. The lead is marked; the rest are here to be argued with.</p>
+    </div>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:18px">
+      <span class="pick-count">shortlisted · <b id="pickCount">0</b> / 10</span>
+      <span class="pick-count">saved locally</span>
+    </div>
+    <div class="name-grid" id="nameGrid">
+
+      <article class="name-card lead" data-name="keebling">
+        <span class="badge">lead</span>
+        <svg class="mini" viewBox="0 0 128 128"><use href="#mark"/></svg>
+        <h3>keebling</h3>
+        <div class="say">KEEB-ling</div>
+        <p>A baby keyboard in a dongle's body. It lives in a port, wears two googly eyes, and types for you.</p>
+        <div class="tags"><span>character</span><span>googly</span><span>dongle-truth</span></div>
+        <button class="pick" type="button">shortlist</button>
+      </article>
+
+      <article class="name-card" data-name="dongling">
+        <svg class="mini" viewBox="0 0 128 128"><use href="#mark"/></svg>
+        <h3>dongling</h3>
+        <div class="say">DONG-ling</div>
+        <p>A baby dongle. The most literal name; the least dignified. It owns the joke instead of hiding from it.</p>
+        <div class="tags"><span>literal</span><span>self-aware</span><span>short</span></div>
+        <button class="pick" type="button">shortlist</button>
+      </article>
+
+      <article class="name-card" data-name="plugling">
+        <svg class="mini" viewBox="0 0 128 128"><use href="#mark"/></svg>
+        <h3>plugling</h3>
+        <div class="say">PLUG-ling</div>
+        <p>A creature with a USB-A plug for a snout. Cute, but "plug" is generic — and it loses the keyboard joke.</p>
+        <div class="tags"><span>plug-first</span><span>cute</span><span>generic</span></div>
+        <button class="pick" type="button">shortlist</button>
+      </article>
+
+      <article class="name-card" data-name="clackling">
+        <svg class="mini" viewBox="0 0 128 128"><use href="#mark"/></svg>
+        <h3>clackling</h3>
+        <div class="say">CLACK-ling</div>
+        <p>A baby switch with a big clack. Louder, cheekier, mechanical-keyboard native. The extrovert of the family.</p>
+        <div class="tags"><span>onomatopoeia</span><span>loud</span><span>hobbyist</span></div>
+        <button class="pick" type="button">shortlist</button>
+      </article>
+
+      <article class="name-card" data-name="thockling">
+        <svg class="mini" viewBox="0 0 128 128"><use href="#mark"/></svg>
+        <h3>thockling</h3>
+        <div class="say">THOCK-ling</div>
+        <p>A baby switch with a deep thock. The audiophile's keebling. If you know, you know — and if you don't, the tagline teaches you.</p>
+        <div class="tags"><span>deep-cut</span><span>sound</span><span>niche</span></div>
+        <button class="pick" type="button">shortlist</button>
+      </article>
+
+      <article class="name-card" data-name="typeling">
+        <svg class="mini" viewBox="0 0 128 128"><use href="#mark"/></svg>
+        <h3>typeling</h3>
+        <div class="say">TYPE-ling</div>
+        <p>A baby typist. The name explains itself. Less creature, more job title — the sensible one in the room.</p>
+        <div class="tags"><span>clear</span><span>gentle</span><span>safe</span></div>
+        <button class="pick" type="button">shortlist</button>
+      </article>
+
+      <article class="name-card" data-name="portling">
+        <svg class="mini" viewBox="0 0 128 128"><use href="#mark"/></svg>
+        <h3>portling</h3>
+        <div class="say">PORT-ling</div>
+        <p>A creature that lives in the port. Puts the dongle first, the keyboard second. Snug, technical, a little nautical.</p>
+        <div class="tags"><span>dongle-first</span><span>snug</span><span>technical</span></div>
+        <button class="pick" type="button">shortlist</button>
+      </article>
+
+      <article class="name-card" data-name="keebit">
+        <svg class="mini" viewBox="0 0 128 128"><use href="#mark"/></svg>
+        <h3>keebit</h3>
+        <div class="say">KEEB-it</div>
+        <p>A tiny bit of keyboard. "Bit" is the nerd joke. Short, quick, a little mischievous.</p>
+        <div class="tags"><span>pun</span><span>short</span><span>quick</span></div>
+        <button class="pick" type="button">shortlist</button>
+      </article>
+
+      <article class="name-card" data-name="keylet">
+        <svg class="mini" viewBox="0 0 128 128"><use href="#mark"/></svg>
+        <h3>keylet</h3>
+        <div class="say">KEY-let</div>
+        <p>A tiny key. Cleaner and more product-like. The least creature-y of the set — good if the brand should feel like an object.</p>
+        <div class="tags"><span>minimal</span><span>product</span><span>quiet</span></div>
+        <button class="pick" type="button">shortlist</button>
+      </article>
+
+      <article class="name-card" data-name="patterling">
+        <svg class="mini" viewBox="0 0 128 128"><use href="#mark"/></svg>
+        <h3>patterling</h3>
+        <div class="say">PATTER-ling</div>
+        <p>Little fingers pattering across the keys. The most poetic; the hardest to say twice. Beautiful on a box, awkward on a command line.</p>
+        <div class="tags"><span>poetic</span><span>soft</span><span>long</span></div>
+        <button class="pick" type="button">shortlist</button>
+      </article>
+
+    </div>
+  </div>
+</section>
+
+<section class="brand-section">
+  <div class="wrap">
+    <div class="brand-section-head">
+      <div><p class="kicker">04 / Palette</p><h2>Warm plastic, cold room.</h2></div>
+      <p>Cream and amber are the character. Ink and night are the machine. PCB green and glass are the body. Sage is the link light; sky is the one cool accent allowed in the UI.</p>
+    </div>
+    <div class="swatches">
+      <div class="swatch"><div class="color" style="background:#0d0e11"></div><div class="meta"><b>Night</b><span>#0D0E11</span></div></div>
+      <div class="swatch"><div class="color" style="background:#1b1a17"></div><div class="meta"><b>Ink</b><span>#1B1A17</span></div></div>
+      <div class="swatch"><div class="color" style="background:#f4e7cf"></div><div class="meta"><b>Shell</b><span>#F4E7CF</span></div></div>
+      <div class="swatch"><div class="color" style="background:#fbf3e4"></div><div class="meta"><b>Shell light</b><span>#FBF3E4</span></div></div>
+      <div class="swatch"><div class="color" style="background:#f2a93b"></div><div class="meta"><b>Amber</b><span>#F2A93B</span></div></div>
+      <div class="swatch"><div class="color" style="background:#e4572e"></div><div class="meta"><b>USB orange</b><span>#E4572E</span></div></div>
+      <div class="swatch"><div class="color" style="background:#5a9a6a"></div><div class="meta"><b>PCB green</b><span>#5A9A6A</span></div></div>
+      <div class="swatch"><div class="color" style="background:#d8ebe4"></div><div class="meta"><b>Glass</b><span>#D8EBE4</span></div></div>
+      <div class="swatch"><div class="color" style="background:#8fbf9f"></div><div class="meta"><b>Sage</b><span>#8FBF9F</span></div></div>
+      <div class="swatch"><div class="color" style="background:#8fb8de"></div><div class="meta"><b>Sky</b><span>#8FB8DE</span></div></div>
+    </div>
+  </div>
+</section>
+
+<section class="brand-section">
+  <div class="wrap">
+    <div class="brand-section-head">
+      <div><p class="kicker">05 / Type</p><h2>Rounded, but not silly.</h2></div>
+      <p>Nunito carries the warmth. IBM Plex Mono carries the proof — addresses, codes, tokens, pin numbers. The device is playful; the facts are not.</p>
+    </div>
+    <div class="type-specimen">
+      <div class="type-card"><div class="label">Display · Nunito 900</div><div class="display">keebling</div><div class="tagline" style="margin-top:10px">a baby keyboard</div></div>
+      <div class="type-card"><div class="label">Body · Nunito 400</div><p class="body">The host sees a normal USB keyboard. Nothing is installed on the target, and nothing needs to be.</p></div>
+      <div class="type-card"><div class="label">Mono · IBM Plex Mono 500</div><p class="mono-sample">keebling.local<br>192.168.1.50<br>12-char code · 60 bits<br>{CTRL+ALT+DEL}</p></div>
+      <div class="type-card"><div class="label">The rule</div><p class="body" style="font-size:14px">If it is a fact the user might type, copy, or say out loud, set it in mono. If it is a feeling, set it in Nunito.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="brand-section">
+  <div class="wrap">
+    <div class="brand-section-head">
+      <div><p class="kicker">06 / Voice</p><h2>Dry, kind, a little amused.</h2></div>
+      <p>The README already has this voice. Keep it. The joke is always in the situation, never in the user's face.</p>
+    </div>
+    <div class="voice-grid">
+      <div class="voice-card yes"><div class="label">say this</div><p>“It's a keyboard. It's just not there.”</p></div>
+      <div class="voice-card no"><div class="label">not this</div><p>“The ultimate remote control solution.”</p></div>
+      <div class="voice-card yes"><div class="label">say this</div><p>“Works before the OS does.”</p></div>
+      <div class="voice-card no"><div class="label">not this</div><p>“Seamlessly leverage your existing hardware investment.”</p></div>
+      <div class="voice-card yes"><div class="label">say this</div><p>“A small warm thing in a cold machine.”</p></div>
+      <div class="voice-card no"><div class="label">not this</div><p>“Unlock unprecedented productivity.”</p></div>
+      <div class="voice-card yes"><div class="label">say this</div><p>“Two googly eyes on top. The screen stays the screen. The plug stays the plug.”</p></div>
+      <div class="voice-card no"><div class="label">not this</div><p>“A revolutionary AI-powered input solution.”</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="brand-section">
+  <div class="wrap">
+    <div class="brand-section-head">
+      <div><p class="kicker">07 / The character</p><h2>The dongle is the character.</h2></div>
+      <p>The assembly never changes. Two googly eyes go on top, and the room gets cozy. The dongle, the adapter, the screen, and the plug stay exactly as they are.</p>
+    </div>
+    <div class="mascot-grid">
+      <div class="mascot-card"><img src="assets/real-front.webp" alt="The actual LILYGO T-Dongle-S3"><div class="caption"><b>The real thing</b><p>The T-Dongle-S3 exactly as it ships: long clear shell, USB-A plug, 0.96-inch LCD, BOOT button. Nothing about the assembly changes.</p></div></div>
+      <div class="mascot-card"><img src="assets/cozy-closeup.webp" alt="The Keebling character in its cozy setup"><div class="caption"><b>The character</b><p>Two googly eyes on the clear body. The screen stays the screen; the plug stays the plug.</p></div></div>
+    </div>
+  </div>
+</section>
+
+<section class="brand-section">
+  <div class="wrap">
+    <div class="brand-section-head">
+      <div><p class="kicker">08 / The device</p><h2>The screen is a screen.</h2></div>
+      <p>The 160×80 LCD shows the link, the address, and the QR. The googly eyes are on the body, not the screen — which is the whole rule.</p>
+    </div>
+    <div class="lcd-wrap" style="align-items:flex-start">
+      <div class="lcd" aria-hidden="true">
+        <div class="lcd-inner">
+          <div class="lcd-copy"><b>keebling</b><p>STA: home<br>192.168.1.50<br>scan to wake me</p></div>
+          <div class="qr">
+            <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+            <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+            <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+            <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+            <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+            <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+            <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+          </div>
+        </div>
+      </div>
+      <span class="lcd-label">160 × 80 · the whole brand in one screen</span>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="brand-footer wrap">
+  <p>Keebling brand sheet · draft 0.1 · <a href="index.html">back to the landing page</a></p>
+  <p>made with a clear shell, a green PCB, and two googly eyes</p>
+</footer>
+
+<script>
+  // Shortlist: a tiny, local-only decision tool. No server, no account.
+  const key = 'keebling-shortlist-v1';
+  const grid = document.getElementById('nameGrid');
+  const countEl = document.getElementById('pickCount');
+  let picks = new Set();
+  try { picks = new Set(JSON.parse(localStorage.getItem(key) || '[]')); } catch (e) { /* file:// or private mode */ }
+
+  function render() {
+    for (const card of grid.querySelectorAll('.name-card')) {
+      const on = picks.has(card.dataset.name);
+      card.classList.toggle('shortlisted', on);
+      card.querySelector('.pick').textContent = on ? 'shortlisted ✓' : 'shortlist';
+    }
+    countEl.textContent = String(picks.size);
+  }
+
+  grid.addEventListener('click', (e) => {
+    const btn = e.target.closest('.pick');
+    if (!btn) return;
+    const card = btn.closest('.name-card');
+    const name = card.dataset.name;
+    if (picks.has(name)) picks.delete(name); else picks.add(name);
+    try { localStorage.setItem(key, JSON.stringify([...picks])); } catch (e) { /* ignore */ }
+    render();
+  });
+
+  render();
+</script>
+</body>
+</html>
