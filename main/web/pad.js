@@ -19,6 +19,7 @@
 
 import { HID_KEYS, apiFetch, appSettings, hostLayout, layoutTextMap, token } from './common.js';
 import { buttonsOnPage, deckSnapshot, keyName } from './deck.js';
+import { parseLayoutFile, readLayouts, renderPage as renderLayoutPage, writeLayouts } from './layout.js';
 import { parseMacro, runMacro } from './macro.js';
 
 export const PadView = (() => {
@@ -687,12 +688,14 @@ const PHONE_QUERY = '(max-width: 620px)';
 // The Keys destination holds three panes and shows one: the on-screen
 // keyboard, the media keys, or the text box. They used to be sibling pages
 // reached from a row of buttons; the strip inside the slot replaces that.
-const PANES = ['built', 'media', 'text', 'deck'];
+const PANES = ['built', 'media', 'text', 'deck', 'layout'];
 let kbPane = 'built';
 let kbPagesEl = null;
 let kbToolSourceEl = null;
 let kbToolTextEl = null;
 let kbDeckEl = null;
+let kbLayoutEl = null;
+let layoutPage = null;      // the imported page the slot is showing
 let deckPageName = '';       // which deck page the slot is showing
 const deckKeys = new Set();  // usages held by deck buttons, kept apart from `held`
 let deckConsumer = 0;
@@ -708,6 +711,7 @@ function setPane(name) {
   if (kbBuiltEl) kbBuiltEl.hidden = !built || kbSource === 'system';
   if (kbCaptureEl) kbCaptureEl.hidden = !built || kbSource !== 'system';
   if (kbDeckEl) kbDeckEl.hidden = kbPane !== 'deck';
+  if (kbLayoutEl) kbLayoutEl.hidden = kbPane !== 'layout';
   refreshStrip();
 }
 
@@ -717,6 +721,7 @@ function setPane(name) {
 function currentPage() {
   if (kbPane === 'media') return 'media';
   if (kbPane === 'deck') return deckPageName ? `deck:${deckPageName}` : null;
+  if (kbPane === 'layout') return layoutPage ? `layout:${layoutPage.id}` : null;
   if (kbPane !== 'built' || kbSource !== 'built') return null;
   return keyPage;
 }
@@ -889,6 +894,186 @@ async function runDeckScript(button, cell) {
   }
 }
 
+// ---------------------------------------------------------------- layouts
+function clearLayoutState() {
+  layoutHeld.clear();
+  layoutLatched.clear();
+  if (kbLayoutEl) {
+    for (const el of kbLayoutEl.querySelectorAll('.lkey.latched')) el.classList.remove('latched');
+  }
+}
+
+function showLayoutPage(page) {
+  if (!kbLayoutEl) return;
+  kbLayoutEl.textContent = '';
+  renderLayoutPage(kbLayoutEl, page);
+}
+
+// With nothing imported, the slot is where you bring one in: paste the JSON the
+// editor exports, and it is stored in this browser.
+function showEmptyLayout() {
+  if (!kbLayoutEl) return;
+  kbLayoutEl.textContent = '';
+
+  const box = document.createElement('div');
+  box.className = 'kbempty';
+
+  const note = document.createElement('p');
+  note.className = 'note';
+  note.textContent = 'Paste a layout from the editor — it stays in this browser.';
+
+  const area = document.createElement('textarea');
+  area.spellcheck = false;
+  area.placeholder = '{ "app": "keebling", "kind": "layout", "pages": [ … ] }';
+
+  const go = document.createElement('button');
+  go.className = 'primary';
+  go.textContent = 'Import layout';
+  go.addEventListener('click', () => {
+    const parsed = parseLayoutFile(area.value);
+    if (parsed.error) {
+      note.textContent = `Not imported: ${parsed.error}. Nothing changed.`;
+      note.classList.add('warn');
+      return;
+    }
+    const existing = readLayouts();
+    for (const page of parsed.pages) {
+      const at = existing.findIndex((p) => p.id === page.id);
+      if (at >= 0) existing[at] = page; else existing.push(page);
+    }
+    const err = writeLayouts(existing);
+    if (err) {
+      note.textContent = `Not saved: ${err}.`;
+      note.classList.add('warn');
+      return;
+    }
+    buildLayoutChips();
+    layoutPage = parsed.pages[0];
+    showLayoutPage(layoutPage);
+    setPane('layout');
+  });
+
+  box.append(note, area, go);
+  kbLayoutEl.appendChild(box);
+}
+
+// A layout page is drawn by layout.js and sent by this: the module owns the
+// picture, the slot owns the transport. Pointer capture on press, so a finger
+// that slides off still releases the key.
+const layoutHeld = new Set();
+const layoutLatched = new Set();
+
+function sendLayoutReport() {
+  const buf = new Uint8Array(8);
+  buf[0] = 0x02;
+  let slot = 2;
+  for (const code of layoutLatched) {
+    if (MOD[code]) buf[1] |= MOD[code];
+  }
+  for (const usage of layoutHeld) {
+    if (slot < 8) buf[slot++] = usage;
+  }
+  send(buf);
+  markInput();
+}
+
+function wireLayoutSlot() {
+  if (!kbLayoutEl) return;
+
+  const keydown = (e) => {
+    const cell = e.target.closest && e.target.closest('.lkey');
+    if (!cell || kbPane !== 'layout') return;
+    e.preventDefault();
+    const kind = cell.dataset.action;
+
+    if (kind === 'key') {
+      const usage = Number(cell.dataset.usage);
+      if (!usage) return;
+      try { cell.setPointerCapture(e.pointerId); } catch (_) {}
+      layoutHeld.add(usage);
+      sendLayoutReport();
+      return;
+    }
+    if (kind === 'modifier') {
+      const code = cell.dataset.mod;
+      if (layoutLatched.has(code)) layoutLatched.delete(code);
+      else layoutLatched.add(code);
+      cell.classList.toggle('latched', layoutLatched.has(code));
+      sendLayoutReport();
+      return;
+    }
+    if (kind === 'page') {
+      const to = cell.dataset.to;
+      if (readLayouts().some((p) => p.id === to)) {
+        openPage('layout:' + to);
+      } else {
+        openPage(to);            // a shipped page: abc, sym, fn, kp, media
+      }
+      return;
+    }
+    if (kind === 'sequence') {
+      runLayoutSequence(cell);
+    }
+  };
+
+  const keyup = (e) => {
+    const cell = e.target.closest && e.target.closest('.lkey');
+    if (!cell || cell.dataset.action !== 'key') return;
+    const usage = Number(cell.dataset.usage);
+    if (!usage || !layoutHeld.delete(usage)) return;
+    sendLayoutReport();
+  };
+
+  kbLayoutEl.addEventListener('pointerdown', keydown);
+  kbLayoutEl.addEventListener('pointerup', keyup);
+  kbLayoutEl.addEventListener('pointercancel', keyup);
+  kbLayoutEl.addEventListener('lostpointercapture', keyup);
+}
+
+// A script on a layout page runs the same way a deck button does.
+let layoutRun = false;
+async function runLayoutSequence(cell) {
+  if (layoutRun) return;
+  const parsed = parseMacro(cell.dataset.steps || '');
+  if (parsed.errors.length || !parsed.steps.length) return;
+  layoutRun = true;
+  cell.classList.add('running');
+  try {
+    await runMacro(parsed.steps, { send, gapMs: Math.max(5, Math.round(500 / (Number(appSettings.type_speed) || 20))) });
+  } finally {
+    layoutRun = false;
+    cell.classList.remove('running');
+  }
+}
+
+// Imported pages ride in the same strip as the shipped ones, after them.
+function buildLayoutChips() {
+  if (!kbPagesEl) return;
+  for (const b of kbPagesEl.querySelectorAll('button[data-layout]')) b.remove();
+
+  const arrow = kbPagesEl.querySelector('button[data-layout-add]');
+  if (arrow) arrow.remove();
+
+  for (const page of readLayouts()) {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'kbpage';
+    chip.dataset.page = `layout:${page.id}`;
+    chip.dataset.layout = '1';
+    chip.textContent = page.name;
+    kbPagesEl.appendChild(chip);
+  }
+
+  const add = document.createElement('button');
+  add.type = 'button';
+  add.className = 'kbpage';
+  add.dataset.page = 'layout:';
+  add.dataset.layoutAdd = '1';
+  add.textContent = '+';
+  add.title = 'Import a layout';
+  kbPagesEl.appendChild(add);
+}
+
 // The strip lists the shipped pages; the deck's own pages follow them, so the
 // same strip reaches both. Empty pages are left out - a chip that opens nothing
 // is a dead end.
@@ -912,6 +1097,20 @@ function buildDeckChips() {
 // A page is a place you type: picking one always lands on the built-in
 // keyboard, because the phone's keyboard has no pages to show.
 function openPage(page) {
+  if (page === 'layout:') {
+    layoutPage = null;
+    showEmptyLayout();
+    setPane('layout');
+    return;
+  }
+  if (page.startsWith('layout:')) {
+    const id = page.slice(7);
+    layoutPage = readLayouts().find((p) => p.id === id) || null;
+    if (!layoutPage) { showEmptyLayout(); setPane('layout'); return; }
+    showLayoutPage(layoutPage);
+    setPane('layout');
+    return;
+  }
   if (page.startsWith('deck:')) {
     deckPageName = page.slice(5);
     renderDeckPage();
@@ -1619,12 +1818,16 @@ function init() {
   kbToolSourceEl = document.getElementById('kbToolSource');
   kbToolTextEl = document.getElementById('kbToolText');
   kbDeckEl = document.getElementById('kbDeck');
+  kbLayoutEl = document.getElementById('kbLayout');
+  layoutPage = null;
   deckPageName = '';
   deckRunning = false;
   deckStop = false;
   deckKeys.clear();
   deckConsumer = 0;
   buildDeckChips();
+  buildLayoutChips();
+  wireLayoutSlot();
   ledsEl = document.getElementById('kbLeds');
   if (ledsEl) { ledsEl.hidden = true; ledsEl.textContent = ''; }
   clearInterval(ledTimer);
@@ -1887,6 +2090,8 @@ function destroy() {
   kbd = null;
   kbPagesEl = null;
   kbDeckEl = null;
+  kbLayoutEl = null;
+  layoutPage = null;
   deckPageName = '';
   kbToolSourceEl = null;
   kbToolTextEl = null;

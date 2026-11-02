@@ -3719,6 +3719,55 @@ __webTests.push({
 
 __webTests.push({
   page: 'keys-deck',
+  name: 'an imported layout is drawn in the slot and joins the strip',
+  fn: async () => {
+    const plus = [...document.querySelectorAll('#kbPages button')].find((b) => b.textContent === '+');
+    __assert(plus, 'there is no way to import a layout');
+    plus.click();
+    await __sleep(60);
+
+    const box = document.querySelector('#kbLayout textarea');
+    __assert(box, 'the slot did not offer a paste box');
+
+    box.value = JSON.stringify({
+      app: 'keebling', kind: 'layout', version: 1,
+      pages: [{ id: 'tv2', name: 'TV2', columns: 4, rows: [
+        { h: 50, gap: 5, align: 'stretch', keys: [
+          { label: '↑', w: 2, colour: 'blue', action: { kind: 'key', page: 7, usage: 82 } },
+          { spacer: 2 },
+        ] },
+      ] }],
+    });
+    [...document.querySelectorAll('#kbLayout button')]
+      .find((b) => b.textContent === 'Import layout').click();
+    await __sleep(100);
+
+    const keys = document.querySelectorAll('#kbLayout .lkey');
+    __assert(keys.length === 1, `drew ${keys.length} keys`);
+    __assert(keys[0].textContent.indexOf('↑') === 0, `drew "${keys[0].textContent}"`);
+    __assert(keys[0].style.gridColumn === 'span 2', `span is "${keys[0].style.gridColumn}"`);
+    __assert(document.querySelectorAll('#kbLayout .lspacer').length === 1, 'the spacer was not drawn');
+
+    // pressing a key on the layout holds it, and releasing clears it
+    const cap = __capture();
+    const up = keys[0];
+    up.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 11 }));
+    await __sleep(40);
+    const down = cap.filter((r) => r[0] === 2 && r[2] !== 0);
+    __assert(down.length === 1 && down[0][2] === 82, `press sent ${JSON.stringify(cap)}`);
+    up.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 11 }));
+    await __sleep(40);
+    __assert(cap.slice(-1)[0][0] === 2 && cap.slice(-1)[0][2] === 0,
+      `release sent ${JSON.stringify(cap.slice(-1))}`);
+
+    const chip = [...document.querySelectorAll('#kbPages button')].find((b) => b.textContent === 'TV2');
+    __assert(chip, 'the imported page did not join the strip');
+    __assert(chip.classList.contains('on'), 'the strip does not mark the open layout');
+  },
+});
+
+__webTests.push({
+  page: 'keys-deck',
   name: 'a deck page is a chip in the strip, and opens in the slot',
   fn: async () => {
     const chip = [...document.querySelectorAll('#kbPages button')]
