@@ -15,19 +15,14 @@
 
 
 import { HID_KEYS, appSettings, saveSettingsToDevice, token } from './common.js';
+import {
+  COLOURS, CONSUMER_CHOICES, DEFAULT_PAGE, KEY_CHOICES, PAGE_KEY,
+  keyName, readPages, readStore, sanitizeButtons, sanitizeKey, writePages, writeStore,
+} from './deck.js';
 import { describeMacroStep, parseMacro, refreshMacroText, runMacro } from './macro.js';
 
 export const MacrosView = (() => {
 
-const STORE_KEY = 'esp32remote.macros';
-const COLOURS = ['', 'blue', 'amber', 'red', 'green'];
-// Pages are a property of the deck, not of a button, so they have their own
-// list: that is what lets a page exist while it is still empty.
-const PAGES_KEY = 'esp32remote.deckPages';
-const PAGE_KEY = 'esp32remote.deckPage';
-const DEFAULT_PAGE = 'Main';
-
-// Assigned by init(); nothing here reaches the document at load.
 let dot = null;
 let statusText = null;
 let listEl = null;
@@ -107,97 +102,11 @@ function onPageHide() {
 }
 
 // ---------------------------------------------------------------- model
-// A deck button is either a script or a held key. The difference is what the
-// host sees: a script is a burst of press/release pairs, a key stays down, so
-// the host repeats it - held arrows, a held volume key, a game's WASD.
-//
-// Kept as two kinds rather than one DSL because holding is not expressible as
-// a sequence: the duration is the finger's, not the macro's.
-const KEY_CHOICES = [
-  ['ArrowUp', '↑ Up'], ['ArrowDown', '↓ Down'], ['ArrowLeft', '← Left'], ['ArrowRight', '→ Right'],
-  ['Enter', '⏎ Enter'], ['Escape', 'Esc'], ['Tab', 'Tab'], ['Space', 'Space'],
-  ['Backspace', 'Backspace'], ['Delete', 'Delete'], ['Home', 'Home'], ['End', 'End'],
-  ['PageUp', 'Page Up'], ['PageDown', 'Page Down'],
-];
-
-// Consumer Control usages, as {SEARCH}-style names would only confuse here.
-const CONSUMER_CHOICES = [
-  [0x00CD, 'Play / pause'], [0x00B5, 'Next track'], [0x00B6, 'Previous track'],
-  [0x00B7, 'Stop'], [0x00E9, 'Volume up'], [0x00EA, 'Volume down'], [0x00E2, 'Mute'],
-  [0x0223, 'Browser home'], [0x0224, 'Browser back'], [0x0225, 'Browser forward'],
-];
-
-function sanitizeKey(k) {
-  if (!k || typeof k !== 'object') return null;
-  if (k.kind === 'key' && typeof k.code === 'string' && HID_KEYS[k.code]) {
-    return { kind: 'key', code: k.code };
-  }
-  if (k.kind === 'consumer') {
-    const usage = Number(k.usage);
-    if (Number.isFinite(usage) && usage > 0 && usage <= 0xFFFF) {
-      return { kind: 'consumer', usage: usage | 0 };
-    }
-  }
-  return null;
-}
-
-// The label a held key shows, from whichever catalogue it came from.
-function keyName(k) {
-  if (!k) return '';
-  if (k.kind === 'key') {
-    const hit = KEY_CHOICES.find(([code]) => code === k.code);
-    return hit ? hit[1] : k.code;
-  }
-  const hit = CONSUMER_CHOICES.find(([usage]) => usage === k.usage);
-  return hit ? hit[1] : `0x${Number(k.usage).toString(16)}`;
-}
-
 let macros = [];
 let confirmDelete = null;      // index waiting for a second tap on Delete
 
-// Anything unexpected in the stored list is dropped rather than trusted: an
-// older build, or a hand-edited localStorage, can have put it there.
 function sanitizeMacros(list) {
-  const raw = Array.isArray(list) ? list : [];
-  const kept = raw
-    .filter((m) => m && typeof m === 'object')
-    .map((m) => ({
-      name: String(m.name || ''),
-      steps: String(m.steps || ''),
-      // Anything unknown falls back to no colour rather than breaking the tile.
-      colour: COLOURS.includes(m.colour) ? m.colour : '',
-      page: String(m.page || DEFAULT_PAGE),
-      hold: !!m.hold,
-      key: sanitizeKey(m.key),
-    }))
-    .filter((m) => m.name || m.steps || m.key);
-  return { kept, dropped: raw.length - kept.length };
-}
-
-// undefined means "nothing stored", which is how the migration below tells an
-// empty list from an untouched browser.
-function readStore() {
-  try {
-    const s = localStorage.getItem(STORE_KEY);
-    return s === null ? undefined : JSON.parse(s);
-  } catch (_) {
-    // Unreadable is treated as absent. localStorage can throw rather than
-    // merely fail (Safari private mode), so this is not hypothetical.
-    return undefined;
-  }
-}
-
-// Returns an error string, or null on success. Quota is the only realistic
-// failure and it deserves reporting rather than a silent no-op.
-function writeStore(list) {
-  try {
-    localStorage.setItem(STORE_KEY, JSON.stringify(list));
-    return null;
-  } catch (e) {
-    return (e && e.name === 'QuotaExceededError')
-      ? 'this browser has no room left for this site'
-      : 'this browser refused to store them (private mode?)';
-  }
+  return sanitizeButtons(list);
 }
 
 async function loadMacros() {
@@ -312,20 +221,6 @@ function actionButton(text, fn, cls) {
   return b;
 }
 
-function readPages() {
-  let stored = [];
-  try {
-    const raw = JSON.parse(localStorage.getItem(PAGES_KEY) || '[]');
-    if (Array.isArray(raw)) stored = raw.map(String).filter(Boolean);
-  } catch (_) { /* an unreadable list falls back to the one page */ }
-  return stored;
-}
-
-function writePages() {
-  try { localStorage.setItem(PAGES_KEY, JSON.stringify(deckPages)); } catch (_) {}
-  try { localStorage.setItem(PAGE_KEY, activePage); } catch (_) {}
-}
-
 // The stored list plus anything a button refers to, so a restored backup with a
 // page the list has never seen still shows its buttons somewhere.
 function syncPages() {
@@ -355,7 +250,7 @@ function renderPages() {
     b.addEventListener('click', () => {
       activePage = name;
       confirmDelete = null;
-      writePages();
+      writePages(deckPages, activePage);
       render();
     });
     strip.appendChild(b);
@@ -369,7 +264,7 @@ function renderPages() {
     const name = nextPageName();
     deckPages.push(name);
     activePage = name;
-    writePages();
+    writePages(deckPages, activePage);
     render();
   });
   strip.appendChild(add);
@@ -422,7 +317,7 @@ function renamePage(raw) {
   deckPages[at] = next;
   activePage = next;
   for (const m of macros) if (m.page === was) m.page = next;
-  writePages();
+  writePages(deckPages, activePage);
   store(macros);
   render();
 }
@@ -435,7 +330,7 @@ function deletePage() {
   for (const m of macros) if (m.page === was) m.page = fallback;
   deckPages.splice(at, 1);
   activePage = fallback;
-  writePages();
+  writePages(deckPages, activePage);
   store(macros);
   render();
 }

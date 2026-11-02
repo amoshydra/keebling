@@ -229,6 +229,17 @@ try {
     // The failure the SPA made newly dangerous: the shell itself replaced by a
     // broken upload. Nothing in the normal UI can load, so this firmware-served
     // page has to be the way out.
+    // A deck page drawn in the Keys slot: the strip must list it and the slot
+    // must run it with the same controls the Deck tab uses.
+    { page: 'keys-deck', url: `${base}/?token=${CODE}#/keys`, metrics: PHONE,
+      seedStorage: {
+        'esp32remote.deckPages': JSON.stringify(['TV']),
+        'esp32remote.macros': JSON.stringify([
+          { name: 'Up', page: 'TV', colour: 'blue', key: { kind: 'key', code: 'ArrowUp' } },
+          { name: 'Netflix', page: 'TV', steps: '{ENTER}' },
+        ]),
+      } },
+
     { page: 'recover', url: `${base}/recover.html`, metrics: PHONE,
       clearStorage: true,
       // A whole broken bundle, not one broken file: the UI is one script now,

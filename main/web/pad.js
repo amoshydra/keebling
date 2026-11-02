@@ -18,6 +18,8 @@
 
 
 import { HID_KEYS, apiFetch, appSettings, hostLayout, layoutTextMap, token } from './common.js';
+import { buttonsOnPage, deckSnapshot, keyName } from './deck.js';
+import { parseMacro, runMacro } from './macro.js';
 
 export const PadView = (() => {
 
@@ -685,11 +687,17 @@ const PHONE_QUERY = '(max-width: 620px)';
 // The Keys destination holds three panes and shows one: the on-screen
 // keyboard, the media keys, or the text box. They used to be sibling pages
 // reached from a row of buttons; the strip inside the slot replaces that.
-const PANES = ['built', 'media', 'text'];
+const PANES = ['built', 'media', 'text', 'deck'];
 let kbPane = 'built';
 let kbPagesEl = null;
 let kbToolSourceEl = null;
 let kbToolTextEl = null;
+let kbDeckEl = null;
+let deckPageName = '';       // which deck page the slot is showing
+const deckKeys = new Set();  // usages held by deck buttons, kept apart from `held`
+let deckConsumer = 0;
+let deckRunning = false;
+let deckStop = false;
 let litPage = null;          // what the strip marked last, so it only scrolls on change
 
 function setPane(name) {
@@ -699,6 +707,7 @@ function setPane(name) {
   const built = kbPane === 'built';
   if (kbBuiltEl) kbBuiltEl.hidden = !built || kbSource === 'system';
   if (kbCaptureEl) kbCaptureEl.hidden = !built || kbSource !== 'system';
+  if (kbDeckEl) kbDeckEl.hidden = kbPane !== 'deck';
   refreshStrip();
 }
 
@@ -707,6 +716,7 @@ function setPane(name) {
 // keyboard replace the slot, so no page is current while they are up.
 function currentPage() {
   if (kbPane === 'media') return 'media';
+  if (kbPane === 'deck') return deckPageName ? `deck:${deckPageName}` : null;
   if (kbPane !== 'built' || kbSource !== 'built') return null;
   return keyPage;
 }
@@ -751,9 +761,163 @@ function refreshStripEdges() {
   el.classList.toggle('more-right', right > 1);
 }
 
+// ---------------------------------------------------------------- deck pages
+// The same buttons the Deck tab holds, drawn in the slot. The point of the
+// strip: arrows you hold, a key, and a script on one page you built, beside
+// the shipped keyboard pages.
+function sendDeckKeys() {
+  const buf = new Uint8Array(8);
+  buf[0] = 0x02;
+  [...deckKeys].slice(0, 6).forEach((usage, i) => { buf[2 + i] = usage; });
+  send(buf);
+  markInput();
+}
+
+function sendDeckConsumer(usage) {
+  send(new Uint8Array([0x03, usage & 0xFF, (usage >> 8) & 0xFF]));
+  markInput();
+}
+
+function pressDeckKey(key) {
+  if (key.kind === 'consumer') {
+    deckConsumer = key.usage;
+    sendDeckConsumer(deckConsumer);
+  } else {
+    deckKeys.add(HID_KEYS[key.code]);
+    sendDeckKeys();
+  }
+}
+
+function releaseDeckKey(key) {
+  if (key.kind === 'consumer') {
+    if (deckConsumer !== key.usage) return;
+    deckConsumer = 0;
+    sendDeckConsumer(0);
+  } else {
+    if (!deckKeys.delete(HID_KEYS[key.code])) return;
+    sendDeckKeys();
+  }
+}
+
+// Leaving the page, the view or the slot with a deck key down must not leave it
+// down on the host.
+function releaseDeckKeys() {
+  if (!deckKeys.size && !deckConsumer) return;
+  deckKeys.clear();
+  deckConsumer = 0;
+  sendDeckKeys();
+  sendDeckConsumer(0);
+}
+
+function renderDeckPage() {
+  if (!kbDeckEl) return;
+  kbDeckEl.textContent = '';
+
+  const buttons = buttonsOnPage(deckSnapshot(), deckPageName);
+  if (!buttons.length) {
+    const p = document.createElement('div');
+    p.className = 'kbcell empty';
+    p.textContent = `“${deckPageName}” has no buttons yet. Add some in the Deck tab.`;
+    kbDeckEl.appendChild(p);
+    return;
+  }
+
+  for (const b of buttons) {
+    const cell = document.createElement('div');
+    cell.className = 'kbcell';
+    if (b.colour) cell.classList.add('c-' + b.colour);
+
+    const hit = document.createElement('button');
+    hit.type = 'button';
+    hit.className = 'hit';
+    hit.setAttribute('aria-label', b.name || b.steps || 'deck button');
+
+    if (b.key) {
+      hit.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        try { hit.setPointerCapture(e.pointerId); } catch (_) {}
+        pressDeckKey(b.key);
+      });
+      for (const t of ['pointerup', 'pointercancel', 'lostpointercapture']) {
+        hit.addEventListener(t, () => releaseDeckKey(b.key));
+      }
+    } else {
+      // A script cannot be held: tap to run, tap again while it runs to stop.
+      hit.addEventListener('click', () => runDeckScript(b, cell));
+    }
+
+    const nm = document.createElement('span');
+    nm.className = 'nm';
+    nm.textContent = b.name || b.steps || '(unnamed)';
+
+    const sub = document.createElement('span');
+    sub.className = 'sub';
+    sub.textContent = b.key ? `${keyName(b.key)} · held` : b.steps;
+
+    cell.append(hit, nm, sub);
+    kbDeckEl.appendChild(cell);
+  }
+}
+
+async function runDeckScript(button, cell) {
+  if (deckRunning) {
+    deckStop = true;          // a second tap interrupts, like the deck's Stop
+    return;
+  }
+
+  const parsed = parseMacro(button.steps);
+  if (parsed.errors.length || !parsed.steps.length) {
+    cell.classList.add('running');
+    setTimeout(() => cell.classList.remove('running'), 600);
+    return;
+  }
+
+  const cps = Number(appSettings.type_speed) || 20;
+  deckRunning = true;
+  deckStop = false;
+  cell.classList.add('running');
+  try {
+    await runMacro(parsed.steps, {
+      send,
+      gapMs: Math.max(5, Math.round(500 / cps)),
+      stopped: () => deckStop || !kbDeckEl,
+    });
+  } finally {
+    deckRunning = false;
+    deckStop = false;
+    cell.classList.remove('running');
+  }
+}
+
+// The strip lists the shipped pages; the deck's own pages follow them, so the
+// same strip reaches both. Empty pages are left out - a chip that opens nothing
+// is a dead end.
+function buildDeckChips() {
+  if (!kbPagesEl) return;
+  for (const b of kbPagesEl.querySelectorAll('button[data-deck]')) b.remove();
+
+  const snap = deckSnapshot();
+  for (const page of snap.pages) {
+    if (!buttonsOnPage(snap, page).length) continue;
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'kbpage';
+    chip.dataset.page = `deck:${page}`;
+    chip.dataset.deck = '1';
+    chip.textContent = page;
+    kbPagesEl.appendChild(chip);
+  }
+}
+
 // A page is a place you type: picking one always lands on the built-in
 // keyboard, because the phone's keyboard has no pages to show.
 function openPage(page) {
+  if (page.startsWith('deck:')) {
+    deckPageName = page.slice(5);
+    renderDeckPage();
+    setPane('deck');
+    return;
+  }
   if (page === 'media') {
     setPane('media');
     return;
@@ -1454,6 +1618,13 @@ function init() {
   kbPagesEl = document.getElementById('kbPages');
   kbToolSourceEl = document.getElementById('kbToolSource');
   kbToolTextEl = document.getElementById('kbToolText');
+  kbDeckEl = document.getElementById('kbDeck');
+  deckPageName = '';
+  deckRunning = false;
+  deckStop = false;
+  deckKeys.clear();
+  deckConsumer = 0;
+  buildDeckChips();
   ledsEl = document.getElementById('kbLeds');
   if (ledsEl) { ledsEl.hidden = true; ledsEl.textContent = ''; }
   clearInterval(ledTimer);
@@ -1710,8 +1881,13 @@ function destroy() {
   helpEl = null;
   helpCloseBtn = null;
   helpOpenBtn = null;
+  releaseDeckKeys();
+  deckRunning = false;
+  deckStop = true;
   kbd = null;
   kbPagesEl = null;
+  kbDeckEl = null;
+  deckPageName = '';
   kbToolSourceEl = null;
   kbToolTextEl = null;
   litPage = null;

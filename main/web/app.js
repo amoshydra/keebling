@@ -4,6 +4,7 @@
 // the view the hash names. Nothing below needs calling.
 
 import * as common from './common.js';
+import * as deck from './deck.js';
 import * as macro from './macro.js';
 import { PadView } from './pad.js';
 import { MacrosView } from './macros.js';
@@ -28,6 +29,7 @@ function expose(namespace, names) {
 }
 
 expose(common, Object.keys(common));
+expose(deck, Object.keys(deck));
 expose(macro, Object.keys(macro));
 
 for (const [name, view] of Object.entries({ PadView, MacrosView, SettingsView, UiView, Router })) {

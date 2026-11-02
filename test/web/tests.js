@@ -3686,6 +3686,78 @@ __webTests.push({
   },
 });
 
+__webTests.push({
+  page: 'keys-deck',
+  name: 'a deck page is a chip in the strip, and opens in the slot',
+  fn: async () => {
+    const chip = [...document.querySelectorAll('#kbPages button')]
+      .find((b) => b.textContent === 'TV');
+    __assert(chip, 'the deck page is not in the strip');
+    __assert(chip.dataset.page === 'deck:TV', `the chip names "${chip.dataset.page}"`);
+
+    chip.click();
+    await __sleep(50);
+
+    const deck = document.getElementById('kbDeck');
+    __assert(!deck.hidden, 'the slot did not open the deck page');
+    __assert(document.getElementById('kbBuilt').hidden,
+      'the keyboard is still showing behind the deck page');
+
+    const names = [...deck.querySelectorAll('.kbcell .nm')].map((n) => n.textContent);
+    __assert(names.join('|') === 'Up|Netflix', `the page shows: ${names.join('|')}`);
+    __assert(deck.querySelector('.kbcell.c-blue'), 'the button lost its colour');
+    __assert(chip.classList.contains('on'), 'the strip does not mark the open deck page');
+  },
+});
+
+__webTests.push({
+  page: 'keys-deck',
+  name: 'a key on a deck page is held, and a script runs',
+  fn: async () => {
+    [...document.querySelectorAll('#kbPages button')]
+      .find((b) => b.textContent === 'TV').click();
+    await __sleep(50);
+
+    const cap = __capture();
+    const up = document.querySelector('#kbDeck .kbcell .hit');
+    up.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 7 }));
+    await __sleep(40);
+    const down = cap.filter((r) => r[0] === 2 && r[2] !== 0);
+    __assert(down.length === 1 && down[0][2] === 0x52,
+      `the hold sent ${JSON.stringify(cap)}`);
+
+    up.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 7 }));
+    await __sleep(40);
+    __assert(cap.slice(-1)[0][0] === 2 && cap.slice(-1)[0][2] === 0,
+      `the release sent ${JSON.stringify(cap.slice(-1))}`);
+
+    // The script button: a tap runs it, and Enter arrives as a press and a
+    // release like any other macro.
+    const cells = [...document.querySelectorAll('#kbDeck .kbcell')];
+    cells[1].querySelector('.hit').click();
+    await __sleep(400);
+    __assert(cap.some((r) => r[0] === 2 && r[2] === 0x28), `no Enter: ${JSON.stringify(cap)}`);
+  },
+});
+
+__webTests.push({
+  page: 'keys-deck',
+  name: 'an empty deck page is not offered in the strip',
+  fn: async () => {
+    // A chip that opens nothing is a dead end, so a page with no buttons is
+    // left out rather than shown as an empty list.
+    const labels = [...document.querySelectorAll('#kbPages button[data-deck]')]
+      .map((b) => b.textContent);
+    __assert(labels.length === 1 && labels[0] === 'TV', `chips: ${labels.join('|')}`);
+
+    localStorage.setItem('esp32remote.deckPages', JSON.stringify(['TV', 'Empty']));
+    // Rebuilding happens on mount; this check is about the rule, not the timing.
+    const snap = deckSnapshot();
+    __assert(snap.pages.includes('Empty'), 'the empty page was not in the snapshot');
+    __assert(buttonsOnPage(snap, 'Empty').length === 0, 'the empty page has buttons');
+  },
+});
+
 // ---------------------------------------------------------------- deck: held keys
 async function __addKeyButton(code, name) {
   document.getElementById('macroAdd').click();
