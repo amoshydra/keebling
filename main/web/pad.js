@@ -947,7 +947,8 @@ function showEmptyLayout() {
       note.classList.add('warn');
       return;
     }
-    buildLayoutChips();
+    if (parsed.strip && parsed.strip.length) writeStripOrder(parsed.strip);
+    buildStrip();
     layoutPage = parsed.pages[0];
     showLayoutPage(layoutPage);
     setPane('layout');
@@ -1046,32 +1047,65 @@ async function runLayoutSequence(cell) {
   }
 }
 
-// Imported pages ride in the same strip as the shipped ones, after them.
-function buildLayoutChips() {
+// The strip is one ordered list: the shipped pages, imported layouts, and the
+// deck's own pages, with an order the file can carry. A layout may be placed
+// first; the shipped pages can be reordered but never removed.
+const STRIP_KEY = 'esp32remote.strip';
+const BUILTINS = [['abc', 'ABC'], ['sym', '?123'], ['fn', 'Fn'], ['kp', 'Num'], ['media', 'Media']];
+
+function readStripOrder() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(STRIP_KEY) || 'null');
+    if (Array.isArray(raw) && raw.length) return raw;
+  } catch (_) { /* fall through to the shipped order */ }
+  return BUILTINS.map(([id]) => id);
+}
+
+function writeStripOrder(order) {
+  try { localStorage.setItem(STRIP_KEY, JSON.stringify(order)); } catch (_) {}
+}
+
+function buildStrip() {
   if (!kbPagesEl) return;
-  for (const b of kbPagesEl.querySelectorAll('button[data-layout]')) b.remove();
+  kbPagesEl.textContent = '';
 
-  const arrow = kbPagesEl.querySelector('button[data-layout-add]');
-  if (arrow) arrow.remove();
+  const chip = (page, label, extra) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'kbpage';
+    b.dataset.page = page;
+    if (extra) b.dataset[extra] = '1';
+    b.textContent = label;
+    kbPagesEl.appendChild(b);
+    return b;
+  };
 
-  for (const page of readLayouts()) {
-    const chip = document.createElement('button');
-    chip.type = 'button';
-    chip.className = 'kbpage';
-    chip.dataset.page = `layout:${page.id}`;
-    chip.dataset.layout = '1';
-    chip.textContent = page.name;
-    kbPagesEl.appendChild(chip);
+  const layouts = readLayouts();
+  const placed = new Set();
+
+  for (const id of readStripOrder()) {
+    if (id.startsWith('page:')) {
+      const p = layouts.find((x) => x.id === id.slice(5));
+      if (p) { chip(`layout:${p.id}`, p.name, 'layout'); placed.add(p.id); }
+      continue;
+    }
+    const builtin = BUILTINS.find(([bid]) => bid === id);
+    if (builtin) chip(builtin[0], builtin[1]);
   }
 
-  const add = document.createElement('button');
-  add.type = 'button';
-  add.className = 'kbpage';
-  add.dataset.page = 'layout:';
-  add.dataset.layoutAdd = '1';
-  add.textContent = '+';
+  // Anything the order does not mention still has to be reachable.
+  for (const p of layouts) {
+    if (!placed.has(p.id)) chip(`layout:${p.id}`, p.name, 'layout');
+  }
+
+  const snap = deckSnapshot();
+  for (const page of snap.pages) {
+    if (!buttonsOnPage(snap, page).length) continue;
+    chip(`deck:${page}`, page, 'deck');
+  }
+
+  const add = chip('layout:', '+');
   add.title = 'Import a layout';
-  kbPagesEl.appendChild(add);
 }
 
 // The strip lists the shipped pages; the deck's own pages follow them, so the
@@ -1825,8 +1859,7 @@ function init() {
   deckStop = false;
   deckKeys.clear();
   deckConsumer = 0;
-  buildDeckChips();
-  buildLayoutChips();
+  buildStrip();
   wireLayoutSlot();
   ledsEl = document.getElementById('kbLeds');
   if (ledsEl) { ledsEl.hidden = true; ledsEl.textContent = ''; }
