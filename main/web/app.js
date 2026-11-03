@@ -10,7 +10,6 @@ import * as macro from './macro.js';
 import { PadView } from './pad.js';
 import { MacrosView } from './macros.js';
 import { SettingsView } from './settings.js';
-import { UiView } from './ui.js';
 import { Router } from './router.js';
 import * as pages from './pages.js';
 
@@ -41,6 +40,6 @@ expose(deck, Object.keys(deck));
 Object.defineProperty(window, 'Pages', { value: pages, configurable: true });
 expose(macro, Object.keys(macro));
 
-for (const [name, view] of Object.entries({ PadView, MacrosView, SettingsView, UiView, Router })) {
+for (const [name, view] of Object.entries({ PadView, MacrosView, SettingsView, Router })) {
   Object.defineProperty(window, name, { value: view, configurable: true });
 }

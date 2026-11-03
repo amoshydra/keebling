@@ -17,8 +17,12 @@
 import { PadView } from './pad.js';
 import { MacrosView } from './macros.js';
 import { SettingsView } from './settings.js';
-import { UiView } from './ui.js';
 import { appSettings, loadSettings, requireAuth } from './common.js';
+
+// The UI-files page is a repair tool, not the pad. It is a separate file so the
+// app stays under the device's per-file upload limit, and it is loaded when its
+// route is opened.
+const loadUiView = () => import('./ui.js').then((m) => m.UiView);
 
 export const Router = (() => {
   const main = document.getElementById('view');
@@ -38,8 +42,7 @@ export const Router = (() => {
                  template: 'view-macros',   name: 'macros' },
     '/settings': { view: () => (typeof SettingsView === 'undefined' ? null : SettingsView),
                    template: 'view-settings', name: 'settings' },
-    '/ui':     { view: () => (typeof UiView === 'undefined' ? null : UiView),
-                 template: 'view-ui',       name: 'ui' },
+    '/ui':     { view: loadUiView, template: 'view-ui', name: 'ui' },
   };
 
   // Which tab a route belongs to. Several routes can share one tab.
@@ -61,6 +64,7 @@ export const Router = (() => {
   }
 
   let current = null;      // the base route currently mounted
+  let currentView = null;  // its resolved view object
   let started = false;
 
   function pathFromHash() {
@@ -87,14 +91,16 @@ export const Router = (() => {
 
   function unmount() {
     if (!current) return;
-    const view = ROUTES[current].view();
-    if (view) view.destroy();      // release keys, sockets, window listeners
+    if (currentView && typeof currentView.destroy === 'function') {
+      currentView.destroy();       // release keys, sockets, window listeners
+    }
     main.replaceChildren();
     delete main.dataset.view;
     current = null;
+    currentView = null;
   }
 
-  function mount(path) {
+  async function mount(path, preloaded) {
     unmount();
 
     const route = ROUTES[path];
@@ -106,7 +112,8 @@ export const Router = (() => {
     current = path;
     markActive(path);
 
-    const view = route.view();
+    const view = preloaded || await route.view();
+    currentView = view;
     if (!view) {
       // A stored copy of one view script can be broken without taking the
       // shell with it. Say so here rather than leaving a blank screen.
@@ -119,20 +126,21 @@ export const Router = (() => {
     view.init();
   }
 
-  function route() {
+  async function route() {
     const path = pathFromHash();
     const { base, sub } = splitPath(path);
 
     // Moving between sections of the same view is not a remount: the settings
     // form is a live document with a debounce, and tearing it down would throw
     // away what was typed and re-fetch everything from the device.
-    const view = ROUTES[base] && ROUTES[base].view();
+    const route = ROUTES[base];
+    const view = current === base ? currentView : (route ? await route.view() : null);
     if (current === base && view && typeof view.show === 'function') {
       markActive(base);
       view.show(sub);
       return;
     }
-    mount(base);
+    await mount(base, view);
   }
 
   async function start() {
@@ -142,8 +150,8 @@ export const Router = (() => {
     // The pad's gesture tuning, the settings form and a legacy macro list all
     // read appSettings, so load it once before the first view mounts.
     await loadSettings();
-    route();
-    window.addEventListener('hashchange', route);
+    await route();
+    window.addEventListener('hashchange', () => { route(); });
   }
 
   // The access gate runs once, on the shell. A view never prompts for a code.

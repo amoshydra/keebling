@@ -29,6 +29,8 @@ idf_component_register(
         "web/dist/index.html"
         "web/dist/style.css"
         "web/dist/app.js"
+        "web/dist/common.js"
+        "web/dist/ui.js"
         "web/dist/editor.html"
         "web/dist/recover.html"
         "web/dist/manifest.webmanifest"

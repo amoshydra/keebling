@@ -41,6 +41,10 @@ extern const unsigned char style_css_start[]     asm("_binary_style_css_start");
 extern const unsigned char style_css_end[]       asm("_binary_style_css_end");
 extern const unsigned char app_js_start[]        asm("_binary_app_js_start");
 extern const unsigned char app_js_end[]          asm("_binary_app_js_end");
+extern const unsigned char common_js_start[]     asm("_binary_common_js_start");
+extern const unsigned char common_js_end[]       asm("_binary_common_js_end");
+extern const unsigned char ui_js_start[]         asm("_binary_ui_js_start");
+extern const unsigned char ui_js_end[]           asm("_binary_ui_js_end");
 extern const unsigned char editor_html_start[]   asm("_binary_editor_html_start");
 extern const unsigned char editor_html_end[]     asm("_binary_editor_html_end");
 extern const unsigned char manifest_webmanifest_start[] asm("_binary_manifest_webmanifest_start");
@@ -56,7 +60,7 @@ extern const unsigned char icon_180_png_end[]    asm("_binary_icon_180_png_end")
 // the upload enforces it, and the two must not drift apart.
 #define UI_ARCHIVE_MAX  (224 * 1024)   // the whole archive
 #define UI_ENTRY_MAX    (160 * 1024)   // one file inside it
-#define UI_ENTRY_COUNT  10             // more than the asset table has
+#define UI_ENTRY_COUNT  12             // more than the asset table has
 
 typedef struct {
     const char *path;     // request URI
@@ -80,6 +84,8 @@ static const static_asset_t s_assets[] = {
     { "/index.html",            "text/html",                "index.html",          index_html_start,          index_html_end },
     { "/style.css",             "text/css",                 "style.css",           style_css_start,           style_css_end },
     { "/app.js",                "application/javascript",   "app.js",              app_js_start,              app_js_end },
+    { "/common.js",             "application/javascript",   "common.js",           common_js_start,           common_js_end },
+    { "/ui.js",                 "application/javascript",   "ui.js",               ui_js_start,               ui_js_end },
     { "/editor.html",           "text/html",                "editor.html",         editor_html_start,         editor_html_end },
     { "/manifest.webmanifest",  "application/manifest+json", "manifest.webmanifest", manifest_webmanifest_start, manifest_webmanifest_end },
     { "/icon-192.png",          "image/png",                "icon-192.png",        icon_192_png_start,        icon_192_png_end },

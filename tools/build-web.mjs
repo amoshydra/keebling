@@ -31,11 +31,11 @@ const PAGES = ['index.html', 'recover.html'];
 // but is deliberately not one of them: it repairs a broken upload, so it must
 // come from the binary. Shipping it inside the archive made every upload fail
 // whole, which is the behaviour the archive is for - and a fine way to find out.
-const SERVED = ['index.html', 'style.css', 'app.js', 'editor.html'];
+const SERVED = ['index.html', 'style.css', 'app.js', 'common.js', 'ui.js', 'editor.html'];
 // Built-in only: the PWA manifest and home-screen icons. They are not in the
 // upload bundle, so a UI upload cannot leave the install metadata missing.
 const STATIC = ['manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'icon-180.png'];
-const ASSETS = [...STATIC, 'app.js', 'style.css', 'editor.html', ...PAGES];
+const ASSETS = [...STATIC, 'app.js', 'common.js', 'ui.js', 'style.css', 'editor.html', ...PAGES];
 
 const kb = (n) => `${(n / 1024).toFixed(1)} KB`;
 
@@ -58,14 +58,29 @@ async function buildOnce() {
     ignoreCustomFragments: [],
   });
 
-  const js = await build({
-    entryPoints: [path.join(SRC, 'app.js')],
+  const jsOptions = {
     bundle: true,
     minify: true,
     format: 'esm',
     target: ['es2020'],
     legalComments: 'none',
     write: false,
+  };
+
+  // `common.js` is one module instance shared by the app and the lazily loaded
+  // UI-files page: externalising it (rather than inlining a copy) keeps the
+  // access code and settings in one place. `ui.js` is its own file so no single
+  // upload entry grows past the device's per-file cap.
+  const js = await build({
+    ...jsOptions,
+    entryPoints: [path.join(SRC, 'app.js')],
+    external: ['./common.js', './ui.js'],
+  });
+  const commonJs = await build({ ...jsOptions, entryPoints: [path.join(SRC, 'common.js')] });
+  const uiJs = await build({
+    ...jsOptions,
+    entryPoints: [path.join(SRC, 'ui.js')],
+    external: ['./common.js'],
   });
 
   const css = await build({
@@ -77,6 +92,8 @@ async function buildOnce() {
 
   const out = new Map();
   out.set('app.js', js.outputFiles[0].contents);
+  out.set('common.js', commonJs.outputFiles[0].contents);
+  out.set('ui.js', uiJs.outputFiles[0].contents);
   out.set('style.css', css.outputFiles[0].contents);
   out.set('editor.html', Buffer.from(editorMin));
 

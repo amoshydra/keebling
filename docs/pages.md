@@ -7,14 +7,17 @@
 | Branch | `main`, pushed |
 | Tests | `node test/web/run.mjs` → 157 passed |
 | Firmware | `idf.py build` green |
-| UI bundle | `app.js` 102 KB, `editor.html` 42 KB, `web.zip` 189 KB (caps: 224 KB archive / 160 KB file) |
-| Device | running the previous image at `http://192.168.4.1/` (AP mode) |
+| UI bundle | `app.js` 85 KB, `common.js` 6.5 KB, `ui.js` 8.3 KB, `editor.html` 41 KB, `web.zip` 189 KB (caps: 224 KB archive / 160 KB file) |
+| Device | UI uploaded over WiFi to `http://192.168.4.1/` (AP mode); the firmware image itself is still the previous one |
 | Flash | **not done** — the dongle is booted, so it exposes HID (303a:4008) and no `/dev/ttyACM*`. It needs BOOT-held download mode to flash. |
 
-The firmware builds from this tree. Until it is flashed, the device still runs
-the previous image (embedded app 95,244 bytes, 96 KiB per-file upload cap), which
-is too small to accept the new UI over WiFi. Flash it when the port is
-available:
+The new UI is already stored on the device's LittleFS, so it survives a reboot
+and is being served now. The firmware image is not: the new C limits and the
+embedded copies of `common.js`, `ui.js` and `editor.html` need a flash. The
+uploaded UI currently works against the old firmware because the app and its
+modules each fit the old 96 KiB per-file cap.
+
+Flash it when the port is available:
 
 ```bash
 ls -l /dev/ttyACM0                    # must be writable (0666)
@@ -51,6 +54,13 @@ step keeps them and only loses the old keys — the conversion already happened.
 
 The browser still adopts a macro list left in the device's settings blob, after
 settings load, because the boot migration runs before the device is reachable.
+
+### Files served
+
+`app.js` is the app; `common.js` is its one shared module (the access code and
+settings must not exist twice); `ui.js` is the repair page's script, loaded only
+when that route opens. Splitting them keeps every file under the device's
+per-file cap and lets the UI update over WiFi on the older firmware.
 
 ### One renderer
 

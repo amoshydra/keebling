@@ -2595,10 +2595,10 @@ __webTests.push({
 
     const rows = [...document.querySelectorAll('#fileList .file')];
     const names = rows.map((r) => r.dataset.file);
-    __assert(rows.length === 4, `listed ${rows.length} files: ${names.join('|')}`);
-    __assert(names.includes('index.html') && names.includes('app.js')
-      && names.includes('style.css') && names.includes('editor.html'),
-      `missing files: ${names.join('|')}`);
+    __assert(rows.length === 6, `listed ${rows.length} files: ${names.join('|')}`);
+    for (const name of ['index.html', 'app.js', 'common.js', 'ui.js', 'style.css', 'editor.html']) {
+      __assert(names.includes(name), `missing files: ${names.join('|')}`);
+    }
     __assert(!names.includes('pad.js') && !names.includes('router.js'),
       `the pre-bundle sources are still listed: ${names.join('|')}`);
     __assert(names.filter((n) => n === 'index.html').length === 1,

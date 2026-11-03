@@ -40,7 +40,7 @@ const TYPES = {
 };
 
 // The built-in files, which are also what the firmware embeds.
-const UI_FILES = ['index.html', 'style.css', 'app.js', 'editor.html'];
+const UI_FILES = ['index.html', 'style.css', 'app.js', 'common.js', 'ui.js', 'editor.html'];
 
 // Mirrors safe_file_name() in main/web_server.c: one or two segments, each a
 // plain name, so ".." cannot be spelled; two names reserved.

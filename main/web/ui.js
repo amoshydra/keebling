@@ -494,3 +494,7 @@ return {
 };
 
 })();
+
+// Loaded by the router only when its route is opened.
+Object.defineProperty(window, 'UiView', { value: UiView, configurable: true });
+
