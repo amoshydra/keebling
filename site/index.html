@@ -3,12 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Keebling — a baby keyboard that lives in your USB port</title>
-<meta name="description" content="Keebling turns a tiny ESP32-S3 dongle into a keyboard, mouse, and macro deck you drive from any browser. Nothing to install on the target. Works in the BIOS, at the login screen, and on the machine whose keyboard just died.">
+<title>Keebling — WiFi → USB HID bridge for the ESP32-S3</title>
+<meta name="description" content="Keebling is a WiFi → USB HID bridge on an ESP32-S3: keyboard, mouse, and media input from a browser on the same LAN. No software on the target; input only, no video.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://amoshydra.github.io/keebling/">
-<meta property="og:title" content="Keebling — a baby keyboard that lives in your USB port">
-<meta property="og:description" content="A WiFi → USB HID bridge for the ESP32-S3. No drivers, no installer, no OS required.">
+<meta property="og:title" content="Keebling — WiFi → USB HID bridge for the ESP32-S3">
+<meta property="og:description" content="Keyboard, mouse, and media input from a browser on the same LAN. No software on the target. Input only; no video or internet relay.">
 <meta property="og:image" content="https://amoshydra.github.io/keebling/assets/og.jpg">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
@@ -47,9 +47,10 @@
       keebling
     </a>
     <div class="nav-links">
-      <a href="#meet">The keebling</a>
+      <a href="#short">Overview</a>
       <a href="#how">How it works</a>
-      <a href="#deck">The deck</a>
+      <a href="#quickstart">Quickstart</a>
+      <a href="#deck">Deck</a>
       <a href="#build">Build</a>
       <a class="nav-cta" href="https://github.com/amoshydra/keebling">Source <span>↗</span></a>
     </div>
@@ -59,23 +60,19 @@
 <header class="hero" id="top">
   <div class="wrap hero-grid">
     <div class="hero-copy">
-      <p class="eyebrow"><span class="dot"></span> ESP32-S3 · USB-A DONGLE · WiFi</p>
+      <p class="eyebrow"><span class="dot"></span> ESP32-S3 · USB HID · WiFi (AP or LAN)</p>
       <h1>A baby keyboard<br>that lives in your<br><em>USB port.</em></h1>
-      <p class="lede">Keebling is a USB dongle with two googly eyes and a keyboard inside. Plug it in and it becomes a keyboard, mouse, and macro deck you drive from any browser. Nothing to install on the machine you're fixing — it works at the login screen, in the BIOS, and on the computer whose keyboard just died.</p>
+      <p class="lede">Keebling is a WiFi → USB HID bridge on an ESP32-S3. It plugs into a target's USB-A port and enumerates as a keyboard, mouse, and media-key device; you drive it from a browser on your phone or laptop over the dongle's own access point or your LAN. Nothing is installed on the target, so it works at the login screen, in UEFI/BIOS, and in recovery — but it is input only, with no video capture and no internet relay.</p>
       <div class="actions">
-        <a class="btn primary" href="#meet">Meet the keebling <span class="arrow">↓</span></a>
-        <a class="btn ghost" href="#build">Build one <span class="arrow">↗</span></a>
+        <a class="btn primary" href="#quickstart">Quickstart <span class="arrow">↓</span></a>
+        <a class="btn ghost" href="https://github.com/amoshydra/keebling">Source <span class="arrow">↗</span></a>
       </div>
-      <p class="fine">macOS · Linux · Windows · BIOS · recovery consoles</p>
+      <p class="fine">macOS · Linux · Windows · UEFI/BIOS · recovery consoles</p>
     </div>
     <div class="hero-art">
       <div class="frame">
         <img src="assets/hero-cozy.webp" alt="The Keebling dongle with googly eyes, plugged into a laptop's USB-C port through a silver adapter, on a cozy desk at night.">
-        <div class="hero-status" aria-hidden="true">
-          <span class="dot live"></span>
-          <div><strong>keebling.local</strong><small>connected · 12 ms</small></div>
-          <span class="chip">Release</span>
-        </div>
+        <div class="hero-caption">T-Dongle-S3 · USB-C adapter · screen up</div>
       </div>
     </div>
   </div>
@@ -83,33 +80,49 @@
 
 <div class="strip">
   <div class="wrap">
-    <span><b>No drivers</b> on the target</span>
-    <span><b>No installer</b> to run</span>
-    <span><b>No admin rights</b> needed</span>
-    <span><b>No OS</b> required</span>
+    <span><b>USB HID</b> keyboard · mouse · media</span>
+    <span><b>WiFi</b> AP or same LAN</span>
+    <span><b>No software</b> on the target</span>
+    <span><b>Input only</b> · no video</span>
   </div>
 </div>
 
 <main>
 
-<section class="section" id="meet">
+<section class="section" id="short">
   <div class="wrap">
-    <div class="meet reveal">
-      <div class="art-card">
-        <img src="assets/real-front.webp" alt="The actual LILYGO T-Dongle-S3: a clear USB-A dongle with a metal plug, a black LCD screen, and a green PCB inside.">
-        <div class="art-caption"><span>the real thing</span><span>front view · unchanged</span></div>
+    <div class="section-head reveal">
+      <div>
+        <p class="kicker">Read this first</p>
+        <h2>A keyboard bridge,<br><em>not a KVM.</em></h2>
       </div>
-      <div class="meet-copy">
-        <p class="kicker">The mascot</p>
-        <h3>It's a keyboard.<br>It's just not there.</h3>
-        <p>The host sees a normal USB keyboard. The thing in the port is the actual T-Dongle-S3: a clear shell, a USB-A plug, and a 0.96-inch LCD. A keebling is what you call a baby keyboard when it hasn't grown into a full desk yet — so it borrows a dongle's body, sticks two googly eyes on top, and gets to work.</p>
-        <div class="traits">
-          <div class="trait"><span class="num">01</span><div><b>Curious</b><p>It peeks out of the port and waits for a page to load. It has no opinions about the operating system.</p></div></div>
-          <div class="trait"><span class="num">02</span><div><b>Quiet</b><p>No agent, no daemon, no tray icon. The host only ever sees a keyboard and a mouse.</p></div></div>
-          <div class="trait"><span class="num">03</span><div><b>Very good at pretending</b><p>It types into the BIOS, the login screen, and the recovery console — the places software can't reach.</p></div></div>
-        </div>
-      </div>
+      <p>The short version, before the build steps.</p>
     </div>
+    <div class="cards-2 reveal">
+      <article class="card">
+        <span class="big">WHAT IT IS</span>
+        <h3>Input over USB HID,<br>from a browser.</h3>
+        <p>Keebling is the input path, not a remote desktop. It enumerates as a keyboard, mouse, and media-key device; your phone or laptop is the input surface.</p>
+        <ul class="limits" style="margin-top:14px">
+          <li><b>USB HID.</b> Keyboard, mouse, and media keys; no target software.</li>
+          <li><b>Browser input.</b> Touchpad, on-screen keyboard, and deck.</li>
+          <li><b>Before the OS.</b> Login, UEFI, and recovery.</li>
+          <li><b>Same network.</b> Dongle AP or your LAN; no internet relay.</li>
+        </ul>
+      </article>
+      <article class="card">
+        <span class="big">WHAT IT ISN'T</span>
+        <h3>No video, no cloud,<br>no target software.</h3>
+        <ul class="limits">
+          <li><b>Not a KVM.</b> No video capture, virtual media, or power control. You still need a display or serial console.</li>
+          <li><b>Not remote over the internet.</b> No cloud relay, account, or port forwarding; access stays on the local network.</li>
+          <li><b>Not software on the target.</b> It is USB HID; no agent, driver install, or admin rights — on hosts that permit USB HID.</li>
+          <li><b>Not Bluetooth.</b> USB HID only; BLE HID is not implemented.</li>
+          <li><b>Not a synced deck.</b> Macros live in one browser profile; back them up from Setup → Backup.</li>
+        </ul>
+      </article>
+    </div>
+    <p class="security-note"><b>Security:</b> the UI is a privileged console and speaks plain HTTP. The 12-character code is the AP password and the page token; anyone with the code or LCD access can type into the host. Use the device AP or a trusted LAN. <a href="https://github.com/amoshydra/keebling#security-model">Security model ↗</a></p>
   </div>
 </section>
 
@@ -118,16 +131,141 @@
     <div class="section-head reveal">
       <div>
         <p class="kicker">How it works</p>
-        <h2>One small thing.<br>Three <em>honest</em> hops.</h2>
+        <h2>One small thing.<br>Five <em>honest</em> hops.</h2>
       </div>
       <p>The dongle does the pretending. The browser does the talking. The host never knows there is a network in the middle.</p>
     </div>
     <div class="flow reveal">
       <div class="flow-step"><span class="num">01 / BROWSER</span><h3>Your phone</h3><p>The touchpad, keyboard, and deck. One page, no app store.</p></div>
       <div class="flow-step"><span class="num">02 / WIFI</span><h3>The link</h3><p>Join its access point, or put it on your own network. WebSocket from there.</p></div>
-      <div class="flow-step"><span class="num">03 / ESP32-S3</span><h3>The dongle</h3><p>A 12-character code pairs the page. The firmware translates input.</p></div>
+      <div class="flow-step"><span class="num">03 / ESP32-S3</span><h3>The dongle</h3><p>The 12-character code is the AP password and the page token. The firmware translates input.</p></div>
       <div class="flow-step"><span class="num">04 / USB HID</span><h3>The plug</h3><p>A composite HID device over USB-A — with a USB-C adapter when the host needs one.</p></div>
-      <div class="flow-step"><span class="num">05 / HOST</span><h3>The machine</h3><p>It sees a keyboard. It does not see the phone, the WiFi, or the deck.</p></div>
+      <div class="flow-step"><span class="num">05 / HOST</span><h3>The machine</h3><p>It sees a keyboard, mouse, and media keys. It does not see the phone, the WiFi, or the deck.</p></div>
+    </div>
+    <p class="fine" style="margin-top:18px">The browser must be on the dongle's access point or the same LAN. There is no internet relay.</p>
+  </div>
+</section>
+
+<section class="section" id="requirements">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div>
+        <p class="kicker">Requirements</p>
+        <h2>What you need.</h2>
+      </div>
+      <p>Everything between the repo and a working session.</p>
+    </div>
+    <div class="req-grid reveal">
+      <div class="req"><b>Dongle</b><p>LILYGO T-Dongle-S3: ESP32-S3, 16 MB flash, no PSRAM. It does not ship with Keebling; you flash it.</p></div>
+      <div class="req"><b>Adapter</b><p>USB-C-to-USB-A for a USB-C-only target. The dongle has a USB-A male plug.</p></div>
+      <div class="req"><b>Cable + power</b><p>A USB data cable for flashing. The dongle is bus-powered and draws up to ~800 mA with WiFi and backlight; use a USB 3.x port or a powered hub if the port is limited.</p></div>
+      <div class="req"><b>Target</b><p>A USB-A host with HID keyboard support. You need a display or serial console; there is no video capture.</p></div>
+      <div class="req"><b>Controller</b><p>A phone, tablet, or laptop with a current browser and WiFi, on the dongle's AP or the same LAN.</p></div>
+      <div class="req"><b>Build host</b><p>ESP-IDF v5.3.2, Node.js, and pnpm. Run <code>pnpm build</code> before <code>idf.py build</code>.</p></div>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="quickstart">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div>
+        <p class="kicker">Quickstart</p>
+        <h2>From source to typing<br>in five steps.</h2>
+      </div>
+      <p>No prebuilt firmware is published; build from source. Full details in the README.</p>
+    </div>
+    <ol class="steps reveal">
+      <li class="step">
+        <div class="step-num">01</div>
+        <div>
+          <h3>Build the firmware</h3>
+          <p>Clone the repo, then run this from its root:</p>
+          <pre class="cmd">. ~/esp/esp-idf/export.sh
+idf.py set-target esp32s3
+pnpm install
+pnpm build
+idf.py build</pre>
+          <p>ESP-IDF v5.3.2. <code>set-target</code> and <code>pnpm install</code> are first-time only. <code>pnpm build</code> must run before <code>idf.py build</code>.</p>
+        </div>
+      </li>
+      <li class="step">
+        <div class="step-num">02</div>
+        <div>
+          <h3>Flash in download mode</h3>
+          <p>Unplug the board, hold <b>BOOT</b>, plug in USB, then run the flash and release BOOT when “Connecting…” appears.</p>
+          <pre class="cmd">idf.py -p /dev/ttyACM0 flash</pre>
+          <p>Use your serial port. On Linux, your user needs permission to access the serial device. Unplug and replug without BOOT. On a fresh board it starts in AP mode; a configured device rejoins its saved network.</p>
+        </div>
+      </li>
+      <li class="step">
+        <div class="step-num">03</div>
+        <div>
+          <h3>Plug it into the target</h3>
+          <p>It enumerates as a keyboard, mouse, and media keys. Nothing is installed on the target.</p>
+        </div>
+      </li>
+      <li class="step">
+        <div class="step-num">04</div>
+        <div>
+          <h3>Join and authenticate</h3>
+          <p>On first run, join <code>keebling</code> — password is the 12-character code on the LCD — and open <code>http://192.168.4.1</code>. Paste the code when the page asks. Or scan the QR: it carries either the WiFi join payload or <code>http://&lt;address&gt;/?token=&lt;code&gt;</code>. The QR stays up for 20 seconds; tap BOOT to wake the screen or cycle display modes. For your own network, use Setup → Network; the LCD shows the address.</p>
+        </div>
+      </li>
+      <li class="step">
+        <div class="step-num">05</div>
+        <div>
+          <h3>Drive it</h3>
+          <p>Tap the pad to capture the pointer; <b>Esc</b> releases it; <b>Release</b> clears every held key. Hold BOOT 3 s for the panic release; hold BOOT 10 s while powered to forget the saved network and return to AP mode. <code>/recover.html</code> resets a broken UI.</p>
+        </div>
+      </li>
+    </ol>
+  </div>
+</section>
+
+<section class="section" id="build">
+  <div class="wrap">
+    <div class="build reveal">
+      <div>
+        <p class="kicker">Hardware</p>
+        <h2>Small, cheap,<br>and <em>deliberately</em> boring.</h2>
+        <p class="lede" style="font-size:16px;max-width:520px">A LILYGO T-Dongle-S3 does the work: native USB OTG, WiFi, a 160×80 LCD, and one button. The firmware is ESP-IDF. The UI is a bundle the device serves itself.</p>
+        <dl class="specs">
+          <div class="spec"><dt>MCU</dt><dd>ESP32-S3 · 16 MB flash</dd></div>
+          <div class="spec"><dt>Display</dt><dd>ST7735 160×80</dd></div>
+          <div class="spec"><dt>Plug</dt><dd>USB-A male</dd></div>
+          <div class="spec"><dt>HID</dt><dd>Keyboard + mouse + media</dd></div>
+          <div class="spec"><dt>Case</dt><dd>clear shell</dd></div>
+          <div class="spec"><dt>Radio</dt><dd>WiFi STA + AP fallback</dd></div>
+          <div class="spec"><dt>Pairing</dt><dd>QR + 12-char code</dd></div>
+          <div class="spec"><dt>Panic</dt><dd>BOOT · 3 s</dd></div>
+        </dl>
+        <p class="fine" style="margin-top:18px">USB-C-only laptop? Add a USB-C-to-USB-A adapter; a data cable is still needed for flashing.</p>
+        <div class="actions" style="margin-top:22px">
+          <a class="btn primary" href="https://github.com/amoshydra/keebling">Get the code <span class="arrow">↗</span></a>
+          <a class="btn ghost" href="https://github.com/amoshydra/keebling#build">Build guide <span class="arrow">↗</span></a>
+        </div>
+      </div>
+      <div class="lcd-wrap">
+        <div class="lcd" aria-hidden="true">
+          <div class="lcd-inner">
+            <div class="lcd-copy">
+              <b>keebling</b>
+              <p>AP: keebling<br>192.168.4.1<br>scan to join</p>
+            </div>
+            <div class="qr">
+              <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+              <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+              <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+              <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+              <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+              <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+              <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+            </div>
+          </div>
+        </div>
+        <span class="lcd-label">screen mock · first-run AP/QR</span>
+      </div>
     </div>
   </div>
 </section>
@@ -138,16 +276,16 @@
       <div class="deck-copy">
         <p class="kicker">The deck</p>
         <h2>Macros with<br><em>a thumb.</em></h2>
-        <p>A grid of buttons you press. Sequences, chords, whole pages of them. Put a whole login in one tile, or a <span class="code">{REPEAT:5}</span> volume ramp that runs while your finger is down.</p>
-        <p>The deck lives in the browser, not on the device. That means megabytes of room for it — and that it belongs to the phone you set it up on.</p>
+        <p>A grid of buttons you press. Each tile types a line of text or a key sequence into the host; examples depend on the host OS and keyboard layout. It does not execute commands or control power.</p>
+        <p>Put a whole line of text in one tile, or a volume ramp that repeats while your finger is down. The deck lives in the browser, not on the device. A second phone does not see it, and clearing this site's data removes it; back it up from Setup → Backup.</p>
       </div>
       <div class="deck">
         <div class="deck-top"><span>deck / page 1</span><span><b>Edit</b> · Stop</span></div>
         <div class="deck-grid">
           <div class="deck-tile a"><small>sequence</small>Open terminal</div>
           <div class="deck-tile b"><small>chord</small>Lock screen</div>
-          <div class="deck-tile c"><small>text</small>Paste password</div>
-          <div class="deck-tile d"><small>sequence</small>Reboot to BIOS</div>
+          <div class="deck-tile c"><small>text</small>Paste command</div>
+          <div class="deck-tile d"><small>sequence</small>Reboot command</div>
           <div class="deck-tile e"><small>hold</small>Volume up <span class="mono" style="font-size:9px;opacity:.5">REPEAT:5</span></div>
           <div class="deck-tile f"><small>key</small>Mute</div>
         </div>
@@ -163,59 +301,32 @@
         <p class="kicker">Built for the bad days</p>
         <h2>When the machine<br>won't <em>meet you</em> halfway.</h2>
       </div>
-      <p>Remote desktop needs an OS, a network, and permission. Keebling needs a USB port.</p>
+      <p>Remote desktop needs the target OS, its network, and permission. Keebling needs a USB port, power, and a browser on the same network — but no software on the target.</p>
     </div>
     <div class="cards-3 reveal">
       <article class="card"><span class="big">01 / DEAD KEYBOARD</span><h3>The keyboard is gone.</h3><p>The laptop's keyboard died, or the desktop is under a desk. Plug in the dongle and type from the phone in your hand.</p></article>
-      <article class="card"><span class="big">02 / NO OS</span><h3>The OS won't boot.</h3><p>BIOS, UEFI, recovery, a fresh install, a LUKS prompt. The places where remote desktop has never been.</p></article>
-      <article class="card"><span class="big">03 / NO SOFTWARE</span><h3>You can't install anything.</h3><p>A locked-down machine, a friend's laptop, a rack you don't own. The host sees a keyboard, because it is one.</p></article>
+      <article class="card"><span class="big">02 / BEFORE THE OS</span><h3>The OS won't boot.</h3><p>BIOS, UEFI, recovery, a fresh install, a LUKS prompt. The places where remote desktop has never been.</p></article>
+      <article class="card"><span class="big">03 / NO SOFTWARE</span><h3>You can't install anything.</h3><p>A locked-down machine, a friend's laptop, a rack you don't own — as long as it allows USB HID. The host sees a keyboard, because it is one.</p></article>
     </div>
   </div>
 </section>
 
-<section class="section" id="build">
+<section class="section" id="meet">
   <div class="wrap">
-    <div class="build reveal">
-      <div>
-        <p class="kicker">The build</p>
-        <h2>Small, cheap,<br>and <em>deliberately</em> boring.</h2>
-        <p class="lede" style="font-size:16px;max-width:520px">A LILYGO T-Dongle-S3 does the work: native USB OTG, WiFi, a 160×80 LCD, and one button. The firmware is ESP-IDF. The UI is a bundle the device serves itself.</p>
-        <dl class="specs">
-          <div class="spec"><dt>MCU</dt><dd>ESP32-S3 · 16 MB</dd></div>
-          <div class="spec"><dt>Display</dt><dd>ST7735 160×80</dd></div>
-          <div class="spec"><dt>Plug</dt><dd>USB-A male</dd></div>
-          <div class="spec"><dt>HID</dt><dd>Keyboard + mouse</dd></div>
-          <div class="spec"><dt>Case</dt><dd>clear shell</dd></div>
-          <div class="spec"><dt>Radio</dt><dd>WiFi AP + STA</dd></div>
-          <div class="spec"><dt>Pairing</dt><dd>QR + 12-char code</dd></div>
-          <div class="spec"><dt>Panic</dt><dd>BOOT · 3 s</dd></div>
-        </dl>
-        <p class="fine" style="margin-top:18px">USB-C-only laptop? A USB-C-to-USB-A adapter is the only accessory.</p>
-        <div class="actions" style="margin-top:22px">
-          <a class="btn primary" href="https://github.com/amoshydra/keebling">Get the code <span class="arrow">↗</span></a>
-          <a class="btn ghost" href="https://github.com/amoshydra/keebling#build">Build guide <span class="arrow">↗</span></a>
-        </div>
-        <p class="fine" style="margin-top:14px">Independent project. LILYGO and T-Dongle-S3 are trademarks of their respective owners.</p>
+    <div class="meet reveal">
+      <div class="art-card">
+        <img src="assets/real-front.webp" alt="The actual LILYGO T-Dongle-S3: a clear USB-A dongle with a metal plug, a black LCD screen, and a green PCB inside.">
+        <div class="art-caption"><span>the real thing</span><span>front view · unchanged</span></div>
       </div>
-      <div class="lcd-wrap">
-        <div class="lcd" aria-hidden="true">
-          <div class="lcd-inner">
-            <div class="lcd-copy">
-              <b>keebling</b>
-              <p>STA: home<br>192.168.1.50<br>scan to wake me</p>
-            </div>
-            <div class="qr">
-              <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
-              <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
-              <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
-              <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
-              <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
-              <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
-              <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
-            </div>
-          </div>
+      <div class="meet-copy">
+        <p class="kicker">The mascot</p>
+        <h3>It's a keyboard.<br>It's just not there.</h3>
+        <p>The host sees a normal USB keyboard, mouse, and media keys. The thing in the port is the actual T-Dongle-S3: a clear shell, a USB-A plug, and a 0.96-inch LCD. A keebling is what you call a baby keyboard when it hasn't grown into a full desk yet — so it borrows a dongle's body, sticks two googly eyes on top, and gets to work.</p>
+        <div class="traits">
+          <div class="trait"><span class="num">01</span><div><b>Curious</b><p>It peeks out of the port and waits for a page to load. It has no opinions about the operating system.</p></div></div>
+          <div class="trait"><span class="num">02</span><div><b>Quiet</b><p>No agent, no daemon, no tray icon. The host only ever sees a keyboard, mouse, and media keys.</p></div></div>
+          <div class="trait"><span class="num">03</span><div><b>Very good at pretending</b><p>It types into the BIOS, the login screen, and the recovery console — the places software can't reach.</p></div></div>
         </div>
-        <span class="lcd-label">actual screen · 160 × 80</span>
       </div>
     </div>
   </div>
@@ -231,7 +342,9 @@
     </div>
     <div class="foot-links">
       <a href="#how">How it works</a>
+      <a href="#quickstart">Quickstart</a>
       <a href="#build">Build</a>
+      <a href="#meet">The mascot</a>
       <a href="https://github.com/amoshydra/keebling/tree/main/main">Firmware</a>
       <a href="https://github.com/amoshydra/keebling">Source ↗</a>
     </div>
