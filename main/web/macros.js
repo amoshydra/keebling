@@ -19,7 +19,7 @@ import {
   COLOURS, CONSUMER_CHOICES, DEFAULT_PAGE, KEY_CHOICES, PAGE_KEY,
   keyName, readPages, readStore, sanitizeButtons, sanitizeKey, writePages, writeStore,
 } from './deck.js';
-import { describeMacroStep, parseMacro, refreshMacroText, runMacro } from './macro.js';
+import { describeMacroStep, macroText, parseMacro, refreshMacroText, runMacro } from './macro.js';
 
 export const MacrosView = (() => {
 
@@ -113,7 +113,13 @@ async function loadMacros() {
   const stored = readStore();
   if (stored !== undefined) {
     const s = sanitizeMacros(stored);
-    macros = s.kept;
+    // Decks stored before this build hold only the text; parse it once, and
+    // leave the text alone when it does not parse so the run still refuses it.
+    macros = s.kept.map((m) => {
+      if (m.blocks) return m;
+      const parsed = parseMacro(m.steps);
+      return parsed.errors.length ? m : { ...m, blocks: parsed.steps };
+    });
     if (s.dropped) {
       showSaveNote(`${s.dropped} stored entr${s.dropped === 1 ? 'y was' : 'ies were'} not ` +
                    'readable as a macro and have been left out.', true);
@@ -440,7 +446,8 @@ function deckTile(m, i) {
 
   tile.appendChild(run);
   tile.appendChild(el('span', 'name', macroTitle(m, i)));
-  tile.appendChild(el('span', 'src', m.key ? `${keyName(m.key)} · held` : (m.steps || '(empty)')));
+  tile.appendChild(el('span', 'src', m.key ? `${keyName(m.key)} · held`
+    : (m.steps || (m.blocks ? macroText(m.blocks) : '') || '(empty)')));
   if (!m.key && parsed.errors.length) {
     tile.appendChild(el('div', 'bad',
       parsed.errors.map((e) => `${e.token}: ${e.message}`).join(' · ')));
@@ -523,7 +530,7 @@ function openEditor(index) {
   if (holdBox) holdBox.checked = editHold;
   editPage = index >= 0 ? (macros[index].page || DEFAULT_PAGE) : activePage;
   paintColourSwatches();
-  stepsEl.value = m.steps;
+  stepsEl.value = m.blocks ? macroText(m.blocks) : String(m.steps || '');
   paintKind();
   editorTitleEl.textContent = index >= 0 ? 'Edit button' : 'New button';
   editorEl.classList.add('show');
@@ -615,10 +622,17 @@ async function saveEditor() {
     showSaveNote('Not saved: the macro has no steps.', true);
     return;
   }
+  const parsed = editKind === 'key' ? { steps: [], errors: [] } : parseMacro(stepsEl.value);
+  if (parsed.errors.length) {
+    showSaveNote(`Not saved: ${parsed.errors[0].token} — ${parsed.errors[0].message}.`, true);
+    return;
+  }
+
   const next = macros.slice();
   const entry = {
     name: nameEl.value.trim(),
     steps: editKind === 'key' ? '' : stepsEl.value,
+    blocks: editKind === 'key' ? null : parsed.steps,
     colour: editColour,
     page: editPage,
     // A held key is held by definition; the flag only means something to a
@@ -733,7 +747,7 @@ async function runMacroAt(index) {
   const gen = runGen;
   const m = macros[index];
   const title = macroTitle(m, index);
-  const parsed = parseMacro(m.steps);
+  const parsed = m.blocks ? { steps: m.blocks, errors: [], warnings: [] } : parseMacro(m.steps);
 
   // An unrecognised token is never skipped: the run is refused and the token
   // is named.

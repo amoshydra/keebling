@@ -66,7 +66,11 @@ export function sanitizeButtons(list) {
     .filter((m) => m && typeof m === 'object')
     .map((m) => ({
       name: String(m.name || ''),
+      // The stored text, kept for display and for decks written by older
+      // builds; `blocks` is the parse of it, which is what runs.
       steps: String(m.steps || ''),
+      blocks: Array.isArray(m.blocks) ? m.blocks
+             : (Array.isArray(m.steps) ? m.steps : null),
       colour: COLOURS.includes(m.colour) ? m.colour : '',
       page: String(m.page || DEFAULT_PAGE),
       hold: !!m.hold,

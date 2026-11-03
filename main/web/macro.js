@@ -350,3 +350,31 @@ export async function runMacro(steps, opts) {
   if (out.stopped) release();
   return out;
 }
+
+// The brace text is an input, not the stored form: a deck button keeps the
+// block tree and prints itself back into the editor. Kept here so the app and
+// the editor print the same way.
+export function macroText(steps) {
+  let out = '';
+  for (const step of steps || []) {
+    if (step.kind === 'text') out += String(step.text || '').replace(/\{/g, '{{');
+    else if (step.kind === 'wait') out += `{WAIT:${step.ms}}`;
+    else if (step.kind === 'consumer') out += `{${step.token}}`;
+    else if (step.kind === 'repeatStart') out += `{REPEAT:${step.count}}`;
+    else if (step.kind === 'repeatEnd') out += '{/REPEAT}';
+    else if (step.kind === 'key') {
+      if (step.mod) out += `{${modName(step.mod)}+${step.token}}`;
+      else out += `{${step.token}}`;
+    }
+  }
+  return out;
+
+  function modName(mod) {
+    const names = [];
+    if (mod & 0x01) names.push('CTRL');
+    if (mod & 0x02) names.push('SHIFT');
+    if (mod & 0x04) names.push('ALT');
+    if (mod & 0x08) names.push('CMD');
+    return names.join('+');
+  }
+}
