@@ -1,37 +1,13 @@
-// Layouts: user-authored pages, imported as JSON and drawn with the same rules
-// the editor uses — a page is rows, a row is a line of columns, a key spans.
+// A page is rows of items, an item is a key or a spacer, and a key spans
+// columns. This file owns that shape: what a valid page is, how a file becomes
+// pages, and the one renderer both the Pages tab and the Keys slot draw with.
 //
-// Kept in this browser, like the deck, and separate from it: an imported
-// layout is a page you brought, not a page the app ships.
+// It does not own storage. The store is pages.js, and the transport is the
+// view that draws the page: a key is a picture with data on it, never a socket.
 
-const KEY = 'esp32remote.layouts';
-
-export const BUILTIN_STRIP = ['abc', 'sym', 'fn', 'kp'];
-
-export function readLayouts() {
-  try {
-    const raw = JSON.parse(localStorage.getItem(KEY) || '[]');
-    return Array.isArray(raw) ? raw.filter(validPage) : [];
-  } catch (_) {
-    return [];
-  }
-}
-
-export function writeLayouts(list) {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(list));
-    return null;
-  } catch (e) {
-    return (e && e.name === 'QuotaExceededError') ? 'no room left in this browser' : 'this browser refused to store it';
-  }
-}
-
-// The same acceptance rule the editor and the schema apply. Anything that
-// fails is refused as a whole rather than half-drawn.
-// A file from a newer build may carry an action this build cannot run. Refusing
-// it is the only honest answer: importing it would draw a key that does nothing.
-const ACTIONS = new Set(['key', 'modifier', 'page', 'sequence']);
 export const FORMAT_VERSION = 1;
+export const ACTIONS = new Set(['key', 'modifier', 'page', 'sequence']);
+export const BUILTIN_STRIP = ['abc', 'sym', 'fn', 'kp', 'media'];
 
 export function validPage(p) {
   if (!p || typeof p !== 'object') return false;
@@ -46,11 +22,14 @@ export function validPage(p) {
     for (const it of r.keys) {
       if (!it || it.spacer) continue;
       if (!it.action || !ACTIONS.has(it.action.kind)) return false;
+      if (it.action.kind === 'page' && typeof it.action.to !== 'string') return false;
     }
   }
   return true;
 }
 
+// A file from a newer build may carry an action this build cannot run. Refusing
+// it is the only honest answer: importing it would draw a key that does nothing.
 export function parseLayoutFile(text) {
   let data;
   try {
@@ -62,7 +41,6 @@ export function parseLayoutFile(text) {
     return { error: 'not a keebling layout file' };
   }
 
-  // Newer than us: a field or an action we would silently drop.
   const version = Number(data.version) || 0;
   if (version > FORMAT_VERSION) {
     return { error: `this file is version ${version}; this build understands ${FORMAT_VERSION} — update Keebling first` };
@@ -83,47 +61,90 @@ export function parseLayoutFile(text) {
 
 // ---------------------------------------------------------------- drawing
 //
-// A key is a web component of one thing: a press target with a label. It sends
-// nothing here — the slot owns the transport, and layout.js only draws.
+// The renderer draws rows at their stated height and columns at their span.
+// Interaction is data, not listeners: the caller owns the transport and reads
+// data-action / data-usage / data-to / data-mod. Options:
+//
+//   className   added to the host
+//   decorate(el, item, info)  fills a key instead of the default label/alt
+//   fit         scale the page down to its container, to a floor of 50%
+//
+// The Pages tab uses decorate for the tile chrome (name, source, edit actions);
+// the Keys slot uses the default, which is the key as it will look on glass.
 
-const COLOUR = { blue: 'c-blue', amber: 'c-amber', red: 'c-red', green: 'c-green' };
+const COLOUR = { grey: 'c-grey', blue: 'c-blue', amber: 'c-amber', red: 'c-red', green: 'c-green' };
 
-export function renderPage(host, page) {
+export function renderPage(host, page, opts = {}) {
   host.textContent = '';
-  for (const r of page.rows) {
+  if (opts.className) host.classList.add(opts.className);
+  host.classList.add('pagegrid');
+
+  page.rows.forEach((r, ri) => {
     const row = document.createElement('div');
     row.className = 'lrow';
+    row.dataset.row = String(ri);
     row.style.gridTemplateColumns = `repeat(${page.columns}, minmax(0, 1fr))`;
     row.style.gap = `${Number(r.gap) || 0}px`;
     row.style.height = `${Number(r.h) || 44}px`;
 
-    for (const it of r.keys) {
+    r.keys.forEach((it, ki) => {
       const el = document.createElement('div');
       if (it && it.spacer) {
         el.className = 'lspacer';
-        el.style.gridColumn = `span ${Number(it.spacer) || 1}`;
+        el.style.gridColumn = `span ${Math.max(1, Math.min(page.columns, Number(it.spacer) || 1))}`;
       } else {
         el.className = 'lkey' + (COLOUR[it.colour] ? ' ' + COLOUR[it.colour] : '');
-        el.style.gridColumn = `span ${Number(it.w) || 1}`;
-        el.dataset.action = it.action && it.action.kind || 'key';
-        if (it.action && it.action.kind === 'key') el.dataset.usage = String(it.action.usage);
-        if (it.action && it.action.kind === 'page') el.dataset.to = it.action.to;
-        if (it.action && it.action.kind === 'modifier') el.dataset.mod = it.action.code;
+        el.style.gridColumn = `span ${Math.max(1, Math.min(page.columns, Number(it.w) || 1))}`;
+        const a = it.action || { kind: 'key' };
+        el._pageAction = a;
+        el.dataset.action = a.kind;
+        el.dataset.index = String(ki);
+        if (a.kind === 'key') {
+          el.dataset.page = String(a.page || 7);
+          el.dataset.usage = String(a.usage !== undefined ? a.usage : '');
+          if (a.code) el.dataset.code = a.code;
+        }
+        if (a.kind === 'page') el.dataset.to = a.to || '';
+        if (a.kind === 'modifier') el.dataset.mod = a.code || '';
+        if (a.kind === 'sequence') el.dataset.sequence = '1';
 
-        const label = document.createElement('span');
-        label.className = 'lb';
-        label.textContent = it.label || '·';
-        el.appendChild(label);
+        if (typeof opts.decorate === 'function') {
+          opts.decorate(el, it, { row: ri, key: ki });
+        } else {
+          const label = document.createElement('span');
+          label.className = 'lb';
+          label.textContent = it.label || '·';
+          el.appendChild(label);
 
-        if (it.alt) {
-          const alt = document.createElement('span');
-          alt.className = 'alt';
-          alt.textContent = it.alt;
-          el.appendChild(alt);
+          if (it.alt) {
+            const alt = document.createElement('span');
+            alt.className = 'alt';
+            alt.textContent = it.alt;
+            el.appendChild(alt);
+          }
         }
       }
       row.appendChild(el);
-    }
+    });
     host.appendChild(row);
-  }
+  });
+
+  if (opts.fit) fitPage(host, page);
+}
+
+// A page keeps its proportions when it does not fit: it shrinks as a whole to
+// half size, and below that the slot scrolls. Scaling only the width would make
+// a tall page's keys shorter than they are tall, which is not the page any more.
+export function fitPage(host, page) {
+  host.style.transform = '';
+  host.style.width = '';
+  const natural = page.rows.reduce((n, r) => n + (Number(r.h) || 44), 0)
+    + page.rows.reduce((n, r) => n + (Number(r.gap) || 0), 0);
+  const avail = Math.max(120, Math.round((window.visualViewport ? window.visualViewport.height : window.innerHeight) * 0.48));
+  if (!natural || natural <= avail) return;
+  const scale = Math.max(0.5, avail / natural);
+  if (scale >= 1) return;
+  host.style.transformOrigin = 'top left';
+  host.style.transform = `scale(${scale.toFixed(3)})`;
+  host.style.width = `${(100 / scale).toFixed(2)}%`;
 }

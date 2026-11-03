@@ -3,8 +3,8 @@
 //   pnpm build
 //
 // Sources stay in main/web and remain readable: the device only ever sees the
-// output in main/web/dist, which is one bundled, minified JavaScript file, one
-// minified stylesheet, one minified document and one repair page.
+// output in main/web/dist, which is one bundled, minified JavaScript file, the
+// stylesheet, the shell, the editor and the repair page.
 //
 // The same run also writes web.zip. That is the unit the device accepts at
 // /ui/upload: a whole UI at once, not a file at a time, so an upload cannot
@@ -31,17 +31,32 @@ const PAGES = ['index.html', 'recover.html'];
 // but is deliberately not one of them: it repairs a broken upload, so it must
 // come from the binary. Shipping it inside the archive made every upload fail
 // whole, which is the behaviour the archive is for - and a fine way to find out.
-const SERVED = ['index.html', 'style.css', 'app.js'];
+const SERVED = ['index.html', 'style.css', 'app.js', 'editor.html'];
 // Built-in only: the PWA manifest and home-screen icons. They are not in the
 // upload bundle, so a UI upload cannot leave the install metadata missing.
 const STATIC = ['manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'icon-180.png'];
-const ASSETS = [...STATIC, 'app.js', 'style.css', ...PAGES];
+const ASSETS = [...STATIC, 'app.js', 'style.css', 'editor.html', ...PAGES];
 
 const kb = (n) => `${(n / 1024).toFixed(1)} KB`;
 
 async function buildOnce() {
   await fs.rm(OUT, { recursive: true, force: true });
   await fs.mkdir(OUT, { recursive: true });
+
+  // The Pages tab embeds the layout editor in an iframe. It is not a copy: this
+  // bundle is built from site/editor/index.html, the same file GitHub Pages
+  // serves, so the hosted and embedded editors cannot drift.
+  const editorSource = await fs.readFile(path.join(ROOT, 'site', 'editor', 'index.html'), 'utf8');
+  const editorMin = await minify(editorSource, {
+    collapseWhitespace: true,
+    conservativeCollapse: true,
+    removeComments: true,
+    removeRedundantAttributes: false,
+    useShortDoctype: true,
+    minifyCSS: true,
+    minifyJS: true,
+    ignoreCustomFragments: [],
+  });
 
   const js = await build({
     entryPoints: [path.join(SRC, 'app.js')],
@@ -63,6 +78,7 @@ async function buildOnce() {
   const out = new Map();
   out.set('app.js', js.outputFiles[0].contents);
   out.set('style.css', css.outputFiles[0].contents);
+  out.set('editor.html', Buffer.from(editorMin));
 
   for (const page of PAGES) {
     const html = await inlineIcons(await fs.readFile(path.join(SRC, page), 'utf8'));

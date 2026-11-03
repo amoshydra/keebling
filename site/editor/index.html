@@ -307,6 +307,7 @@
     <button id="undo" title="Undo (Ctrl+Z)" aria-label="Undo">↶</button>
     <button id="redo" title="Redo (Ctrl+Shift+Z)" aria-label="Redo">↷</button>
   </div>
+  <button class="primary" id="useHere" hidden>Use in Pages</button>
   <button class="primary" id="export">Export</button>
   <button class="quiet" id="more" aria-label="More">⋯</button>
 </div>
@@ -1195,6 +1196,20 @@ $('export').addEventListener('click', () => {
   a.click();
   URL.revokeObjectURL(a.href);
 });
+
+// Embedded in the Pages tab, the editor hands its file to the app instead of
+// asking for a download. The document is the same one GitHub Pages serves; the
+// only difference is that a parent window exists.
+const EMBED = window.parent !== window;
+if (EMBED) {
+  const back = document.querySelector('.back');
+  if (back) back.style.display = 'none';
+  const use = $('useHere');
+  use.hidden = false;
+  use.addEventListener('click', () => {
+    window.parent.postMessage({ type: 'keebling:import', json: currentJson() }, '*');
+  });
+}
 
 const filePicker = document.createElement('input');
 filePicker.type = 'file';

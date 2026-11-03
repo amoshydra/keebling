@@ -189,10 +189,13 @@ try {
   //
   // Macros live in localStorage now, so the macro page is seeded before it
   // loads - seeding after load would only prove the page can be re-rendered.
-  const MACROS_STORED = JSON.stringify([
-    { name: 'Open Chrome', steps: '{SEARCH}chrome{ENTER}' },
-    { name: 'Screenshot', steps: '{CMD+SHIFT+4}' },
-    { name: 'Broken', steps: '{NOPE}x' },
+  const PAGES_STORED = JSON.stringify([
+    { id: 'main', name: 'Main', columns: 4,
+      rows: [{ h: 50, gap: 4, align: 'stretch', keys: [
+        { label: 'Open Chrome', w: 1, action: { kind: 'sequence', blocks: [], text: '{SEARCH}chrome{ENTER}' } },
+        { label: 'Screenshot', w: 1, action: { kind: 'sequence', blocks: [], text: '{CMD+SHIFT+4}' } },
+        { label: 'Broken', w: 1, action: { kind: 'sequence', blocks: [], text: '{NOPE}x' } },
+      ] }] },
   ]);
 
   const targets = [
@@ -204,7 +207,7 @@ try {
     { page: 'settings', url: `${base}/?token=${CODE}#/settings`, metrics: DESKTOP,
       storedUiFiles: { 'style.css': '/* uploaded before the settings pass */' } },
     { page: 'macros', url: `${base}/?token=${CODE}#/macros`, metrics: PHONE,
-      seedStorage: { 'esp32remote.macros': MACROS_STORED } },
+      seedStorage: { 'esp32remote.pages': PAGES_STORED, 'esp32remote.pagesActive': 'main' } },
     // Before the migration pass: that one clears localStorage, which takes the
     // stored access code with it, and this pass relies on the code being there.
     { page: 'control-desktop', url: `${base}/#/`, metrics: DESKTOP },
@@ -233,11 +236,16 @@ try {
     // must run it with the same controls the Deck tab uses.
     { page: 'keys-deck', url: `${base}/?token=${CODE}#/keys`, metrics: PHONE,
       seedStorage: {
-        'esp32remote.deckPages': JSON.stringify(['TV']),
-        'esp32remote.macros': JSON.stringify([
-          { name: 'Up', page: 'TV', colour: 'blue', key: { kind: 'key', code: 'ArrowUp' } },
-          { name: 'Netflix', page: 'TV', steps: '{ENTER}' },
+        'esp32remote.pages': JSON.stringify([
+          { id: 'tv', name: 'TV', columns: 4, rows: [{ h: 50, gap: 4, align: 'stretch', keys: [
+            { label: 'Up', w: 1, colour: 'blue', action: { kind: 'key', page: 7, usage: 0x52, code: 'ArrowUp' } },
+            { label: 'Netflix', w: 1, action: { kind: 'sequence', blocks: [], text: '{ENTER}' } },
+            { label: 'Ctrl', w: 1, action: { kind: 'modifier', code: 'ControlLeft' } },
+            { label: 'Jump', w: 1, action: { kind: 'page', to: 'empty' } },
+          ] }] },
+          { id: 'empty', name: 'Empty', columns: 4, rows: [{ h: 50, gap: 4, align: 'stretch', keys: [] }] },
         ]),
+        'esp32remote.pagesActive': 'tv',
       } },
 
     { page: 'recover', url: `${base}/recover.html`, metrics: PHONE,

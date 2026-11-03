@@ -66,7 +66,7 @@
 <nav class="tabbar">
   <a href="#/" data-tab="remote">Remote</a>
   <a href="#/keys" data-tab="keys">Keys</a>
-  <a href="#/deck" data-tab="deck">Deck</a>
+  <a href="#/deck" data-tab="deck">Pages</a>
   <a href="#/setup" data-tab="setup">Setup</a>
 </nav>
 
@@ -176,9 +176,8 @@
        row: it describes the phone you are holding, not the device. The choice
        is remembered per browser. -->
     <div id="kbBuilt"></div>
-    <!-- A deck page drawn in the slot, when the strip names one. -->
-    <div id="kbDeck" hidden></div>
-    <!-- An imported layout, drawn in the slot. -->
+    <!-- A user page drawn in the slot, when the strip names one. The same
+         renderer draws it here and in the Pages tab. -->
     <div id="kbLayout" hidden></div>
     <!-- What the host says its lock keys are doing. Empty and hidden when they
          are all off, so it costs nothing in the normal case. -->
@@ -459,23 +458,48 @@
   <div class="wrap wrap-macros">
 
     <section>
-      <h2>Deck</h2>
-      <p class="note">A button runs a line of text typed into the host, with braced
-        tokens for keys that are not characters:
+      <h2>Pages</h2>
+      <p class="note">A page is rows of keys. A key can hold a HID key, latch a
+        modifier, run a script, or jump to another page. Scripts use braced tokens
+        for keys that are not characters:
         <code>{SEARCH}chrome{ENTER}</code> presses the Search media key, types
         “chrome” and presses Enter. Text assumes a US QWERTY layout on the host.</p>
-      <p class="note">The deck is stored in <strong>this browser</strong>, not on
-        the device. It is not shared with another phone or browser, and clearing
-        this site's data removes it.</p>
-      <div id="deckPages" class="pagestrip" role="tablist" aria-label="Deck pages"></div>
+      <p class="note">Pages are stored in <strong>this browser</strong>, not on
+        the device. They are not shared with another phone or browser, and
+        clearing this site's data removes them.</p>
+      <div id="deckPages" class="pagestrip" role="tablist" aria-label="Pages"></div>
       <div id="deckPageTools" class="pagerow" hidden></div>
       <div id="macroList"></div>
       <div class="row" style="margin-top:12px">
-        <button id="macroAdd" class="primary">New button</button>
+        <button id="macroAdd" class="primary">New key</button>
         <button id="deckEdit">Edit</button>
       </div>
       <p class="note" id="saveNote"></p>
       <p class="note" id="blobMeter"></p>
+    </section>
+
+    <section id="pageImport">
+      <h2>Import a page</h2>
+      <p class="note">Paste the JSON the editor exports, or open the file. The
+        pages are added beside the ones you already have; an id or a name that
+        already exists is suffixed rather than overwritten.</p>
+      <textarea id="importText" rows="5" spellcheck="false" autocapitalize="none"
+                autocomplete="off" placeholder='{ "app": "keebling", "kind": "layout", "pages": [ … ] }'></textarea>
+      <input id="importFile" type="file" accept="application/json,.json" hidden>
+      <div class="row" style="margin-top:8px">
+        <button id="importGo" class="primary">Import from the box</button>
+        <button id="importPick">Open a file…</button>
+      </div>
+      <p class="note" id="importNote"></p>
+    </section>
+
+    <section id="pageEditor">
+      <h2>Editor</h2>
+      <p class="note">The same editor as
+        <a href="https://amoshydra.github.io/keebling/editor/" target="_blank" rel="noopener">the hosted one</a>,
+        built from the same source. Edit a page, then press <strong>Use in Pages</strong>.</p>
+      <iframe id="editorFrame" title="Keebling layout editor" loading="lazy"
+              src="editor.html" sandbox="allow-scripts allow-downloads"></iframe>
     </section>
 
     <section id="editor">
@@ -490,6 +514,8 @@
         <div id="editKind" class="segmented" role="group" aria-label="Button type">
           <button type="button" data-kind="script" class="on">Script</button>
           <button type="button" data-kind="key">Hold a key</button>
+          <button type="button" data-kind="modifier">Modifier</button>
+          <button type="button" data-kind="page">Go to page</button>
         </div>
       </div>
       <div class="field">
@@ -514,6 +540,18 @@
         <p class="note">The key stays down while your finger is, so the host
           repeats it — the difference between an arrow key and a macro that
           presses it once.</p>
+      </div>
+      <div class="field" id="editModifierField" hidden>
+        <span>Modifier</span>
+        <select id="editModifier"></select>
+        <p class="note">Tapping it latches the modifier for the next key, so a
+          capital or Ctrl+C needs one finger.</p>
+      </div>
+      <div class="field" id="editPageField" hidden>
+        <span>Page</span>
+        <select id="editPageTarget"></select>
+        <p class="note">A jump to a page that is deleted later is refused at
+          delete time, not discovered in the dark.</p>
       </div>
       <div class="field" id="editStepsField">
         <span>Steps</span>

@@ -1,19 +1,9 @@
-// The deck's stored shape, in one place.
+// The key and colour catalogue shared by the Pages tab and the Keys slot.
 //
-// A deck button is a name, a colour, a page, and either a script or a held key.
-// Two surfaces read this: the Deck tab, which edits and runs it full screen,
-// and the Keys strip, which shows a page in the slot under the pad. They have
-// different layouts and different feedback, but they must not have different
-// data - a page edited in one has to be the same page in the other.
-//
-// Nothing here touches the DOM.
+// A page stores a key as an HID descriptor (page + usage) and may also keep the
+// DOM code it was chosen by. This file only names them; the store is pages.js.
 
 import { HID_KEYS } from './common.js';
-
-export const STORE_KEY = 'esp32remote.macros';
-export const PAGES_KEY = 'esp32remote.deckPages';
-export const PAGE_KEY = 'esp32remote.deckPage';
-export const DEFAULT_PAGE = 'Main';
 
 export const COLOURS = ['', 'blue', 'amber', 'red', 'green'];
 
@@ -34,104 +24,24 @@ export const CONSUMER_CHOICES = [
   [0x0223, 'Browser home'], [0x0224, 'Browser back'], [0x0225, 'Browser forward'],
 ];
 
-export function sanitizeKey(k) {
-  if (!k || typeof k !== 'object') return null;
-  if (k.kind === 'key' && typeof k.code === 'string' && HID_KEYS[k.code]) {
-    return { kind: 'key', code: k.code };
-  }
-  if (k.kind === 'consumer') {
-    const usage = Number(k.usage);
-    if (Number.isFinite(usage) && usage > 0 && usage <= 0xFFFF) {
-      return { kind: 'consumer', usage: usage | 0 };
-    }
-  }
-  return null;
-}
-
+// Keys in a page carry an HID descriptor (page + usage) and may also carry the
+// DOM code they were picked by. Both shapes are read here, so a label never
+// depends on which one stored it.
 export function keyName(k) {
   if (!k) return '';
-  if (k.kind === 'key') {
-    const hit = KEY_CHOICES.find(([code]) => code === k.code);
-    return hit ? hit[1] : k.code;
+  const consumer = k.page === 12 || k.kind === 'consumer';
+  if (consumer) {
+    const hit = CONSUMER_CHOICES.find(([usage]) => usage === Number(k.usage));
+    return hit ? hit[1] : `0x${Number(k.usage).toString(16)}`;
   }
-  const hit = CONSUMER_CHOICES.find(([usage]) => usage === k.usage);
-  return hit ? hit[1] : `0x${Number(k.usage).toString(16)}`;
-}
-
-// Anything unexpected in the stored list is dropped rather than trusted: an
-// older build, or a hand-edited localStorage, can have put it there.
-export function sanitizeButtons(list) {
-  const raw = Array.isArray(list) ? list : [];
-  const kept = raw
-    .filter((m) => m && typeof m === 'object')
-    .map((m) => ({
-      name: String(m.name || ''),
-      // The stored text, kept for display and for decks written by older
-      // builds; `blocks` is the parse of it, which is what runs.
-      steps: String(m.steps || ''),
-      blocks: Array.isArray(m.blocks) ? m.blocks
-             : (Array.isArray(m.steps) ? m.steps : null),
-      colour: COLOURS.includes(m.colour) ? m.colour : '',
-      page: String(m.page || DEFAULT_PAGE),
-      hold: !!m.hold,
-      key: sanitizeKey(m.key),
-    }))
-    .filter((m) => m.name || m.steps || m.key);
-  return { kept, dropped: raw.length - kept.length };
-}
-
-// undefined means "nothing stored", which is how the Deck view tells an empty
-// list from an untouched browser.
-export function readStore() {
-  try {
-    const s = localStorage.getItem(STORE_KEY);
-    return s === null ? undefined : JSON.parse(s);
-  } catch (_) {
-    // Unreadable is treated as absent. localStorage can throw rather than
-    // merely fail (Safari private mode), so this is not hypothetical.
-    return undefined;
+  if (k.code) {
+    const byCode = KEY_CHOICES.find(([code]) => code === k.code);
+    if (byCode) return byCode[1];
   }
-}
-
-export function writeStore(list) {
-  try {
-    localStorage.setItem(STORE_KEY, JSON.stringify(list));
-    return null;
-  } catch (e) {
-    return (e && e.name === 'QuotaExceededError')
-      ? 'this browser has no room left for this site'
-      : 'this browser refused to store them (private mode?)';
+  if (k.usage !== undefined) {
+    const code = Object.keys(HID_KEYS).find((c) => HID_KEYS[c] === Number(k.usage));
+    const byUsage = code && KEY_CHOICES.find(([c]) => c === code);
+    if (byUsage) return byUsage[1];
   }
-}
-
-export function readPages() {
-  try {
-    const raw = JSON.parse(localStorage.getItem(PAGES_KEY) || '[]');
-    if (Array.isArray(raw)) return raw.map(String).filter(Boolean);
-  } catch (_) { /* an unreadable list falls back to the one page */ }
-  return [];
-}
-
-export function writePages(pages, active) {
-  try { localStorage.setItem(PAGES_KEY, JSON.stringify(pages)); } catch (_) {}
-  if (active) {
-    try { localStorage.setItem(PAGE_KEY, active); } catch (_) {}
-  }
-}
-
-// What a surface needs to draw a deck: the pages in order and the buttons on
-// them. Pages that only exist because a button names them are included, so a
-// restored list never hides its own contents.
-export function deckSnapshot() {
-  const { kept } = sanitizeButtons(readStore() || []);
-  const pages = readPages();
-  for (const b of kept) {
-    if (!pages.includes(b.page)) pages.push(b.page);
-  }
-  if (!pages.length) pages.push(DEFAULT_PAGE);
-  return { pages, buttons: kept };
-}
-
-export function buttonsOnPage(snapshot, page) {
-  return snapshot.buttons.filter((b) => b.page === page);
+  return k.code || `0x${Number(k.usage).toString(16)}`;
 }

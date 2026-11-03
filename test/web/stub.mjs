@@ -40,7 +40,7 @@ const TYPES = {
 };
 
 // The built-in files, which are also what the firmware embeds.
-const UI_FILES = ['index.html', 'style.css', 'app.js'];
+const UI_FILES = ['index.html', 'style.css', 'app.js', 'editor.html'];
 
 // Mirrors safe_file_name() in main/web_server.c: one or two segments, each a
 // plain name, so ".." cannot be spelled; two names reserved.
@@ -60,8 +60,8 @@ function safeName(name) {
 }
 
 // Mirrors UI_ARCHIVE_MAX in main/web_server.c: the cap on a whole archive.
-const UI_MAX = 192 * 1024;
-const UI_ENTRY_MAX = 96 * 1024;
+const UI_MAX = 224 * 1024;
+const UI_ENTRY_MAX = 160 * 1024;
 
 // Reads a stored zip, mirroring ui_upload_handler: local headers only, names
 // matched against the whitelist, sizes checked, deflate refused.

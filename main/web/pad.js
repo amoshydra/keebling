@@ -18,9 +18,9 @@
 
 
 import { HID_KEYS, apiFetch, appSettings, hostLayout, layoutTextMap, token } from './common.js';
-import { buttonsOnPage, deckSnapshot, keyName } from './deck.js';
-import { parseLayoutFile, readLayouts, renderPage as renderLayoutPage, writeLayouts } from './layout.js';
-import { parseMacro, runMacro } from './macro.js';
+import { renderPage as renderLayoutPage } from './layout.js';
+import * as Pages from './pages.js';
+import { parseMacro, runMacro, stepsFromBlocks } from './macro.js';
 
 export const PadView = (() => {
 
@@ -688,19 +688,18 @@ const PHONE_QUERY = '(max-width: 620px)';
 // The Keys destination holds three panes and shows one: the on-screen
 // keyboard, the media keys, or the text box. They used to be sibling pages
 // reached from a row of buttons; the strip inside the slot replaces that.
-const PANES = ['built', 'media', 'text', 'deck', 'layout'];
+const PANES = ['built', 'media', 'text', 'page'];
 let kbPane = 'built';
 let kbPagesEl = null;
 let kbToolSourceEl = null;
 let kbToolTextEl = null;
-let kbDeckEl = null;
 let kbLayoutEl = null;
-let layoutPage = null;      // the imported page the slot is showing
-let deckPageName = '';       // which deck page the slot is showing
-const deckKeys = new Set();  // usages held by deck buttons, kept apart from `held`
-let deckConsumer = 0;
-let deckRunning = false;
-let deckStop = false;
+let userPage = null;         // the page the slot is showing
+const pageKeys = new Set();  // usages held by page keys, kept apart from `held`
+let pageConsumer = 0;
+const pageLatched = new Set();
+let pageRunning = false;
+let pageStop = false;
 let litPage = null;          // what the strip marked last, so it only scrolls on change
 
 function setPane(name) {
@@ -710,8 +709,7 @@ function setPane(name) {
   const built = kbPane === 'built';
   if (kbBuiltEl) kbBuiltEl.hidden = !built || kbSource === 'system';
   if (kbCaptureEl) kbCaptureEl.hidden = !built || kbSource !== 'system';
-  if (kbDeckEl) kbDeckEl.hidden = kbPane !== 'deck';
-  if (kbLayoutEl) kbLayoutEl.hidden = kbPane !== 'layout';
+  if (kbLayoutEl) kbLayoutEl.hidden = kbPane !== 'page';
   refreshStrip();
 }
 
@@ -720,8 +718,7 @@ function setPane(name) {
 // keyboard replace the slot, so no page is current while they are up.
 function currentPage() {
   if (kbPane === 'media') return 'media';
-  if (kbPane === 'deck') return deckPageName ? `deck:${deckPageName}` : null;
-  if (kbPane === 'layout') return layoutPage ? `layout:${layoutPage.id}` : null;
+  if (kbPane === 'page') return userPage ? `page:${userPage.id}` : null;
   if (kbPane !== 'built' || kbSource !== 'built') return null;
   return keyPage;
 }
@@ -766,263 +763,134 @@ function refreshStripEdges() {
   el.classList.toggle('more-right', right > 1);
 }
 
-// ---------------------------------------------------------------- deck pages
-// The same buttons the Deck tab holds, drawn in the slot. The point of the
-// strip: arrows you hold, a key, and a script on one page you built, beside
-// the shipped keyboard pages.
-function sendDeckKeys() {
+// ---------------------------------------------------------------- user pages
+// Every user page — one built in the Pages tab, or imported from the editor —
+// is drawn by layout.js and sent by this slot. The renderer owns the picture;
+// the slot owns the transport. There is no second kind of page here any more.
+function sendPageReport() {
   const buf = new Uint8Array(8);
   buf[0] = 0x02;
-  [...deckKeys].slice(0, 6).forEach((usage, i) => { buf[2 + i] = usage; });
-  send(buf);
-  markInput();
-}
-
-function sendDeckConsumer(usage) {
-  send(new Uint8Array([0x03, usage & 0xFF, (usage >> 8) & 0xFF]));
-  markInput();
-}
-
-function pressDeckKey(key) {
-  if (key.kind === 'consumer') {
-    deckConsumer = key.usage;
-    sendDeckConsumer(deckConsumer);
-  } else {
-    deckKeys.add(HID_KEYS[key.code]);
-    sendDeckKeys();
-  }
-}
-
-function releaseDeckKey(key) {
-  if (key.kind === 'consumer') {
-    if (deckConsumer !== key.usage) return;
-    deckConsumer = 0;
-    sendDeckConsumer(0);
-  } else {
-    if (!deckKeys.delete(HID_KEYS[key.code])) return;
-    sendDeckKeys();
-  }
-}
-
-// Leaving the page, the view or the slot with a deck key down must not leave it
-// down on the host.
-function releaseDeckKeys() {
-  if (!deckKeys.size && !deckConsumer) return;
-  deckKeys.clear();
-  deckConsumer = 0;
-  sendDeckKeys();
-  sendDeckConsumer(0);
-}
-
-function renderDeckPage() {
-  if (!kbDeckEl) return;
-  kbDeckEl.textContent = '';
-
-  const buttons = buttonsOnPage(deckSnapshot(), deckPageName);
-  if (!buttons.length) {
-    const p = document.createElement('div');
-    p.className = 'kbcell empty';
-    p.textContent = `“${deckPageName}” has no buttons yet. Add some in the Deck tab.`;
-    kbDeckEl.appendChild(p);
-    return;
-  }
-
-  for (const b of buttons) {
-    const cell = document.createElement('div');
-    cell.className = 'kbcell';
-    if (b.colour) cell.classList.add('c-' + b.colour);
-
-    const hit = document.createElement('button');
-    hit.type = 'button';
-    hit.className = 'hit';
-    hit.setAttribute('aria-label', b.name || b.steps || 'deck button');
-
-    if (b.key) {
-      hit.addEventListener('pointerdown', (e) => {
-        e.preventDefault();
-        try { hit.setPointerCapture(e.pointerId); } catch (_) {}
-        pressDeckKey(b.key);
-      });
-      for (const t of ['pointerup', 'pointercancel', 'lostpointercapture']) {
-        hit.addEventListener(t, () => releaseDeckKey(b.key));
-      }
-    } else {
-      // A script cannot be held: tap to run, tap again while it runs to stop.
-      hit.addEventListener('click', () => runDeckScript(b, cell));
-    }
-
-    const nm = document.createElement('span');
-    nm.className = 'nm';
-    nm.textContent = b.name || b.steps || '(unnamed)';
-
-    const sub = document.createElement('span');
-    sub.className = 'sub';
-    sub.textContent = b.key ? `${keyName(b.key)} · held` : b.steps;
-
-    cell.append(hit, nm, sub);
-    kbDeckEl.appendChild(cell);
-  }
-}
-
-async function runDeckScript(button, cell) {
-  if (deckRunning) {
-    deckStop = true;          // a second tap interrupts, like the deck's Stop
-    return;
-  }
-
-  const parsed = parseMacro(button.steps);
-  if (parsed.errors.length || !parsed.steps.length) {
-    cell.classList.add('running');
-    setTimeout(() => cell.classList.remove('running'), 600);
-    return;
-  }
-
-  const cps = Number(appSettings.type_speed) || 20;
-  deckRunning = true;
-  deckStop = false;
-  cell.classList.add('running');
-  try {
-    await runMacro(parsed.steps, {
-      send,
-      gapMs: Math.max(5, Math.round(500 / cps)),
-      stopped: () => deckStop || !kbDeckEl,
-    });
-  } finally {
-    deckRunning = false;
-    deckStop = false;
-    cell.classList.remove('running');
-  }
-}
-
-// ---------------------------------------------------------------- layouts
-function clearLayoutState() {
-  layoutHeld.clear();
-  layoutLatched.clear();
-  if (kbLayoutEl) {
-    for (const el of kbLayoutEl.querySelectorAll('.lkey.latched')) el.classList.remove('latched');
-  }
-}
-
-function showLayoutPage(page) {
-  if (!kbLayoutEl) return;
-  kbLayoutEl.textContent = '';
-  renderLayoutPage(kbLayoutEl, page);
-}
-
-// With nothing imported, the slot is where you bring one in: paste the JSON the
-// editor exports, and it is stored in this browser.
-function showEmptyLayout() {
-  if (!kbLayoutEl) return;
-  kbLayoutEl.textContent = '';
-
-  const box = document.createElement('div');
-  box.className = 'kbempty';
-
-  const note = document.createElement('p');
-  note.className = 'note';
-  note.textContent = 'Paste a layout from the editor — it stays in this browser.';
-
-  const area = document.createElement('textarea');
-  area.spellcheck = false;
-  area.placeholder = '{ "app": "keebling", "kind": "layout", "pages": [ … ] }';
-
-  const go = document.createElement('button');
-  go.className = 'primary';
-  go.textContent = 'Import layout';
-  go.addEventListener('click', () => {
-    const parsed = parseLayoutFile(area.value);
-    if (parsed.error) {
-      note.textContent = `Not imported: ${parsed.error}. Nothing changed.`;
-      note.classList.add('warn');
-      return;
-    }
-    const existing = readLayouts();
-    for (const page of parsed.pages) {
-      const at = existing.findIndex((p) => p.id === page.id);
-      if (at >= 0) existing[at] = page; else existing.push(page);
-    }
-    const err = writeLayouts(existing);
-    if (err) {
-      note.textContent = `Not saved: ${err}.`;
-      note.classList.add('warn');
-      return;
-    }
-    if (parsed.strip && parsed.strip.length) writeStripOrder(parsed.strip);
-    buildStrip();
-    layoutPage = parsed.pages[0];
-    showLayoutPage(layoutPage);
-    setPane('layout');
-  });
-
-  box.append(note, area, go);
-  kbLayoutEl.appendChild(box);
-}
-
-// A layout page is drawn by layout.js and sent by this: the module owns the
-// picture, the slot owns the transport. Pointer capture on press, so a finger
-// that slides off still releases the key.
-const layoutHeld = new Set();
-const layoutLatched = new Set();
-
-function sendLayoutReport() {
-  const buf = new Uint8Array(8);
-  buf[0] = 0x02;
+  for (const code of pageLatched) buf[1] |= MOD[code] || 0;
   let slot = 2;
-  for (const code of layoutLatched) {
-    if (MOD[code]) buf[1] |= MOD[code];
-  }
-  for (const usage of layoutHeld) {
+  for (const usage of pageKeys) {
     if (slot < 8) buf[slot++] = usage;
   }
   send(buf);
   markInput();
 }
 
-function wireLayoutSlot() {
+function sendPageConsumer(usage) {
+  send(new Uint8Array([0x03, usage & 0xFF, (usage >> 8) & 0xFF]));
+  markInput();
+}
+
+function pressPageKey(action) {
+  const usage = Number(action.usage) || HID_KEYS[action.code];
+  if (!usage) return;
+  if (action.page === 12) {
+    pageConsumer = usage;
+    sendPageConsumer(usage);
+  } else {
+    pageKeys.add(usage);
+    sendPageReport();
+  }
+}
+
+function releasePageKey(action) {
+  const usage = Number(action.usage) || HID_KEYS[action.code];
+  if (action.page === 12) {
+    if (pageConsumer !== usage) return;
+    pageConsumer = 0;
+    sendPageConsumer(0);
+  } else {
+    if (!pageKeys.delete(usage)) return;
+    sendPageReport();
+  }
+}
+
+// Leaving the page, the view or the slot with a key down must not leave it down
+// on the host.
+function releasePageKeys() {
+  if (!pageKeys.size && !pageConsumer && !pageLatched.size) return;
+  pageKeys.clear();
+  pageConsumer = 0;
+  pageLatched.clear();
+  sendPageReport();
+  sendPageConsumer(0);
+}
+
+function pageIsEmpty(page) {
+  return !page || !page.rows.some((r) => r.keys.some((it) => !it.spacer));
+}
+
+function showUserPage(page) {
+  if (!kbLayoutEl) return;
+  userPage = page;
+  kbLayoutEl.textContent = '';
+  if (!page) return;
+  renderLayoutPage(kbLayoutEl, page, { fit: true });
+  if (pageIsEmpty(page)) {
+    const p = document.createElement('p');
+    p.className = 'note';
+    p.textContent = `“${page.name}” is empty. Add keys to it in the Pages tab.`;
+    kbLayoutEl.appendChild(p);
+  }
+}
+
+function showNoPage() {
+  if (!kbLayoutEl) return;
+  releasePageKeys();
+  userPage = null;
+  kbLayoutEl.textContent = '';
+  const box = document.createElement('div');
+  box.className = 'kbempty';
+  const note = document.createElement('p');
+  note.className = 'note';
+  note.textContent = 'That page is not here any more.';
+  const go = document.createElement('button');
+  go.className = 'primary';
+  go.textContent = 'Open Pages';
+  go.addEventListener('click', () => { location.hash = '#/deck'; });
+  box.append(note, go);
+  kbLayoutEl.appendChild(box);
+}
+
+// A page is a picture plus data. Pointer capture on press, so a finger that
+// slides off still releases the key; a page jump replaces the slot.
+function wirePageSlot() {
   if (!kbLayoutEl) return;
 
   const keydown = (e) => {
     const cell = e.target.closest && e.target.closest('.lkey');
-    if (!cell || kbPane !== 'layout') return;
+    if (!cell || kbPane !== 'page') return;
+    const a = cell._pageAction;
+    if (!a) return;
     e.preventDefault();
-    const kind = cell.dataset.action;
 
-    if (kind === 'key') {
-      const usage = Number(cell.dataset.usage);
-      if (!usage) return;
+    if (a.kind === 'key') {
       try { cell.setPointerCapture(e.pointerId); } catch (_) {}
-      layoutHeld.add(usage);
-      sendLayoutReport();
+      pressPageKey(a);
       return;
     }
-    if (kind === 'modifier') {
-      const code = cell.dataset.mod;
-      if (layoutLatched.has(code)) layoutLatched.delete(code);
-      else layoutLatched.add(code);
-      cell.classList.toggle('latched', layoutLatched.has(code));
-      sendLayoutReport();
+    if (a.kind === 'modifier') {
+      if (pageLatched.has(a.code)) pageLatched.delete(a.code);
+      else pageLatched.add(a.code);
+      cell.classList.toggle('latched', pageLatched.has(a.code));
+      sendPageReport();
       return;
     }
-    if (kind === 'page') {
-      const to = cell.dataset.to;
-      if (readLayouts().some((p) => p.id === to)) {
-        openPage('layout:' + to);
-      } else {
-        openPage(to);            // a shipped page: abc, sym, fn, kp, media
-      }
+    if (a.kind === 'page') {
+      if (Pages.pageById(Pages.readPages(), a.to)) openPage('page:' + a.to);
+      else openPage(a.to);       // a shipped page: abc, sym, fn, kp, media
       return;
     }
-    if (kind === 'sequence') {
-      runLayoutSequence(cell);
-    }
+    if (a.kind === 'sequence') runPageSequence(a, cell);
   };
 
   const keyup = (e) => {
     const cell = e.target.closest && e.target.closest('.lkey');
-    if (!cell || cell.dataset.action !== 'key') return;
-    const usage = Number(cell.dataset.usage);
-    if (!usage || !layoutHeld.delete(usage)) return;
-    sendLayoutReport();
+    if (!cell || !cell._pageAction || cell._pageAction.kind !== 'key') return;
+    releasePageKey(cell._pageAction);
   };
 
   kbLayoutEl.addEventListener('pointerdown', keydown);
@@ -1031,40 +899,33 @@ function wireLayoutSlot() {
   kbLayoutEl.addEventListener('lostpointercapture', keyup);
 }
 
-// A script on a layout page runs the same way a deck button does.
-let layoutRun = false;
-async function runLayoutSequence(cell) {
-  if (layoutRun) return;
-  const parsed = parseMacro(cell.dataset.steps || '');
-  if (parsed.errors.length || !parsed.steps.length) return;
-  layoutRun = true;
+async function runPageSequence(action, cell) {
+  if (pageRunning) { pageStop = true; return; }
+  const steps = (action.blocks && action.blocks.length)
+    ? stepsFromBlocks(action.blocks)
+    : parseMacro(action.text || '').steps;
+  if (!steps.length) return;
+  const cps = Number(appSettings.type_speed) || 20;
+  pageRunning = true;
+  pageStop = false;
   cell.classList.add('running');
   try {
-    await runMacro(parsed.steps, { send, gapMs: Math.max(5, Math.round(500 / (Number(appSettings.type_speed) || 20))) });
+    await runMacro(steps, {
+      send,
+      gapMs: Math.max(5, Math.round(500 / cps)),
+      stopped: () => pageStop || !kbLayoutEl,
+    });
   } finally {
-    layoutRun = false;
+    pageRunning = false;
+    pageStop = false;
     cell.classList.remove('running');
   }
 }
 
-// The strip is one ordered list: the shipped pages, imported layouts, and the
-// deck's own pages, with an order the file can carry. A layout may be placed
-// first; the shipped pages can be reordered but never removed.
-const STRIP_KEY = 'esp32remote.strip';
-const BUILTINS = [['abc', 'ABC'], ['sym', '?123'], ['fn', 'Fn'], ['kp', 'Num'], ['media', 'Media']];
-
-function readStripOrder() {
-  try {
-    const raw = JSON.parse(localStorage.getItem(STRIP_KEY) || 'null');
-    if (Array.isArray(raw) && raw.length) return raw;
-  } catch (_) { /* fall through to the shipped order */ }
-  return BUILTINS.map(([id]) => id);
-}
-
-function writeStripOrder(order) {
-  try { localStorage.setItem(STRIP_KEY, JSON.stringify(order)); } catch (_) {}
-}
-
+// The strip is one ordered list: the shipped pages and every user page. A page
+// may be placed first; the shipped pages can be reordered but never removed.
+// An empty user page is a ghost chip rather than hidden: it is still a place
+// you can go to add keys, and hiding it makes the page look lost.
 function buildStrip() {
   if (!kbPagesEl) return;
   kbPagesEl.textContent = '';
@@ -1080,85 +941,69 @@ function buildStrip() {
     return b;
   };
 
-  const layouts = readLayouts();
+  const list = Pages.readPages();
+  const byId = new Map(list.map((p) => [p.id, p]));
   const placed = new Set();
 
-  for (const id of readStripOrder()) {
+  for (const id of Pages.readStrip()) {
     if (id.startsWith('page:')) {
-      const p = layouts.find((x) => x.id === id.slice(5));
-      if (p) { chip(`layout:${p.id}`, p.name, 'layout'); placed.add(p.id); }
+      const p = byId.get(id.slice(5));
+      if (p) {
+        const b = chip(`page:${p.id}`, p.name, 'user');
+        b.classList.toggle('ghost', pageIsEmpty(p));
+        if (pageIsEmpty(p)) b.title = 'Empty page — add keys in Pages';
+        placed.add(p.id);
+      }
       continue;
     }
-    const builtin = BUILTINS.find(([bid]) => bid === id);
+    const builtin = Pages.BUILTINS.find(([bid]) => bid === id);
     if (builtin) chip(builtin[0], builtin[1]);
   }
 
   // Anything the order does not mention still has to be reachable.
-  for (const p of layouts) {
-    if (!placed.has(p.id)) chip(`layout:${p.id}`, p.name, 'layout');
-  }
-
-  const snap = deckSnapshot();
-  for (const page of snap.pages) {
-    if (!buttonsOnPage(snap, page).length) continue;
-    chip(`deck:${page}`, page, 'deck');
-  }
-
-  const add = chip('layout:', '+');
-  add.title = 'Import a layout';
-}
-
-// The strip lists the shipped pages; the deck's own pages follow them, so the
-// same strip reaches both. Empty pages are left out - a chip that opens nothing
-// is a dead end.
-function buildDeckChips() {
-  if (!kbPagesEl) return;
-  for (const b of kbPagesEl.querySelectorAll('button[data-deck]')) b.remove();
-
-  const snap = deckSnapshot();
-  for (const page of snap.pages) {
-    if (!buttonsOnPage(snap, page).length) continue;
-    const chip = document.createElement('button');
-    chip.type = 'button';
-    chip.className = 'kbpage';
-    chip.dataset.page = `deck:${page}`;
-    chip.dataset.deck = '1';
-    chip.textContent = page;
-    kbPagesEl.appendChild(chip);
+  for (const p of list) {
+    if (!placed.has(p.id)) {
+      const b = chip(`page:${p.id}`, p.name, 'user');
+      b.classList.toggle('ghost', pageIsEmpty(p));
+    }
   }
 }
 
-// A page is a place you type: picking one always lands on the built-in
-// keyboard, because the phone's keyboard has no pages to show.
 function openPage(page) {
-  if (page === 'layout:') {
-    layoutPage = null;
-    showEmptyLayout();
-    setPane('layout');
-    return;
-  }
-  if (page.startsWith('layout:')) {
-    const id = page.slice(7);
-    layoutPage = readLayouts().find((p) => p.id === id) || null;
-    if (!layoutPage) { showEmptyLayout(); setPane('layout'); return; }
-    showLayoutPage(layoutPage);
-    setPane('layout');
+  if (page.startsWith('page:') || page.startsWith('layout:')) {
+    const id = page.slice(page.indexOf(':') + 1);
+    const found = Pages.pageById(Pages.readPages(), id);
+    if (!found) { showNoPage(); setPane('page'); return; }
+    releasePageKeys();
+    showUserPage(found);
+    setPane('page');
     return;
   }
   if (page.startsWith('deck:')) {
-    deckPageName = page.slice(5);
-    renderDeckPage();
-    setPane('deck');
+    // A bookmark from the old Deck tab names a page by its name.
+    const name = page.slice(5);
+    const found = Pages.readPages().find((p) => p.name === name);
+    if (found) { releasePageKeys(); showUserPage(found); setPane('page'); return; }
+    showNoPage();
+    setPane('page');
     return;
   }
   if (page === 'media') {
+    releasePageKeys();
     setPane('media');
     return;
   }
+  releasePageKeys();
   if (kbSource !== 'built') setKeyboardSource('built');
   keyPage = page;
   buildKeyboard();
   setPane('built');
+}
+
+// A page key in the Pages view asks the Keys slot to open it.
+function onPageRequest(e) {
+  if (!e.detail) return;
+  openPage(String(e.detail));
 }
 
 function togglePanel(el) {
@@ -1851,16 +1696,16 @@ function init() {
   kbPagesEl = document.getElementById('kbPages');
   kbToolSourceEl = document.getElementById('kbToolSource');
   kbToolTextEl = document.getElementById('kbToolText');
-  kbDeckEl = document.getElementById('kbDeck');
   kbLayoutEl = document.getElementById('kbLayout');
-  layoutPage = null;
-  deckPageName = '';
-  deckRunning = false;
-  deckStop = false;
-  deckKeys.clear();
-  deckConsumer = 0;
+  userPage = null;
+  pageRunning = false;
+  pageStop = false;
+  pageKeys.clear();
+  pageConsumer = 0;
+  pageLatched.clear();
   buildStrip();
-  wireLayoutSlot();
+  wirePageSlot();
+  window.addEventListener('keebling:page', onPageRequest);
   ledsEl = document.getElementById('kbLeds');
   if (ledsEl) { ledsEl.hidden = true; ledsEl.textContent = ''; }
   clearInterval(ledTimer);
@@ -2117,15 +1962,14 @@ function destroy() {
   helpEl = null;
   helpCloseBtn = null;
   helpOpenBtn = null;
-  releaseDeckKeys();
-  deckRunning = false;
-  deckStop = true;
+  releasePageKeys();
+  pageRunning = false;
+  pageStop = true;
+  window.removeEventListener('keebling:page', onPageRequest);
   kbd = null;
   kbPagesEl = null;
-  kbDeckEl = null;
   kbLayoutEl = null;
-  layoutPage = null;
-  deckPageName = '';
+  userPage = null;
   kbToolSourceEl = null;
   kbToolTextEl = null;
   litPage = null;

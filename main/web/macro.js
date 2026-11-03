@@ -254,6 +254,46 @@ export function parseMacro(text) {
   return out;
 }
 
+// The editor stores a script as a block tree (text / tap / delay / repeat);
+// the runner wants the flat steps parseMacro() produces. Both shapes are stored
+// by older builds, so this accepts either and returns the runner's shape.
+//
+// A tap carries HID descriptors rather than DOM codes, because the editor draws
+// keys from that table: [{ page, usage, code }], with modifiers first.
+const MOD_BIT = { 0xE0: 0x01, 0xE1: 0x02, 0xE2: 0x04, 0xE3: 0x08,
+                  0xE4: 0x10, 0xE5: 0x20, 0xE6: 0x40, 0xE7: 0x80 };
+
+export function stepsFromBlocks(blocks) {
+  if (!Array.isArray(blocks) || !blocks.length) return [];
+  if (blocks.every((b) => b && typeof b.kind === 'string')) return blocks.slice();
+
+  const out = [];
+  const walk = (list) => {
+    for (const b of list) {
+      if (!b || typeof b !== 'object') continue;
+      if (b.action === 'text') {
+        if (b.text) out.push({ kind: 'text', text: String(b.text) });
+      } else if (b.action === 'delay') {
+        out.push({ kind: 'wait', ms: Number(b.ms) || 0 });
+      } else if (b.action === 'repeat') {
+        out.push({ kind: 'repeatStart', count: Number(b.count) || 1 });
+        walk(b.blocks || []);
+        out.push({ kind: 'repeatEnd' });
+      } else if (b.action === 'tap' && Array.isArray(b.keys) && b.keys.length) {
+        const keys = b.keys;
+        const last = keys[keys.length - 1];
+        let mod = 0;
+        for (const k of keys.slice(0, -1)) mod |= MOD_BIT[k && k.usage] || 0;
+        const token = (last && last.code) || (last ? `0x${Number(last.usage).toString(16)}` : '?');
+        if (last && last.page === 12) out.push({ kind: 'consumer', usage: last.usage, token });
+        else out.push({ kind: 'key', usage: last && last.usage, mod, token });
+      }
+    }
+  };
+  walk(blocks);
+  return out;
+}
+
 // Label for the progress line and the editor's preview.
 export function describeMacroStep(step) {
   if (!step) return '';

@@ -1,87 +1,122 @@
-# Pages: the merge, and where it stopped
-
-Written for whoever picks this up next — including me after a context reset.
+# Pages: one store, one renderer
 
 ## State at the time of writing
 
 | | |
 |---|---|
-| Branch | `main`, clean, pushed |
-| Last commit | `b45a5aa` — one page store, converted from the old ones |
-| Tests | `node test/web/run.mjs` → 150 passed |
-| Firmware | `idf.py build` green; device flashed from this commit |
-| Device | dongle on the LAN, reachable at `10.0.20.209` (via `wg0-mullvad`), code `1z310KG7qzq1` |
+| Branch | `main`, pushed |
+| Tests | `node test/web/run.mjs` → 157 passed |
+| Firmware | `idf.py build` green |
+| UI bundle | `app.js` 102 KB, `editor.html` 42 KB, `web.zip` 189 KB (caps: 224 KB archive / 160 KB file) |
+| Device | running the previous image at `http://192.168.4.1/` (AP mode) |
+| Flash | **not done** — the dongle is booted, so it exposes HID (303a:4008) and no `/dev/ttyACM*`. It needs BOOT-held download mode to flash. |
 
-Do not trust the IP. Check with:
+The firmware builds from this tree. Until it is flashed, the device still runs
+the previous image (embedded app 95,244 bytes, 96 KiB per-file upload cap), which
+is too small to accept the new UI over WiFi. Flash it when the port is
+available:
 
 ```bash
-curl -s -o /dev/null -w '%{http_code}\n' http://10.0.20.209/
-# if the dongle fell back to AP mode it is at 192.168.4.1 and not reachable from the host
+ls -l /dev/ttyACM0                    # must be writable (0666)
+. ~/esp/esp-idf/export.sh
+idf.py -p /dev/ttyACM0 flash
+# then power-cycle: the dongle stays in download mode after a flash
 ```
 
-## What exists
+## What the merge did
 
-| Path | What it is |
-|---|---|
-| `main/web/pages.js` | **The one store.** `readPages`, `writePages`, `migrate`, `dropLegacy`, `parsePageFile` |
-| `main/web/layout.js` | Draws an imported layout in the Keys slot; owns validation |
-| `main/web/deck.js` | The deck's shape (colour, key catalogue, sanitiser) |
-| `main/web/macro.js` | The brace DSL: `parseMacro`, `macroText`, `runMacro` |
-| `main/web/macros.js` | **The Deck view** — 969 lines, still reads `esp32remote.macros` |
-| `main/web/pad.js` | Remote + Keys; builds the strip, owns the transport |
-| `site/editor/index.html` | The layout editor (self-contained), published on Pages |
-| `site/editor/deck.schema.json` | The format, as a schema |
+### One store
 
-## Decisions already taken
+`main/web/pages.js` owns `esp32remote.pages`:
 
-- A page is **rows → items**; an item is a **key** or a **spacer**; a key spans columns. Row height in px; the page scales as a whole, floor 50%, then scrolls.
-- Four actions: **hold a key**, **modifier (latches)**, **script** (blocks: tap/text/wait/repeat), **page jump**.
-- The strip is an ordered list; built-ins `abc sym fn kp media` can be reordered, never removed; a user page may be first.
-- **The tab is renamed Deck → Pages.**
-- **No migration preservation**: the old keys get deleted once the Deck reads `pages`. Until then the migration is additive — that is deliberate, see Traps.
-- Columns cannot drop below the widest row; a page cannot be deleted while a key jumps to it; duplicate ids and names get suffixed.
-- The editor is **embedded under Pages** and also hosted on Pages from the same source.
-- Keyboard source (IME) mode is unchanged for now.
+```js
+{
+  id: 'tv', name: 'TV', columns: 4,
+  rows: [{ h: 50, gap: 4, align: 'stretch', keys: [
+    { label: 'Up', w: 1, colour: 'blue',
+      action: { kind: 'key', page: 7, usage: 0x52, code: 'ArrowUp' } },
+    { spacer: 1 },
+  ] }],
+}
+```
 
-## The plan, in order
+Actions are `key` (held), `modifier` (latches), `sequence` (blocks of steps),
+and `page` (jump). A sequence is stored in the runner's own flat step shape;
+the editor's block tree is converted by `stepsFromBlocks()` in `macro.js`.
 
-### 1. `macros.js` reads `pages`
-Render the active page through `renderPage` from `layout.js`; keep each tile's name, source line, colour, delete, and the HOLD tag; keep press-to-run, press-to-hold, and the run bar. **No storage change yet.**
+`migrate()` runs once at boot. It converts `esp32remote.macros`,
+`esp32remote.deckPages`, `esp32remote.deckPage` and `esp32remote.layouts`, then
+deletes all four. A browser that already has `pages` from the earlier additive
+step keeps them and only loses the old keys — the conversion already happened.
 
-Acceptance: the deck tests pass unchanged; a deck page still runs a script and holds a key.
+The browser still adopts a macro list left in the device's settings blob, after
+settings load, because the boot migration runs before the device is reachable.
 
-### 2. Delete the old stores
-Call `dropLegacy()` from `migrate()` once step 1 is the only reader.
+### One renderer
 
-Acceptance: a browser with only `esp32remote.macros` boots, shows the converted deck, and afterwards has no `macros`/`deckPages`/`layouts` key.
+`main/web/layout.js` exports `renderPage(host, page, opts)` and the page
+validator/parser. The Pages tab and the Keys slot both call it; `opts.decorate`
+adds the Pages tab's tile chrome, `opts.fit` shrinks a tall page as a whole to a
+50% floor before the slot scrolls.
 
-### 3. The strip reads `pages` alone
-`pad.js buildStrip()` stops calling `deckSnapshot()` and `readLayouts()`; `deck:` and `layout:` chips become `page:<id>`. The import writes `pages` instead of `layouts`.
+### The Pages tab
 
-Acceptance: one chip per page, user pages marked, empty pages shown as ghosts rather than hidden.
+`main/web/macros.js` is now the Pages view. It keeps the existing IDs and the
+tile classes (`.macro`, `.name`, `.src`, `.run`, `.acts`) so the tests still
+drive the real UI, but the grid is the page's rows and spans, not a flat
+three-column list.
 
-### 4. The editor under Pages
-Same source as `site/editor`, bundled into the app; import lives here with the six states (empty, placeholder, invalid, refused, done), plus `+ New page`.
+- page strip with every page, `+`, rename and two-tap delete;
+- delete is refused while a key jumps to the page, and the refusal names it;
+- editor for all four action kinds;
+- run bar, hold-to-run, held keys and latching modifiers;
+- import from the box or a file, with states for empty, unreadable, refused,
+  imported, and imported-with-suffixed-ids;
+- the editor embedded in an iframe from `editor.html`, built from
+  `site/editor/index.html` — the same file GitHub Pages serves.
 
-### 5. Small rules
-44px tap targets in the strip; `env(safe-area-inset-*)`; scale floor; blocked page delete; columns floor (partly done in the editor).
+### The Keys strip
+
+`main/web/pad.js` reads `pages` only. Chips are `page:<id>`; an empty page is a
+ghost chip rather than hidden. The old `kbDeck` pane is gone: all user pages are
+drawn by the same renderer in `#kbLayout`. Keys, modifiers, scripts and page
+jumps have one handler.
+
+### Backup
+
+`settings.js` exports `pages` and `strip`. Restoring accepts `pages`; a backup
+from before the merge (`macros`) is converted into one page. Incoming pages are
+validated before anything is written.
+
+## Limits raised for this bundle
+
+- `main/web_server.c`: archive 224 KiB, one file 160 KiB, entry count 10.
+- `test/web/stub.mjs` mirrors both numbers.
+- `editor.html` is embedded in the firmware and listed as a served asset.
 
 ## Traps already paid for
 
-- **Deleting the old keys before the Deck reads `pages` cost 7 test failures.** The migration is additive on purpose. Do not flip it early.
-- `macros.js` needs `{ steps: [], errors: [] }` for a key control — an object without `errors` throws in `saveEditor`.
-- Sections in Setup must keep the base route they arrived by (`/setup` vs `/settings`), or the router remounts and the form resets.
-- The device UI's accent is amber `#f2a93b`; the editor's is blue `#6ea8fe`. Do not cross them.
-- A build that slices CSS without its closing `</style>` renders a blank page. Look at the render, not the file.
-- `hidden` is overridden by `display: flex` — ghost chips and the layout pane both needed an explicit `[hidden]` rule.
+- Deleting the old keys before the reader switched to `pages` cost 7 test
+  failures. The order is convert → rewrite the reader → delete; all three have
+  landed.
+- A tile re-render while a script is held detaches the pointerup listener. The
+  run start disables buttons in place instead of calling `render()`.
+- `data-page` is the chip's identity. A second dataset flag called `page`
+  overwrites it; the flag is `data-user`.
+- An empty page needs one empty row to be a valid page.
+- `hidden` loses to `display: flex`; ghost chips and the page pane each have an
+  explicit `[hidden]` rule.
+- The device UI's accent is amber `#f2a93b`; the editor's is blue `#6ea8fe`.
+- Sections in Setup must keep the base route they arrived by (`/setup` vs
+  `/settings`) or the router remounts and resets the form.
 
 ## How to check
 
 ```bash
-pnpm build && node test/web/run.mjs      # 150 now
+pnpm build && node test/web/run.mjs      # 157 now
 bash test/firmware/run.sh
 . ~/esp/esp-idf/export.sh && idf.py build
-idf.py -p /dev/ttyACM0 flash             # needs the port writable (0666)
+idf.py -p /dev/ttyACM0 flash             # needs the port writable
 ```
 
-The dongle stays in download mode after a flash: it needs a power cycle to boot.
+The device stays in download mode after a flash: power-cycle it to boot.

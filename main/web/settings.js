@@ -8,6 +8,7 @@
 
 
 import { apiFetch, apiPost, appSettings, forgetCode, hostLayout, hostLayoutId, saveSettingsToDevice, setHostLayout, setLocal } from './common.js';
+import * as Pages from './pages.js';
 
 export const SettingsView = (() => {
 
@@ -769,11 +770,10 @@ on('probeClear', 'click', probeClear);
 on('probeSelect', 'click', probeSelectAll);
 
 // ---------------------------------------------------------------- backup
-// Two stores, one file. Settings live on the device; macros live in this
+// Two stores, one file. Settings live on the device; pages live in this
 // browser. A backup that covered only one of them would be a trap - the whole
-// point of exporting macros is that they do not travel on their own.
+// point of exporting pages is that they do not travel on their own.
 const BACKUP_VERSION = 1;
-const MACRO_STORE_KEY = 'esp32remote.macros';
 
 function setBackupNote(text, warn) {
   const el = document.getElementById('backupNote');
@@ -782,33 +782,24 @@ function setBackupNote(text, warn) {
   el.textContent = text || '';
 }
 
-function readStoredMacros() {
-  try {
-    const raw = JSON.parse(localStorage.getItem(MACRO_STORE_KEY) || '[]');
-    return Array.isArray(raw) ? raw : [];
-  } catch (_) {
-    // An unreadable store exports without macros rather than failing outright.
-    return [];
-  }
-}
-
 function collectBackup() {
   const device = Object.assign({}, appSettings);
-  delete device.macros;        // a legacy device key; macros are browser-side now
+  delete device.macros;        // a legacy device key; pages are browser-side now
 
   return {
     app: 'keebling',
     version: BACKUP_VERSION,
     exported: new Date().toISOString(),
     device,
-    macros: readStoredMacros(),
+    pages: Pages.readPages(),
+    strip: Pages.readStrip(),
   };
 }
 
 function backupSummary(b) {
   const n = Object.keys(b.device || {}).length;
-  const m = (b.macros || []).length;
-  return `${n} device setting${n === 1 ? '' : 's'} and ${m} macro${m === 1 ? '' : 's'}`;
+  const m = (b.pages || []).length;
+  return `${n} device setting${n === 1 ? '' : 's'} and ${m} page${m === 1 ? '' : 's'}`;
 }
 
 on('backupSave', 'click', () => {
@@ -861,23 +852,38 @@ on('backupFile', 'change', async (e) => {
     }
   }
 
-  let macroPart = 'no macros in the file';
-  const macros = Array.isArray(b.macros) ? b.macros : [];
-  if (macros.length) {
-    try {
-      localStorage.setItem(MACRO_STORE_KEY, JSON.stringify(macros));
-      macroPart = `${macros.length} macro${macros.length === 1 ? '' : 's'} restored`;
-    } catch (_) {
-      macroPart = 'the macros could not be stored (private mode?)';
+  let pagePart = 'no pages in the file';
+  let restored = 0;
+  if (Array.isArray(b.pages) && b.pages.length && !b.pages.every(Pages.validPage)) {
+    pagePart = 'the file has a page this build cannot read, so no pages were restored';
+  } else if (Array.isArray(b.pages) && b.pages.length) {
+    restored = b.pages.length;
+    const err = Pages.writePages(b.pages);
+    if (err) pagePart = `the pages could not be stored (${err})`;
+    else {
+      Pages.writeActive(b.pages[0].id);
+      if (Array.isArray(b.strip) && b.strip.length) Pages.writeStrip(b.strip);
+      pagePart = `${restored} page${restored === 1 ? '' : 's'} restored`;
+    }
+  } else if (Array.isArray(b.macros) && b.macros.length) {
+    // A backup from before the merge carried a flat macro list. It becomes one
+    // page, so an old file still restores rather than being refused.
+    const converted = Pages.pagesFromLegacyMacros(b.macros);
+    const err = Pages.writePages(converted.pages);
+    if (err) pagePart = `the pages could not be stored (${err})`;
+    else {
+      restored = b.macros.length;
+      Pages.writeActive(converted.pages[0].id);
+      pagePart = `${b.macros.length} macro${b.macros.length === 1 ? '' : 's'} restored as a page`;
     }
   }
 
   if (!saveNote) return;         // unmounted while the file was being restored
   readIntoForm();
   const failed = !devicePart.startsWith('device settings restored');
-  const reloadHint = (devicePart.startsWith('device settings restored') && macros.length)
-    ? ' Reload the Macros page to see them.' : '';
-  setBackupNote(`${devicePart}; ${macroPart}.${reloadHint}`, failed);
+  const reloadHint = (devicePart.startsWith('device settings restored') && restored)
+    ? ' Reload the Pages page to see them.' : '';
+  setBackupNote(`${devicePart}; ${pagePart}.${reloadHint}`, failed);
 });
 
 // ---------------------------------------------------------------- HID descriptor

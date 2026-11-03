@@ -23,11 +23,13 @@ idf_component_register(
         "qr/qrcodegen.c"
     INCLUDE_DIRS "."
     # The built UI, not the sources: run `pnpm build` first. main/web/dist holds
-    # one bundled script, one stylesheet, one document and the repair page.
+    # one bundled script, the stylesheet, the shell, the editor and the repair
+    # page.
     EMBED_FILES
         "web/dist/index.html"
         "web/dist/style.css"
         "web/dist/app.js"
+        "web/dist/editor.html"
         "web/dist/recover.html"
         "web/dist/manifest.webmanifest"
         "web/dist/icon-192.png"

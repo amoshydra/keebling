@@ -1005,10 +1005,12 @@ __webTests.push({
 // ---------------------------------------------------------------- backup
 __webTests.push({
   page: 'settings',
-  name: 'backup collects the device settings and this browser\'s macros',
+  name: 'backup collects the device settings and this browser\'s pages',
   fn: async () => {
-    localStorage.setItem('esp32remote.macros',
-      JSON.stringify([{ name: 'Phone Only', steps: '{ENTER}' }]));
+    localStorage.setItem('esp32remote.pages', JSON.stringify([{
+      id: 'phone', name: 'Phone Only', columns: 4,
+      rows: [{ h: 50, gap: 4, keys: [{ label: 'Go', w: 1, action: { kind: 'sequence', blocks: [], text: '{ENTER}' } }] }],
+    }]));
 
     const b = SettingsView.collectBackup();
     __assert(b.app === 'keebling' && b.version === 1,
@@ -1017,8 +1019,9 @@ __webTests.push({
       `device part: ${JSON.stringify(b.device)}`);
     __assert(!('macros' in b.device),
       'the device part still carries a legacy macros key');
-    __assert(Array.isArray(b.macros) && b.macros.some((m) => m.name === 'Phone Only'),
-      `macro part: ${JSON.stringify(b.macros)}`);
+    __assert(Array.isArray(b.pages) && b.pages.some((p) => p.name === 'Phone Only'),
+      `page part: ${JSON.stringify(b.pages)}`);
+    __assert(!('macros' in b), 'the backup still carries a legacy macro list');
   },
 });
 
@@ -1030,7 +1033,10 @@ __webTests.push({
       app: 'keebling',
       version: 1,
       device: { usb_product: 'Restored Name', screen_timeout_s: 45 },
-      macros: [{ name: 'From File', steps: '{VOLUMEUP}' }],
+      pages: [{ id: 'from-file', name: 'From File', columns: 4,
+        rows: [{ h: 50, gap: 4, keys: [
+          { label: 'Loud', w: 1, action: { kind: 'sequence', blocks: [], text: '{VOLUMEUP}' } },
+        ] }] }],
     };
     const input = document.getElementById('backupFile');
     const dt = new DataTransfer();
@@ -1047,13 +1053,13 @@ __webTests.push({
     __assert(document.getElementById('screenTimeoutVal').textContent === '45 s',
       'the timeout label was not redrawn');
 
-    const stored = JSON.parse(localStorage.getItem('esp32remote.macros') || '[]');
-    __assert(stored.some((m) => m.name === 'From File'), `macros: ${JSON.stringify(stored)}`);
+    const stored = JSON.parse(localStorage.getItem('esp32remote.pages') || '[]');
+    __assert(stored.some((p) => p.name === 'From File'), `pages: ${JSON.stringify(stored)}`);
 
     const note = document.getElementById('backupNote').textContent;
     __assert(note.includes('device settings restored'), `note: ${note}`);
-    __assert(/\d+ macros? restored/.test(note), `note: ${note}`);
-    __assert(note.includes('Reload the Macros page'), `note: ${note}`);
+    __assert(/\d+ pages? restored/.test(note), `note: ${note}`);
+    __assert(note.includes('Reload the Pages page'), `note: ${note}`);
   },
 });
 
@@ -1080,11 +1086,13 @@ __webTests.push({
     __assert(document.getElementById('screenTimeout').value === '30',
       `the timeout is ${document.getElementById('screenTimeout').value}`);
 
-    const stored = JSON.parse(localStorage.getItem('esp32remote.macros') || '[]');
-    __assert(stored.some((m) => m.name === 'Legacy Macro'), `macros: ${JSON.stringify(stored)}`);
+    const stored = JSON.parse(localStorage.getItem('esp32remote.pages') || '[]');
+    __assert(stored.some((p) => p.rows.some((r) => r.keys.some((k) => k.label === 'Legacy Macro'))),
+      `pages: ${JSON.stringify(stored)}`);
 
     const note = document.getElementById('backupNote').textContent;
     __assert(note.includes('device settings restored'), `note: ${note}`);
+    __assert(note.includes('restored as a page'), `note: ${note}`);
   },
 });
 
@@ -2185,9 +2193,10 @@ __webTests.push({
       `note: ${document.getElementById('saveNote').textContent}`);
 
     // The list on screen is not evidence that anything was stored.
-    const stored = JSON.parse(localStorage.getItem('esp32remote.macros') || 'null');
-    __assert(Array.isArray(stored) && stored.some((m) => m.name === 'Test Macro'),
-      `stored in the browser: ${JSON.stringify(stored)}`);
+    const stored = JSON.parse(localStorage.getItem('esp32remote.pages') || 'null');
+    const made = Array.isArray(stored) && stored.flatMap((p) => p.rows.flatMap((r) => r.keys))
+      .find((k) => k.label === 'Test Macro');
+    __assert(made, `stored in the browser: ${JSON.stringify(stored)}`);
   },
 });
 
@@ -2212,9 +2221,11 @@ __webTests.push({
     await __sleep(200);
     __assert(document.querySelectorAll('.macro').length === before + 1,
       'the large macro did not reach the list');
-    const stored = JSON.parse(localStorage.getItem('esp32remote.macros') || '[]');
-    __assert(stored.some((m) => m.name === 'Big One' && m.steps.length === 1200),
-      'the large macro was not stored');
+    const stored = JSON.parse(localStorage.getItem('esp32remote.pages') || '[]');
+    const made = stored.flatMap((p) => p.rows.flatMap((r) => r.keys))
+      .find((k) => k.label === 'Big One');
+    __assert(made && made.action.blocks[0].text.length === 1200,
+      `the large macro was not stored: ${JSON.stringify(made && made.action)}`);
   },
 });
 
@@ -2284,10 +2295,10 @@ __webTests.push({
     const names = [...document.querySelectorAll('.macro .name')].map((n) => n.textContent);
     __assert(names.includes('On page two'),
       `the button did not land on the new page: ${names.join(', ')}`);
-    const stored = JSON.parse(localStorage.getItem('esp32remote.macros') || '[]');
-    const made = stored.find((m) => m.name === 'On page two');
-    __assert(made && made.page === pages()[pages().length - 1].textContent,
-      `stored page: ${made && made.page}`);
+    const stored = JSON.parse(localStorage.getItem('esp32remote.pages') || '[]');
+    const made = stored.find((p) => p.name === pages()[pages().length - 1].textContent);
+    __assert(made && made.rows.some((r) => r.keys.some((k) => k.label === 'On page two')),
+      `stored page: ${JSON.stringify(stored.map((p) => p.name))}`);
 
     // Leave the deck on its first page: the tests after this one count tiles.
     pages()[0].click();
@@ -2297,7 +2308,7 @@ __webTests.push({
 
 __webTests.push({
   page: 'macros',
-  name: 'a page can be renamed, and deleting one keeps its buttons',
+  name: 'a page can be renamed, and deleting one takes its keys with it',
   fn: async () => {
     const chips = () => [...document.querySelectorAll('#deckPages .page:not(.add)')]
       .map((c) => c.textContent);
@@ -2309,7 +2320,7 @@ __webTests.push({
 
     const tools = document.getElementById('deckPageTools');
     __assert(!tools.hidden, 'the page tools are hidden in edit mode');
-    const press = (label) => tools.querySelectorAll('button').forEach((b) => {
+    const press = (label) => [...tools.querySelectorAll('button')].forEach((b) => {
       if (b.textContent === label) b.click();
     });
 
@@ -2320,26 +2331,29 @@ __webTests.push({
 
     // A button created here belongs to the renamed page.
     document.getElementById('macroAdd').click();
-    document.getElementById('editName').value = 'Moves with the page';
+    document.getElementById('editName').value = 'Goes with the page';
     document.getElementById('editSteps').value = '{ENTER}';
     document.getElementById('editSave').click();
     await __sleep(400);
-    let stored = JSON.parse(localStorage.getItem('esp32remote.macros') || '[]');
-    const made = stored.find((m) => m.name === 'Moves with the page');
-    __assert(made && made.page === 'Renamed page', `stored page: ${made && made.page}`);
+    let stored = JSON.parse(localStorage.getItem('esp32remote.pages') || '[]');
+    const made = stored.find((p) => p.name === 'Renamed page');
+    __assert(made && made.rows.some((r) => r.keys.some((k) => k.label === 'Goes with the page')),
+      `stored page: ${JSON.stringify(stored.map((p) => p.name))}`);
 
-    // Deleting the page must move its button somewhere, not delete it.
-    const before = stored.length;
+    // Delete is two taps: the page and its keys are the same object now, so a
+    // single stray tap must not destroy them.
+    const page = made;
     press('Delete page');
+    await __sleep(60);
+    __assert(chips().includes('Renamed page'), 'the first tap deleted the page');
+    press('Delete page?');
     await __sleep(400);
-    stored = JSON.parse(localStorage.getItem('esp32remote.macros') || '[]');
-    __assert(!chips().includes('Renamed page'), 'the page is still in the strip');
-    __assert(stored.length === before, 'deleting a page deleted its buttons');
-    __assert(stored.some((m) => m.name === 'Moves with the page'),
-      'the button did not survive the page delete');
+    stored = JSON.parse(localStorage.getItem('esp32remote.pages') || '[]');
+    __assert(!stored.some((p) => p.id === page.id), 'the page is still stored');
+    __assert(!stored.some((p) => p.rows.some((r) => r.keys.some((k) => k.label === 'Goes with the page'))),
+      'deleting a page left its keys behind');
 
     document.getElementById('deckEdit').click();
-    chips().length;                       // leave the deck where the next test expects it
     document.querySelector('#deckPages .page:not(.add)').click();
     await __sleep(60);
   },
@@ -2359,8 +2373,9 @@ __webTests.push({
     document.getElementById('editSave').click();
     await __sleep(400);
 
-    const stored = JSON.parse(localStorage.getItem('esp32remote.macros') || '[]');
-    const saved = stored.find((m) => m.name === 'Open Chrome');
+    const stored = JSON.parse(localStorage.getItem('esp32remote.pages') || '[]');
+    const saved = stored.flatMap((p) => p.rows.flatMap((r) => r.keys))
+      .find((k) => k.label === 'Open Chrome');
     __assert(saved && saved.colour === 'blue', `stored: ${JSON.stringify(saved)}`);
     __assert(document.querySelector('.macro.c-blue'),
       'the tile did not take the colour');
@@ -2372,10 +2387,14 @@ __webTests.push({
   page: 'macros',
   name: 'a hold button starts on press and stops on release',
   fn: async () => {
-    const original = localStorage.getItem('esp32remote.macros');
+    const original = localStorage.getItem('esp32remote.pages');
     const list = JSON.parse(original || '[]');
-    list.push({ name: 'Hold volume', steps: '{REPEAT:40}{VOLUMEUP}{WAIT:60}{/REPEAT}', hold: true, page: 'Main' });
-    localStorage.setItem('esp32remote.macros', JSON.stringify(list));
+    const main = list.find((p) => p.name === 'Main');
+    main.rows[main.rows.length - 1].keys.push({
+      label: 'Hold volume', w: 1, hold: true,
+      action: { kind: 'sequence', blocks: [], text: '{REPEAT:40}{VOLUMEUP}{WAIT:60}{/REPEAT}' },
+    });
+    localStorage.setItem('esp32remote.pages', JSON.stringify(list));
 
     // Remount so the view reads the store again.
     location.hash = '#/settings';
@@ -2405,7 +2424,8 @@ __webTests.push({
     __assert(cap.length === settled,
       'it was still sending after release');
 
-    localStorage.setItem('esp32remote.macros', original);
+    if (original === null) localStorage.removeItem('esp32remote.pages');
+    else localStorage.setItem('esp32remote.pages', original);
     location.hash = '#/settings';
     await __waitView('settings');
     location.hash = '#/macros';
@@ -2462,8 +2482,9 @@ __webTests.push({
     const names = [...document.querySelectorAll('.macro .name')].map((e) => e.textContent);
     __assert(names.includes('Left Behind'), `list: ${names.join('|')}`);
 
-    const stored = JSON.parse(localStorage.getItem('esp32remote.macros') || 'null');
-    __assert(Array.isArray(stored) && stored.some((m) => m.name === 'Left Behind'),
+    const stored = JSON.parse(localStorage.getItem('esp32remote.pages') || 'null');
+    __assert(Array.isArray(stored) && stored.some((p) =>
+      p.rows.some((r) => r.keys.some((k) => k.label === 'Left Behind'))),
       `not written to the browser: ${JSON.stringify(stored)}`);
 
     const note = document.getElementById('saveNote').textContent;
@@ -2574,9 +2595,10 @@ __webTests.push({
 
     const rows = [...document.querySelectorAll('#fileList .file')];
     const names = rows.map((r) => r.dataset.file);
-    __assert(rows.length === 3, `listed ${rows.length} files: ${names.join('|')}`);
+    __assert(rows.length === 4, `listed ${rows.length} files: ${names.join('|')}`);
     __assert(names.includes('index.html') && names.includes('app.js')
-      && names.includes('style.css'), `missing files: ${names.join('|')}`);
+      && names.includes('style.css') && names.includes('editor.html'),
+      `missing files: ${names.join('|')}`);
     __assert(!names.includes('pad.js') && !names.includes('router.js'),
       `the pre-bundle sources are still listed: ${names.join('|')}`);
     __assert(names.filter((n) => n === 'index.html').length === 1,
@@ -3721,20 +3743,19 @@ __webTests.push({
   page: 'keys-deck',
   name: 'a layout from a newer build is refused, with the reason',
   fn: async () => {
-    const plus = [...document.querySelectorAll('#kbPages button')].find((b) => b.textContent === '+');
-    plus.click();
-    await __sleep(60);
-    const box = document.querySelector('#kbLayout textarea');
-    const go = () => [...document.querySelectorAll('#kbLayout button')]
-      .find((b) => b.textContent === 'Import layout').click();
+    // Import lives in Pages now, not on the Keys strip.
+    location.hash = '#/deck';
+    await __waitView('macros');
+    const box = document.getElementById('importText');
+    const go = () => document.getElementById('importGo').click();
+    const note = () => document.getElementById('importNote').textContent;
 
     // version from the future
     box.value = JSON.stringify({ app: 'keebling', kind: 'layout', version: 99,
       pages: [{ id: 'x', name: 'X', columns: 4, rows: [{ h: 50, gap: 5, keys: [] }] }] });
     go();
     await __sleep(60);
-    let note = document.querySelector('#kbLayout .note').textContent;
-    __assert(note.includes('version 99'), `note: ${note}`);
+    __assert(note().includes('version 99'), `note: ${note()}`);
 
     // an action this build cannot run
     box.value = JSON.stringify({ app: 'keebling', kind: 'layout', version: 1,
@@ -3742,19 +3763,23 @@ __webTests.push({
         keys: [{ label: 'z', w: 1, action: { kind: 'macro' } }] }] }] });
     go();
     await __sleep(60);
-    note = document.querySelector('#kbLayout .note').textContent;
-    __assert(note.includes('not a valid layout'), `note: ${note}`);
+    __assert(note().includes('not a valid layout'), `note: ${note()}`);
 
     // a misspelled top-level field
     box.value = JSON.stringify({ app: 'keebling', kind: 'layout', version: 1, pagess: [],
       pages: [{ id: 'z', name: 'Z', columns: 4, rows: [{ h: 50, gap: 5, keys: [] }] }] });
     go();
     await __sleep(60);
-    note = document.querySelector('#kbLayout .note').textContent;
-    __assert(note.includes('pagess'), `note: ${note}`);
+    __assert(note().includes('pagess'), `note: ${note()}`);
 
-    // nothing was stored by any of the three
-    const stored = JSON.parse(localStorage.getItem('esp32remote.layouts') || '[]');
+    // an empty box is a state of its own, not a silent no-op
+    box.value = '';
+    go();
+    await __sleep(30);
+    __assert(note().includes('Nothing to import'), `note: ${note()}`);
+
+    // nothing was stored by any of the four
+    const stored = JSON.parse(localStorage.getItem('esp32remote.pages') || '[]');
     __assert(!stored.some((p) => ['x', 'y', 'z'].includes(p.id)),
       `a refused file was stored: ${JSON.stringify(stored.map((p) => p.id))}`);
   },
@@ -3762,15 +3787,12 @@ __webTests.push({
 
 __webTests.push({
   page: 'keys-deck',
-  name: 'an imported layout is drawn in the slot and joins the strip',
+  name: 'an imported page joins the strip and is drawn in the slot',
   fn: async () => {
-    const plus = [...document.querySelectorAll('#kbPages button')].find((b) => b.textContent === '+');
-    __assert(plus, 'there is no way to import a layout');
-    plus.click();
-    await __sleep(60);
-
-    const box = document.querySelector('#kbLayout textarea');
-    __assert(box, 'the slot did not offer a paste box');
+    location.hash = '#/deck';
+    await __waitView('macros');
+    const box = document.getElementById('importText');
+    __assert(box, 'the Pages view did not offer a paste box');
 
     box.value = JSON.stringify({
       app: 'keebling', kind: 'layout', version: 1,
@@ -3781,17 +3803,25 @@ __webTests.push({
         ] },
       ] }],
     });
-    [...document.querySelectorAll('#kbLayout button')]
-      .find((b) => b.textContent === 'Import layout').click();
+    document.getElementById('importGo').click();
     await __sleep(100);
+    __assert(document.getElementById('importNote').textContent.includes('Imported'),
+      `note: ${document.getElementById('importNote').textContent}`);
+
+    location.hash = '#/keys';
+    await __waitView('control');
+    const chip = [...document.querySelectorAll('#kbPages button')].find((b) => b.textContent === 'TV2');
+    __assert(chip, 'the imported page did not join the strip');
+    chip.click();
+    await __sleep(60);
 
     const keys = document.querySelectorAll('#kbLayout .lkey');
     __assert(keys.length === 1, `drew ${keys.length} keys`);
-    __assert(keys[0].textContent.indexOf('↑') === 0, `drew "${keys[0].textContent}"`);
+    __assert(keys[0].querySelector('.lb').textContent === '↑', `drew "${keys[0].textContent}"`);
     __assert(keys[0].style.gridColumn === 'span 2', `span is "${keys[0].style.gridColumn}"`);
     __assert(document.querySelectorAll('#kbLayout .lspacer').length === 1, 'the spacer was not drawn');
 
-    // pressing a key on the layout holds it, and releasing clears it
+    // pressing a key on the page holds it, and releasing clears it
     const cap = __capture();
     const up = keys[0];
     up.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 11 }));
@@ -3803,46 +3833,45 @@ __webTests.push({
     __assert(cap.slice(-1)[0][0] === 2 && cap.slice(-1)[0][2] === 0,
       `release sent ${JSON.stringify(cap.slice(-1))}`);
 
-    const chip = [...document.querySelectorAll('#kbPages button')].find((b) => b.textContent === 'TV2');
-    __assert(chip, 'the imported page did not join the strip');
-    __assert(chip.classList.contains('on'), 'the strip does not mark the open layout');
+    __assert(chip.classList.contains('on'), 'the strip does not mark the open page');
   },
 });
 
 __webTests.push({
   page: 'keys-deck',
-  name: 'a deck page is a chip in the strip, and opens in the slot',
+  name: 'a user page is a chip in the strip, and opens in the slot',
   fn: async () => {
+    // The previous test left the Keys view open on TV2.
     const chip = [...document.querySelectorAll('#kbPages button')]
       .find((b) => b.textContent === 'TV');
-    __assert(chip, 'the deck page is not in the strip');
-    __assert(chip.dataset.page === 'deck:TV', `the chip names "${chip.dataset.page}"`);
+    __assert(chip, 'the page is not in the strip');
+    __assert(chip.dataset.page === 'page:tv', `the chip names "${chip.dataset.page}"`);
 
     chip.click();
     await __sleep(50);
 
-    const deck = document.getElementById('kbDeck');
-    __assert(!deck.hidden, 'the slot did not open the deck page');
+    const page = document.getElementById('kbLayout');
+    __assert(!page.hidden, 'the slot did not open the page');
     __assert(document.getElementById('kbBuilt').hidden,
-      'the keyboard is still showing behind the deck page');
+      'the keyboard is still showing behind the page');
 
-    const names = [...deck.querySelectorAll('.kbcell .nm')].map((n) => n.textContent);
-    __assert(names.join('|') === 'Up|Netflix', `the page shows: ${names.join('|')}`);
-    __assert(deck.querySelector('.kbcell.c-blue'), 'the button lost its colour');
-    __assert(chip.classList.contains('on'), 'the strip does not mark the open deck page');
+    const names = [...page.querySelectorAll('.lkey .lb')].map((n) => n.textContent);
+    __assert(names.join('|') === 'Up|Netflix|Ctrl|Jump', `the page shows: ${names.join('|')}`);
+    __assert(page.querySelector('.lkey.c-blue'), 'the key lost its colour');
+    __assert(chip.classList.contains('on'), 'the strip does not mark the open page');
   },
 });
 
 __webTests.push({
   page: 'keys-deck',
-  name: 'a key on a deck page is held, and a script runs',
+  name: 'a key on a page is held, and a script runs',
   fn: async () => {
     [...document.querySelectorAll('#kbPages button')]
       .find((b) => b.textContent === 'TV').click();
     await __sleep(50);
 
     const cap = __capture();
-    const up = document.querySelector('#kbDeck .kbcell .hit');
+    const up = document.querySelector('#kbLayout .lkey');
     up.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 7 }));
     await __sleep(40);
     const down = cap.filter((r) => r[0] === 2 && r[2] !== 0);
@@ -3854,10 +3883,11 @@ __webTests.push({
     __assert(cap.slice(-1)[0][0] === 2 && cap.slice(-1)[0][2] === 0,
       `the release sent ${JSON.stringify(cap.slice(-1))}`);
 
-    // The script button: a tap runs it, and Enter arrives as a press and a
+    // The script key: a tap runs it, and Enter arrives as a press and a
     // release like any other macro.
-    const cells = [...document.querySelectorAll('#kbDeck .kbcell')];
-    cells[1].querySelector('.hit').click();
+    const keys = [...document.querySelectorAll('#kbLayout .lkey')];
+    keys[1].dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 8 }));
+    keys[1].dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 8 }));
     await __sleep(400);
     __assert(cap.some((r) => r[0] === 2 && r[2] === 0x28), `no Enter: ${JSON.stringify(cap)}`);
   },
@@ -3865,19 +3895,241 @@ __webTests.push({
 
 __webTests.push({
   page: 'keys-deck',
-  name: 'an empty deck page is not offered in the strip',
+  name: 'a modifier latches, and a page key jumps to another page',
   fn: async () => {
-    // A chip that opens nothing is a dead end, so a page with no buttons is
-    // left out rather than shown as an empty list.
-    const labels = [...document.querySelectorAll('#kbPages button[data-deck]')]
-      .map((b) => b.textContent);
-    __assert(labels.length === 1 && labels[0] === 'TV', `chips: ${labels.join('|')}`);
+    [...document.querySelectorAll('#kbPages button')]
+      .find((b) => b.textContent === 'TV').click();
+    await __sleep(50);
 
-    localStorage.setItem('esp32remote.deckPages', JSON.stringify(['TV', 'Empty']));
-    // Rebuilding happens on mount; this check is about the rule, not the timing.
-    const snap = deckSnapshot();
-    __assert(snap.pages.includes('Empty'), 'the empty page was not in the snapshot');
-    __assert(buttonsOnPage(snap, 'Empty').length === 0, 'the empty page has buttons');
+    const cap = __capture();
+    const keys = [...document.querySelectorAll('#kbLayout .lkey')];
+    const ctrl = keys[2];
+    ctrl.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 21 }));
+    await __sleep(40);
+    __assert(ctrl.classList.contains('latched'), 'the modifier did not latch');
+    let last = cap.slice(-1)[0];
+    __assert(last[0] === 2 && last[1] === 0x01,
+      `the latch did not send Ctrl: ${JSON.stringify(last)}`);
+
+    // A key pressed while latched carries the modifier in the same report.
+    keys[0].dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 22 }));
+    await __sleep(40);
+    last = cap.slice(-1)[0];
+    __assert(last[1] === 0x01 && last[2] === 0x52,
+      `the latched key sent ${JSON.stringify(last)}`);
+    keys[0].dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 22 }));
+    await __sleep(40);
+
+    // Tapping the modifier again releases it.
+    ctrl.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 21 }));
+    await __sleep(30);
+    __assert(!ctrl.classList.contains('latched'), 'the second tap did not release the modifier');
+    last = cap.slice(-1)[0];
+    __assert(last[0] === 2 && last[1] === 0x00, `the release sent ${JSON.stringify(last)}`);
+
+    // Jump goes to the page named by the action, not back to the strip.
+    keys[3].dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 23 }));
+    await __sleep(60);
+    const note = document.querySelector('#kbLayout .note');
+    __assert(note && note.textContent.includes('empty'),
+      `the jump did not open the target page: ${note && note.textContent}`);
+  },
+});
+
+__webTests.push({
+  page: 'keys-deck',
+  name: 'an empty page is a ghost chip, not a dead end and not hidden',
+  fn: async () => {
+    const chips = [...document.querySelectorAll('#kbPages button[data-page^="page:"]')];
+    const empty = chips.find((b) => b.textContent === 'Empty');
+    __assert(empty, `the empty page is not offered: ${chips.map((b) => b.textContent).join('|')}`);
+    __assert(empty.classList.contains('ghost'), 'the empty page is not drawn as a ghost');
+
+    empty.click();
+    await __sleep(50);
+    __assert(!document.getElementById('kbLayout').hidden, 'the ghost chip opened nothing');
+    const note = document.querySelector('#kbLayout .note');
+    __assert(note && note.textContent.includes('empty'), 'the slot did not say the page is empty');
+  },
+});
+
+__webTests.push({
+  page: 'macros',
+  name: 'a page a key jumps to cannot be deleted, and the refusal names the key',
+  fn: async () => {
+    const keep = localStorage.getItem('esp32remote.pages');
+    const keepActive = localStorage.getItem('esp32remote.pagesActive');
+    localStorage.setItem('esp32remote.pages', JSON.stringify([
+      { id: 'source', name: 'Source', columns: 4, rows: [{ h: 50, gap: 4, keys: [
+        { label: 'Go', w: 1, action: { kind: 'page', to: 'target' } },
+      ] }] },
+      { id: 'target', name: 'Target', columns: 4, rows: [{ h: 50, gap: 4, keys: [] }] },
+    ]));
+    localStorage.setItem('esp32remote.pagesActive', 'source');
+    location.hash = '#/settings';
+    await __waitView('settings');
+    location.hash = '#/macros';
+    await __waitView('macros');
+    await __sleep(300);
+
+    try {
+      document.getElementById('deckEdit').click();
+      [...document.querySelectorAll('#deckPages .page:not(.add)')]
+        .find((b) => b.textContent === 'Target').click();
+      await __sleep(60);
+      [...document.querySelectorAll('#deckPageTools button')]
+        .find((b) => b.textContent === 'Delete page').click();
+      await __sleep(60);
+
+      const note = document.getElementById('saveNote').textContent;
+      __assert(note.includes('cannot be deleted'), `note: ${note}`);
+      __assert(note.includes('Source · Go'), `the refusal did not name the key: ${note}`);
+      const stored = JSON.parse(localStorage.getItem('esp32remote.pages'));
+      __assert(stored.some((p) => p.id === 'target'), 'the page was deleted anyway');
+    } finally {
+      if (keep === null) localStorage.removeItem('esp32remote.pages');
+      else localStorage.setItem('esp32remote.pages', keep);
+      if (keepActive === null) localStorage.removeItem('esp32remote.pagesActive');
+      else localStorage.setItem('esp32remote.pagesActive', keepActive);
+      location.hash = '#/settings';
+      await __waitView('settings');
+      location.hash = '#/macros';
+      await __waitView('macros');
+      await __sleep(250);
+    }
+  },
+});
+
+__webTests.push({
+  page: 'macros',
+  name: 'importing a page whose id exists keeps both, with a suffix',
+  fn: async () => {
+    const keep = localStorage.getItem('esp32remote.pages');
+    const before = JSON.parse(keep || '[]');
+    document.getElementById('importText').value = JSON.stringify({
+      app: 'keebling', kind: 'layout', version: 1,
+      pages: [{ id: 'main', name: 'Main', columns: 4, rows: [{ h: 50, gap: 4, keys: [
+        { label: 'Another', w: 1, action: { kind: 'sequence', blocks: [], text: '{ENTER}' } },
+      ] }] }],
+    });
+    document.getElementById('importGo').click();
+    await __sleep(100);
+
+    const note = document.getElementById('importNote').textContent;
+    __assert(note.includes('Imported 1 page'), `note: ${note}`);
+    __assert(note.includes('renamed'), `the duplicate was not explained: ${note}`);
+    const stored = JSON.parse(localStorage.getItem('esp32remote.pages'));
+    __assert(stored.length === before.length + 1,
+      `stored ${stored.length} pages, expected ${before.length + 1}`);
+    __assert(stored.some((p) => p.id === 'main-2' && p.name === 'Main 2'),
+      `the duplicate id/name was not suffixed: ${JSON.stringify(stored.map((p) => [p.id, p.name]))}`);
+
+    if (keep === null) localStorage.removeItem('esp32remote.pages');
+    else localStorage.setItem('esp32remote.pages', keep);
+    location.hash = '#/settings';
+    await __waitView('settings');
+    location.hash = '#/macros';
+    await __waitView('macros');
+    await __sleep(250);
+  },
+});
+
+__webTests.push({
+  page: 'macros',
+  name: 'the embedded editor is the hosted document, and hands its file to Pages',
+  fn: async () => {
+    const frame = document.getElementById('editorFrame');
+    __assert(frame && frame.getAttribute('src') === 'editor.html',
+      'the Pages tab does not embed the editor');
+    // It is the same document the site publishes, not a second copy.
+    const html = await (await fetch('editor.html')).text();
+    __assert(/Keebling/.test(html), 'the embedded editor is not the Keebling editor');
+    __assert(/useHere/.test(html),
+      'the embedded copy is not the build with the hand-off button');
+
+    const keep = localStorage.getItem('esp32remote.pages');
+    window.postMessage({
+      type: 'keebling:import',
+      json: JSON.stringify({
+        app: 'keebling', kind: 'layout', version: 1,
+        pages: [{ id: 'from-editor', name: 'From editor', columns: 4, rows: [{ h: 50, gap: 4, keys: [
+          { label: 'Send', w: 1, action: { kind: 'sequence', blocks: [], text: '{TAB}' } },
+        ] }] }],
+      }),
+    }, '*');
+    await __sleep(120);
+
+    const note = document.getElementById('importNote').textContent;
+    __assert(note.includes('From editor'), `the editor hand-off did nothing: ${note}`);
+    const stored = JSON.parse(localStorage.getItem('esp32remote.pages'));
+    __assert(stored.some((p) => p.id === 'from-editor'), 'the editor page was not stored');
+
+    if (keep === null) localStorage.removeItem('esp32remote.pages');
+    else localStorage.setItem('esp32remote.pages', keep);
+    location.hash = '#/settings';
+    await __waitView('settings');
+    location.hash = '#/macros';
+    await __waitView('macros');
+    await __sleep(250);
+  },
+});
+
+__webTests.push({
+  page: 'macros',
+  name: 'the editor\'s block tree becomes the runner\'s flat steps',
+  fn: async () => {
+    const steps = stepsFromBlocks([
+      { action: 'text', text: 'ab' },
+      { action: 'delay', ms: 40 },
+      { action: 'tap', keys: [{ page: 7, usage: 0x28 }] },
+      { action: 'tap', keys: [{ page: 7, usage: 0xE1 }, { page: 7, usage: 0x06 }] },
+    ]);
+    __assert(steps.length === 4, `steps: ${JSON.stringify(steps)}`);
+    __assert(steps[0].kind === 'text' && steps[0].text === 'ab', `text: ${JSON.stringify(steps[0])}`);
+    __assert(steps[1].kind === 'wait' && steps[1].ms === 40, `delay: ${JSON.stringify(steps[1])}`);
+    __assert(steps[2].kind === 'key' && steps[2].usage === 0x28, `tap: ${JSON.stringify(steps[2])}`);
+    __assert(steps[3].kind === 'key' && steps[3].usage === 0x06 && steps[3].mod === 0x02,
+      `chord: ${JSON.stringify(steps[3])}`);
+  },
+});
+
+__webTests.push({
+  page: 'macros',
+  name: 'an imported duplicate id is suffixed, and jumps inside the file follow it',
+  fn: async () => {
+    const existing = [{ id: 'main', name: 'Main', columns: 4,
+      rows: [{ h: 50, gap: 4, keys: [] }] }];
+    const incoming = [
+      { id: 'main', name: 'Main', columns: 4, rows: [{ h: 50, gap: 4, keys: [] }] },
+      { id: 'other', name: 'Other', columns: 4, rows: [{ h: 50, gap: 4, keys: [
+        { label: 'Go', w: 1, action: { kind: 'page', to: 'main' } },
+      ] }] },
+    ];
+    const merged = Pages.mergePages(existing, incoming);
+    const added = merged.pages.slice(1);
+    __assert(added[0].id === 'main-2' && added[0].name === 'Main 2',
+      `duplicate: ${JSON.stringify(added.map((p) => [p.id, p.name]))}`);
+    __assert(added[1].rows[0].keys[0].action.to === 'main-2',
+      `the jump did not follow the suffix: ${JSON.stringify(added[1].rows[0].keys[0].action)}`);
+    __assert(merged.pages.length === 3, 'the existing page was replaced instead of kept');
+  },
+});
+
+__webTests.push({
+  page: 'macros',
+  name: 'a browser that already has pages drops the old keys without disturbing them',
+  fn: async () => {
+    const existing = [{ id: 'kept', name: 'Kept', columns: 4, rows: [{ h: 50, gap: 4, keys: [] }] }];
+    localStorage.setItem('esp32remote.pages', JSON.stringify(existing));
+    localStorage.setItem('esp32remote.macros', JSON.stringify([{ name: 'Old', steps: '{ENTER}' }]));
+    localStorage.setItem('esp32remote.layouts', JSON.stringify([{ id: 'old', name: 'Old', columns: 4, rows: [{ h: 50, gap: 4, keys: [] }] }]));
+
+    const list = Pages.migrate();
+    __assert(list.length === 1 && list[0].id === 'kept',
+      `the existing pages changed: ${JSON.stringify(list.map((p) => p.id))}`);
+    __assert(localStorage.getItem('esp32remote.macros') === null
+      && localStorage.getItem('esp32remote.layouts') === null,
+      'the old keys survived');
   },
 });
 
@@ -3885,13 +4137,11 @@ __webTests.push({
   page: 'macros',
   name: 'the one store converts a deck page into a page of keys',
   fn: async () => {
-    // The store is additive for now: it must produce pages without disturbing
-    // the deck that still reads its own key.
     localStorage.removeItem('esp32remote.pages');
     localStorage.setItem('esp32remote.deckPages', JSON.stringify(['Remote']));
     localStorage.setItem('esp32remote.macros', JSON.stringify([
       { name: 'Up', page: 'Remote', colour: 'blue', key: { kind: 'key', code: 'ArrowUp' } },
-      { name: 'Go', page: 'Remote', steps: '{ENTER}', blocks: [{ action: 'tap', keys: [] }] },
+      { name: 'Go', page: 'Remote', steps: '{ENTER}' },
     ]));
 
     const list = Pages.migrate();
@@ -3902,10 +4152,14 @@ __webTests.push({
     __assert(page.rows[0].keys.length === 2, `keys: ${page.rows[0].keys.length}`);
     __assert(page.rows[0].keys[0].label === 'Up', `label: ${page.rows[0].keys[0].label}`);
     __assert(page.rows[0].keys[0].colour === 'blue', 'the colour was lost');
+    __assert(page.rows[0].keys[0].action.usage === 0x52, 'the key code did not become a HID usage');
+    __assert(page.rows[0].keys[1].action.blocks.length === 1, 'the script did not keep its step');
 
-    // and the deck is untouched, because it has not been rewritten yet
-    __assert(JSON.parse(localStorage.getItem('esp32remote.macros')).length === 2,
-      'the migration dropped the deck it still has to read');
+    // and the old keys are gone: there is only one store now
+    __assert(localStorage.getItem('esp32remote.macros') === null,
+      'the migration left the deck key behind');
+    __assert(localStorage.getItem('esp32remote.deckPages') === null,
+      'the migration left the page list behind');
   },
 });
 
@@ -3954,11 +4208,12 @@ __webTests.push({
     __assert(tile.querySelector('.src').textContent.includes('held'),
       `the tile says "${tile.querySelector('.src').textContent}"`);
 
-    const stored = JSON.parse(localStorage.getItem('esp32remote.macros'));
-    const entry = stored.find((m) => m.name === 'Held up');
-    __assert(entry && entry.key && entry.key.kind === 'key' && entry.key.code === 'ArrowUp',
+    const stored = JSON.parse(localStorage.getItem('esp32remote.pages'));
+    const entry = stored.flatMap((p) => p.rows.flatMap((r) => r.keys))
+      .find((k) => k.label === 'Held up');
+    __assert(entry && entry.action && entry.action.kind === 'key'
+      && entry.action.usage === 0x52 && entry.action.code === 'ArrowUp',
       `stored: ${JSON.stringify(entry)}`);
-    __assert(entry.steps === '', `a key button stored steps: ${JSON.stringify(entry.steps)}`);
   },
 });
 
@@ -4009,10 +4264,11 @@ __webTests.push({
     __assert(last[0] === 3 && last[1] === 0 && last[2] === 0,
       `release sent ${JSON.stringify(last)}`);
 
-    const stored = JSON.parse(localStorage.getItem('esp32remote.macros'));
-    const entry = stored.find((m) => m.name === 'Held mute');
-    __assert(entry.key.kind === 'consumer' && entry.key.usage === 0xE2,
-      `stored: ${JSON.stringify(entry.key)}`);
+    const stored = JSON.parse(localStorage.getItem('esp32remote.pages'));
+    const entry = stored.flatMap((p) => p.rows.flatMap((r) => r.keys))
+      .find((k) => k.label === 'Held mute');
+    __assert(entry.action.kind === 'key' && entry.action.page === 12 && entry.action.usage === 0xE2,
+      `stored: ${JSON.stringify(entry.action)}`);
   },
 });
 

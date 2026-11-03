@@ -1,25 +1,23 @@
-// Macro page: the stored macros, the editor and the runner.
+// Pages: the stored pages, the editor and the runner.
 //
-// Macros live in this browser, under localStorage — not on the device. They
-// started in the device's settings blob, which capped them at 1023 bytes
-// shared with every other setting and would have been wiped by a partition
-// change; a browser has megabytes and survives that. The cost is that they are
-// per-browser: a second phone does not see them, and clearing site data takes
-// them with it. The page says so rather than letting it be discovered.
+// A page is rows of items; an item is a key or a spacer; a key spans columns.
+// The same page can be opened here, in the Keys slot, or in the editor, and it
+// is drawn by one renderer — layout.js — so a key looks like itself everywhere.
 //
-// A list left on the device by an older build is adopted on first load, in
-// loadMacros() below.
+// Pages live in this browser, under localStorage. The old deck, its page list
+// and imported layouts are converted into pages by pages.js at boot; this view
+// only ever reads and writes `pages`.
 //
 // The view is mounted and unmounted by router.js: refs and listeners belong to
 // init(), and destroy() has to stop the socket, the heartbeat and any run.
 
-
 import { HID_KEYS, appSettings, saveSettingsToDevice, token } from './common.js';
+import { COLOURS, CONSUMER_CHOICES, KEY_CHOICES, keyName } from './deck.js';
 import {
-  COLOURS, CONSUMER_CHOICES, DEFAULT_PAGE, KEY_CHOICES, PAGE_KEY,
-  keyName, readPages, readStore, sanitizeButtons, sanitizeKey, writePages, writeStore,
-} from './deck.js';
-import { describeMacroStep, macroText, parseMacro, refreshMacroText, runMacro } from './macro.js';
+  describeMacroStep, macroText, parseMacro, refreshMacroText, runMacro, stepsFromBlocks,
+} from './macro.js';
+import { renderPage } from './layout.js';
+import * as Pages from './pages.js';
 
 export const MacrosView = (() => {
 
@@ -41,6 +39,10 @@ let runCountEl = null;
 let runStepEl = null;
 let runFill = null;
 let runStopEl = null;
+let importTextEl = null;
+let importNoteEl = null;
+let importFileEl = null;
+let editorFrame = null;
 let heartbeatTimer = null;
 let mountGen = 0;              // invalidates an init that is still awaiting
 
@@ -57,9 +59,9 @@ function el(tag, cls, text) {
 }
 
 // ---------------------------------------------------------------- transport
-// The same shape as pad.js, and deliberately its own: the two pages are
-// separate documents and this one only needs the report path. The globals keep
-// pad.js's names so both pages can be driven the same way from a test.
+// The same shape as pad.js, and deliberately its own: the two views only need
+// the report path. The globals keep pad.js's names so both can be driven the
+// same way from a test.
 let ws = null;
 let wsReady = false;
 let reconnectTimer = null;
@@ -93,170 +95,176 @@ function send(bytes) {
   if (wsReady && ws && ws.readyState === 1) ws.send(bytes);
 }
 
-// Same heartbeat as the control page: the device releases everything held when
-// it stops hearing from a browser. Both this timer and the pagehide listener
-// are owned by init() and stopped by destroy().
 function onPageHide() {
   releaseAllKeys();
   send(new Uint8Array([0x05]));
 }
 
 // ---------------------------------------------------------------- model
-let macros = [];
-let confirmDelete = null;      // index waiting for a second tap on Delete
+let pages = [];
+let activeId = '';
+let confirmDelete = null;      // "pageId:row:key" waiting for a second tap
+let pendingPageDelete = null;  // page id waiting for a second tap
 
-function sanitizeMacros(list) {
-  return sanitizeButtons(list);
+const activePage = () => Pages.pageById(pages, activeId) || pages[0] || null;
+
+function saveError(err) {
+  showSaveNote(`Not saved: ${err}.`, true);
 }
 
-async function loadMacros() {
-  const stored = readStore();
-  if (stored !== undefined) {
-    const s = sanitizeMacros(stored);
-    // Decks stored before this build hold only the text; parse it once, and
-    // leave the text alone when it does not parse so the run still refuses it.
-    macros = s.kept.map((m) => {
-      if (m.blocks) return m;
-      const parsed = parseMacro(m.steps);
-      return parsed.errors.length ? m : { ...m, blocks: parsed.steps };
-    });
-    if (s.dropped) {
-      showSaveNote(`${s.dropped} stored entr${s.dropped === 1 ? 'y was' : 'ies were'} not ` +
-                   'readable as a macro and have been left out.', true);
-    }
-    return;
-  }
+// The old device list is the only place a browser that has never been visited
+// by this build can still have macros. Adopt it once, then take it off the
+// device so there is one copy.
+async function adoptDeviceMacros() {
+  const legacy = Array.isArray(appSettings.macros) ? appSettings.macros : [];
+  if (!legacy.length) return false;
+  const converted = Pages.pagesFromLegacyMacros(legacy);
+  if (!converted.pages.length) return false;
+  const err = Pages.writePages(converted.pages);
+  if (err) { saveError(err); return false; }
 
-  // Nothing in this browser. Macros used to live in the device's settings blob,
-  // so adopt anything there and move it off the device — otherwise a list that
-  // was there yesterday would simply look lost.
-  const legacy = sanitizeMacros(appSettings.macros).kept;
-  macros = legacy;
-  if (!legacy.length) return;
-
-  const err = writeStore(legacy);
-  if (err) {
-    // Leave the device copy in place: it is still the only durable one.
-    showSaveNote(`Not saved: ${err}.`, true);
-    return;
-  }
-
-  const n = `${legacy.length} macro${legacy.length === 1 ? '' : 's'}`;
   delete appSettings.macros;
   try {
     await saveSettingsToDevice();
-    showSaveNote(`Moved ${n} from the device into this browser.`);
+    showSaveNote(`Moved ${legacy.length} button${legacy.length === 1 ? '' : 's'} ` +
+                 'from the device into this browser.');
   } catch (_) {
-    // The browser copy is what matters now; the device's is stale but harmless.
-    showSaveNote(`Moved ${n} into this browser. The device could not be reached to ` +
-                 'remove its old copy.', true);
+    showSaveNote(`Moved ${legacy.length} button${legacy.length === 1 ? '' : 's'} into this browser. ` +
+                 'The device could not be reached to remove its old copy.', true);
+  }
+  pages = converted.pages;
+  activeId = converted.pages[0].id;
+  Pages.writeActive(activeId);
+  return true;
+}
+
+async function loadPages() {
+  pages = Pages.readPages();
+  // The migration could not see the device's old list (it runs before settings
+  // load), so a browser whose pages are all empty still adopts it here.
+  const allEmpty = pages.every((p) => !p.rows.some((r) => r.keys.length));
+  if ((!pages.length || allEmpty) && Array.isArray(appSettings.macros)
+      && appSettings.macros.length && await adoptDeviceMacros()) return;
+  if (!pages.length) {
+    const page = Pages.newPage('Main', new Set(), new Set());
+    pages = [page];
+    Pages.writePages(pages);
+  }
+  activeId = Pages.readActive();
+  if (!Pages.pageById(pages, activeId)) {
+    activeId = pages[0].id;
+    Pages.writeActive(activeId);
   }
 }
 
-function macroTitle(m, i) {
-  return m.name || (m.steps || '').slice(0, 32) || `macro ${i + 1}`;
-}
-
-// The macros as a save would store them: what is saved, plus the editor's
-// entry while it is open.
-function pendingMacros() {
-  if (!editorOpen) return macros;
-  const next = macros.slice();
-  const entry = {
-    name: nameEl.value.trim(),
-    steps: stepsEl.value,
-    colour: editColour,
-    page: editPage,
-    hold: editHold,
-  };
-  if (editIndex >= 0) next[editIndex] = entry;
-  else next.push(entry);
-  return next;
+// The pages as a save would store them: what is saved, plus the editor's entry
+// while it is open. Only the meter needs this.
+function pendingPages() {
+  return pages;
 }
 
 function byteLength(o) {
-  // The device measures bytes of the request body, and JSON escapes non-ASCII,
-  // so length in characters is not the same number.
   return new TextEncoder().encode(JSON.stringify(o)).length;
 }
 
 function showSaveNote(text, warn) {
+  if (!saveNoteEl) return;
   saveNoteEl.className = 'note' + (warn ? ' warn' : '');
   saveNoteEl.textContent = text || '';
 }
 
 function updateMeter() {
-  const list = pendingMacros();
-  const bytes = byteLength(list);
+  if (!meterEl) return;
+  const n = pages.reduce((sum, p) => sum + p.rows.reduce((s, r) => s + r.keys.filter((it) => !it.spacer).length, 0), 0);
   meterEl.className = 'note';
-  // The view already says where macros live, a paragraph above the list. This
-  // line is the count, not a second copy of that paragraph.
-  meterEl.textContent =
-    `${list.length} button${list.length === 1 ? '' : 's'} · ${bytes} bytes`;
+  meterEl.textContent = `${n} button${n === 1 ? '' : 's'} · ${byteLength(pendingPages())} bytes`;
 }
 
 // Writes to this browser only. It claims to have saved once the write has
 // succeeded and not before: a list that looks stored but is not is worse than
 // a refusal.
 function store(next) {
-  const err = writeStore(next);
-  if (err) {
-    showSaveNote(`Not saved: ${err}.`, true);
-    updateMeter();
-    return false;
-  }
-
-  macros = next.slice();
+  const err = Pages.writePages(next);
+  if (err) { saveError(err); updateMeter(); return false; }
+  pages = next.slice();
   showSaveNote('saved in this browser');
   render();
   return true;
 }
 
 // ---------------------------------------------------------------- list
-function stepLabel(parsed) {
-  const n = parsed.steps.length;
-  let s = `${n} step${n === 1 ? '' : 's'}`;
-  if (parsed.errors.length) s += ` · ${parsed.errors.length} error${parsed.errors.length === 1 ? '' : 's'}`;
-  if (parsed.warnings.length) s += ` · ${parsed.warnings.length} untypable`;
-  return s;
+function actionOf(it) {
+  return (it && it.action) || { kind: 'key', page: 7, usage: 0 };
+}
+
+function sourceOf(it) {
+  const a = actionOf(it);
+  if (a.kind === 'key') return `${keyName(a)} · held`;
+  if (a.kind === 'modifier') {
+    const hit = MODIFIERS.find(([code]) => code === a.code);
+    return `modifier · ${hit ? hit[1] : a.code}`;
+  }
+  if (a.kind === 'page') {
+    const to = Pages.pageById(pages, a.to);
+    return `→ ${to ? to.name : a.to}`;
+  }
+  const blocks = Array.isArray(a.blocks) ? a.blocks : [];
+  return macroText(blocks) || a.text || '(empty)';
+}
+
+function parseSequence(it) {
+  const a = actionOf(it);
+  if (Array.isArray(a.blocks) && a.blocks.length) return { steps: a.blocks, errors: [], warnings: [] };
+  if (a.text) return parseMacro(a.text);
+  return { steps: [], errors: [], warnings: [] };
 }
 
 function actionButton(text, fn, cls) {
   const b = el('button', cls, text);
+  b.type = 'button';
   b.addEventListener('click', fn);
   return b;
 }
 
-// The stored list plus anything a button refers to, so a restored backup with a
-// page the list has never seen still shows its buttons somewhere.
-function syncPages() {
-  for (const m of macros) {
-    if (!deckPages.includes(m.page)) deckPages.push(m.page);
-  }
-  if (!deckPages.length) deckPages = [DEFAULT_PAGE];
-  if (!deckPages.includes(activePage)) activePage = deckPages[0];
+function tileTitle(it, index) {
+  return it.label || sourceOf(it) || `button ${index + 1}`;
 }
 
+// ---------------------------------------------------------------- page strip
 function nextPageName() {
+  const taken = new Set(pages.map((p) => p.name.toLowerCase()));
   for (let n = 2; ; n++) {
     const name = `Page ${n}`;
-    if (!deckPages.includes(name)) return name;
+    if (!taken.has(name.toLowerCase())) return name;
   }
+}
+
+function addPage() {
+  const name = nextPageName();
+  const page = Pages.newPage(name, new Set(pages.map((p) => p.id)), new Set(pages.map((p) => p.name.toLowerCase())));
+  const next = pages.concat(page);
+  if (!store(next)) return;
+  activeId = page.id;
+  Pages.writeActive(activeId);
+  confirmDelete = null;
+  pendingPageDelete = null;
+  render();
 }
 
 function renderPages() {
   const strip = document.getElementById('deckPages');
   if (!strip) return;
   strip.textContent = '';
-  for (const name of deckPages) {
-    const b = el('button', 'page' + (name === activePage ? ' on' : ''), name);
+  for (const p of pages) {
+    const b = el('button', 'page' + (p.id === activeId ? ' on' : ''), p.name);
     b.type = 'button';
     b.setAttribute('role', 'tab');
-    b.setAttribute('aria-selected', name === activePage ? 'true' : 'false');
+    b.setAttribute('aria-selected', p.id === activeId ? 'true' : 'false');
     b.addEventListener('click', () => {
-      activePage = name;
+      activeId = p.id;
       confirmDelete = null;
-      writePages(deckPages, activePage);
+      pendingPageDelete = null;
+      Pages.writeActive(activeId);
       render();
     });
     strip.appendChild(b);
@@ -266,236 +274,274 @@ function renderPages() {
   add.type = 'button';
   add.title = 'Add a page';
   add.setAttribute('aria-label', 'Add a page');
-  add.addEventListener('click', () => {
-    const name = nextPageName();
-    deckPages.push(name);
-    activePage = name;
-    writePages(deckPages, activePage);
-    render();
-  });
+  add.addEventListener('click', addPage);
   strip.appendChild(add);
 }
 
-// Renaming and deleting pages live in edit mode, next to the grid they change.
-// Deleting moves the page's buttons to a surviving page rather than destroying
-// them, so there is nothing to confirm.
 function renderPageTools() {
   const tools = document.getElementById('deckPageTools');
   if (!tools) return;
   tools.hidden = !editMode;
   if (!editMode) { tools.textContent = ''; return; }
   tools.textContent = '';
+  const p = activePage();
+  if (!p) return;
 
   const input = el('input');
   input.type = 'text';
-  input.value = activePage;
-  input.maxLength = 20;
+  input.value = p.name;
+  input.maxLength = 24;
   input.setAttribute('aria-label', 'Page name');
   input.spellcheck = false;
 
-  const apply = () => renamePage(input.value);
+  const apply = () => renamePage(p.id, input.value);
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') apply(); });
 
-  const rename = el('button', '', 'Rename');
-  rename.type = 'button';
-  rename.addEventListener('click', apply);
-
-  const del = el('button', 'danger', 'Delete page');
-  del.type = 'button';
-  del.disabled = deckPages.length < 2;
-  del.title = del.disabled
-    ? 'The deck always has at least one page'
-    : `Move this page's buttons to another page and remove it`;
-  del.addEventListener('click', deletePage);
+  const rename = actionButton('Rename', apply);
+  const del = actionButton(pendingPageDelete === p.id ? 'Delete page?' : 'Delete page',
+                           () => deletePage(p.id), 'danger');
+  del.disabled = pages.length < 2;
+  del.title = del.disabled ? 'A deck needs at least one page'
+    : 'Delete this page and the keys on it';
 
   tools.append(input, rename, del);
 }
 
-function renamePage(raw) {
-  const next = String(raw || '').trim().slice(0, 20);
-  if (!next || next === activePage) return;
-  if (deckPages.includes(next)) {
+function renamePage(id, raw) {
+  const p = Pages.pageById(pages, id);
+  if (!p) return;
+  const next = String(raw || '').trim().slice(0, 24);
+  if (!next || next === p.name) return;
+  if (pages.some((x) => x.id !== id && x.name.toLowerCase() === next.toLowerCase())) {
     showSaveNote('Not renamed: there is already a page with that name.', true);
     return;
   }
-  const at = deckPages.indexOf(activePage);
-  const was = activePage;
-  deckPages[at] = next;
-  activePage = next;
-  for (const m of macros) if (m.page === was) m.page = next;
-  writePages(deckPages, activePage);
-  store(macros);
+  p.name = next;
+  store(pages);
+}
+
+// Deleting a page that a key jumps to would leave that key doing nothing on the
+// device, discovered in the dark. Refuse, and name the keys.
+function deletePage(id) {
+  const p = Pages.pageById(pages, id);
+  if (!p) return;
+  if (pages.length < 2) { showSaveNote('A deck needs at least one page.', true); return; }
+
+  // Refuse before asking for confirmation: a second tap cannot fix a jump that
+  // would point at nothing, so there is nothing to confirm.
+  const used = Pages.referrers(pages, id);
+  if (used.length) {
+    pendingPageDelete = null;
+    showSaveNote(`“${p.name}” cannot be deleted: ${used.length} key${used.length === 1 ? '' : 's'} ` +
+      `jump${used.length === 1 ? 's' : ''} here — ${used.slice(0, 3).join(', ')}` +
+      `${used.length > 3 ? ` and ${used.length - 3} more` : ''}. Point those keys somewhere else first.`, true);
+    render();
+    return;
+  }
+
+  if (pendingPageDelete !== id) {
+    pendingPageDelete = id;
+    showSaveNote(`Tap Delete page again to remove “${p.name}” and everything on it.`, true);
+    render();
+    return;
+  }
+
+  const at = pages.findIndex((x) => x.id === id);
+  const fallback = pages[at === 0 ? 1 : 0];
+  const next = pages.filter((x) => x.id !== id);
+  pendingPageDelete = null;
+  if (!store(next)) return;
+  activeId = fallback.id;
+  Pages.writeActive(activeId);
   render();
 }
 
-function deletePage() {
-  if (deckPages.length < 2) return;
-  const at = deckPages.indexOf(activePage);
-  const fallback = deckPages[at === 0 ? 1 : 0];
-  const was = activePage;
-  for (const m of macros) if (m.page === was) m.page = fallback;
-  deckPages.splice(at, 1);
-  activePage = fallback;
-  writePages(deckPages, activePage);
-  store(macros);
-  render();
-}
-
-// A deck button: the whole tile is the target, so a thumb does not have to find
-// a small "run". Editing is a mode rather than a long press, because a long
-// press cannot be discovered and cannot be done with a keyboard.
-// What the host is told while a held-key button is down. Reports are state,
-// not events: one on press, one clearing it on release, and the host supplies
-// the repeat.
+// ---------------------------------------------------------------- a key tile
+// The whole tile is the target, so a thumb does not have to find a small "run".
+// Editing is a mode rather than a long press, because a long press cannot be
+// discovered and cannot be done with a keyboard.
 const heldCodes = new Set();
 let heldConsumer = 0;
+const latched = new Set();
+
+const MODIFIERS = [
+  ['ControlLeft', 'Ctrl'], ['ShiftLeft', 'Shift'], ['AltLeft', 'Alt'], ['MetaLeft', 'Cmd'],
+  ['ControlRight', 'Right Ctrl'], ['ShiftRight', 'Right Shift'], ['AltRight', 'Right Alt'], ['MetaRight', 'Right Cmd'],
+];
+const MOD_BIT = {
+  ControlLeft: 0x01, ShiftLeft: 0x02, AltLeft: 0x04, MetaLeft: 0x08,
+  ControlRight: 0x10, ShiftRight: 0x20, AltRight: 0x40, MetaRight: 0x80,
+};
+
+function modMask() {
+  let m = 0;
+  for (const code of latched) m |= MOD_BIT[code] || 0;
+  return m;
+}
 
 function sendHeldKeys() {
   const report = new Uint8Array(8);
   report[0] = 0x02;
+  report[1] = modMask();
   [...heldCodes].slice(0, 6).forEach((usage, i) => { report[2 + i] = usage; });
   send(report);
-  // The bar is not shown for a held key: there is nothing to run or to stop,
-  // and a progress bar under a finger that is already doing the work is noise.
 }
 
 function sendHeldConsumer() {
   send(new Uint8Array([0x03, heldConsumer & 0xFF, (heldConsumer >> 8) & 0xFF]));
 }
 
-function pressKey(k) {
-  if (!wsReady) {
-    runBarRefused('Not connected', 'Reload this page; the deck needs the socket.');
-    return false;
-  }
-  if (k.kind === 'consumer') {
-    heldConsumer = k.usage;
+function connectRefused() {
+  runBarRefused('Not connected', 'Reload this page; the deck needs the socket.');
+}
+
+function pressKey(action) {
+  if (!wsReady) { connectRefused(); return false; }
+  const usage = Number(action.usage) || HID_KEYS[action.code];
+  if (action.page === 12 || action.kind === 'consumer') {
+    heldConsumer = usage;
     sendHeldConsumer();
   } else {
-    heldCodes.add(HID_KEYS[k.code]);
+    if (!usage) return false;
+    heldCodes.add(usage);
     sendHeldKeys();
   }
   return true;
 }
 
-function releaseKey(k) {
-  if (k.kind === 'consumer') {
-    if (heldConsumer !== k.usage) return;
+function releaseKey(action) {
+  const usage = Number(action.usage) || HID_KEYS[action.code];
+  if (action.page === 12 || action.kind === 'consumer') {
+    if (heldConsumer !== usage) return;
     heldConsumer = 0;
     sendHeldConsumer();
   } else {
-    if (!heldCodes.delete(HID_KEYS[k.code])) return;
+    if (!heldCodes.delete(usage)) return;
     sendHeldKeys();
   }
 }
 
-// A view that unmounts mid-hold must not leave a key down on the host.
+function toggleModifier(code, cell) {
+  if (!wsReady) { connectRefused(); return; }
+  if (latched.has(code)) latched.delete(code);
+  else latched.add(code);
+  cell.classList.toggle('latched', latched.has(code));
+  sendHeldKeys();
+}
+
 function releaseAllKeys() {
-  if (!heldCodes.size && !heldConsumer) return;
+  if (!heldCodes.size && !heldConsumer && !latched.size) return;
   heldCodes.clear();
   heldConsumer = 0;
+  latched.clear();
   sendHeldKeys();
   sendHeldConsumer();
 }
 
-function deckTile(m, i) {
-  const parsed = parseMacro(m.steps);
-  const tile = el('div', 'macro');
-  tile.dataset.index = String(i);
-  if (m.colour) tile.classList.add('c-' + m.colour);
+function decorateTile(tile, it, info) {
+  const a = actionOf(it);
+  tile.classList.add('macro');
+  if (info.row !== undefined) {
+    tile.dataset.row = String(info.row);
+    tile.dataset.key = String(info.key);
+    tile.dataset.id = `${activeId}:${info.row}:${info.key}`;
+  }
   if (editMode) tile.classList.add('editing');
 
-  const run = el('button', 'run', m.key ? 'Hold' : 'Run');
-  run.title = editMode ? `Edit ${macroTitle(m, i)}` : `Run ${macroTitle(m, i)}`;
-  run.disabled = running && !editMode;
+  const title = tileTitle(it, info.key || 0);
+  const run = el('button', 'run', a.kind === 'key' ? 'Hold' : 'Run');
+  run.type = 'button';
+  run.title = editMode ? `Edit ${title}` : (a.kind === 'key' ? `Hold ${title}` : `Run ${title}`);
+  run.disabled = running && !editMode && a.kind === 'sequence';
 
-  if (m.key) {
+  if (a.kind === 'key' && !editMode) {
     tile.classList.add('hold', 'keybutton');
-    if (!editMode) {
-      const down = (e) => {
-        e.preventDefault();
-        // Take the pointer, so a finger that slides off still gets its release
-        // here rather than leaving the key down.
-        try { run.setPointerCapture(e.pointerId); } catch (_) {}
-        pressKey(m.key);
-      };
-      const up = () => releaseKey(m.key);
-      run.addEventListener('pointerdown', down);
-      for (const t of ['pointerup', 'pointercancel', 'lostpointercapture']) {
-        run.addEventListener(t, up);
-      }
-    } else {
-      run.addEventListener('click', () => openEditor(i));
-    }
-  } else if (m.hold && !editMode) {
-    // Hold to run, release to stop. The macro carries its own {REPEAT} when it
-    // is meant to loop, so there is no second loop here to get out of step.
+    const down = (e) => {
+      e.preventDefault();
+      try { run.setPointerCapture(e.pointerId); } catch (_) {}
+      pressKey(a);
+    };
+    const up = () => releaseKey(a);
+    run.addEventListener('pointerdown', down);
+    for (const t of ['pointerup', 'pointercancel', 'lostpointercapture']) run.addEventListener(t, up);
+  } else if (a.kind === 'modifier' && !editMode) {
     tile.classList.add('hold');
-    const start = (e) => { e.preventDefault(); if (!running) runMacroAt(i); };
+    run.addEventListener('click', () => toggleModifier(a.code, tile));
+  } else if (a.kind === 'page' && !editMode) {
+    run.addEventListener('click', () => {
+      if (Pages.pageById(pages, a.to)) {
+        activeId = a.to;
+        Pages.writeActive(activeId);
+        render();
+      } else if (['abc', 'sym', 'fn', 'kp', 'media'].includes(a.to)) {
+        location.hash = '#/keys';
+        setTimeout(() => window.dispatchEvent(new CustomEvent('keebling:page', { detail: a.to })), 80);
+      } else {
+        runBarRefused(title, `Not run: there is no page “${a.to}”.`);
+      }
+    });
+  } else if (a.kind === 'sequence' && it.hold && !editMode) {
+    tile.classList.add('hold');
+    const start = (e) => { e.preventDefault(); if (!running) runSequenceAt(info); };
     const stop = () => { if (running) onRunStop(); };
     run.addEventListener('pointerdown', start);
-    for (const t of ['pointerup', 'pointerleave', 'pointercancel']) {
-      run.addEventListener(t, stop);
-    }
-  } else {
+    for (const t of ['pointerup', 'pointerleave', 'pointercancel']) run.addEventListener(t, stop);
+  } else if (!editMode) {
     run.addEventListener('click', () => {
-      if (editMode) openEditor(i);
-      else runMacroAt(i);
+      if (a.kind === 'sequence') runSequenceAt(info);
     });
   }
 
   tile.appendChild(run);
-  tile.appendChild(el('span', 'name', macroTitle(m, i)));
-  tile.appendChild(el('span', 'src', m.key ? `${keyName(m.key)} · held`
-    : (m.steps || (m.blocks ? macroText(m.blocks) : '') || '(empty)')));
-  if (!m.key && parsed.errors.length) {
-    tile.appendChild(el('div', 'bad',
-      parsed.errors.map((e) => `${e.token}: ${e.message}`).join(' · ')));
+  tile.appendChild(el('span', 'name', title));
+  tile.appendChild(el('span', 'src', sourceOf(it)));
+
+  if (a.kind === 'sequence') {
+    const parsed = parseSequence(it);
+    if (parsed.errors.length) {
+      tile.appendChild(el('div', 'bad', parsed.errors.map((e) => `${e.token}: ${e.message}`).join(' · ')));
+    }
   }
 
-  // Deleting is two taps rather than a confirm() dialog: one of them lands
-  // under a thumb on a phone, and the deck is small enough to keep this in
-  // place.
   const acts = el('div', 'acts');
-  if (confirmDelete === i) {
+  const id = `${activeId}:${info.row}:${info.key}`;
+  if (confirmDelete === id) {
     acts.append(
       actionButton('Cancel', () => { confirmDelete = null; render(); }),
-      actionButton('Delete?', () => deleteMacro(i), 'danger'),
+      actionButton('Delete?', () => deleteKey(info), 'danger'),
     );
   } else {
     acts.append(
-      actionButton('Edit', () => openEditor(i)),
-      actionButton('Delete', () => { confirmDelete = i; render(); }),
+      actionButton('Edit', () => openEditor(info)),
+      actionButton('Delete', () => { confirmDelete = id; render(); }),
     );
   }
-  if (m.hold || m.key) tile.appendChild(el('span', 'holdtag', 'HOLD'));
+  if (a.kind === 'key' || it.hold) tile.appendChild(el('span', 'holdtag', 'HOLD'));
   tile.appendChild(acts);
-  // In edit mode the overlay is hidden, so the tile itself opens the editor -
-  // the same thing the overlay does when it is visible.
+
   if (editMode) {
     tile.addEventListener('click', (e) => {
       if (e.target.closest && e.target.closest('.acts')) return;
-      openEditor(i);
+      openEditor(info);
     });
   }
-  return tile;
 }
 
 function render() {
-  syncPages();
+  if (!pages.length) return;
+  if (!Pages.pageById(pages, activeId)) activeId = pages[0].id;
   renderPages();
+  if (!listEl) return;
+  const p = activePage();
   listEl.textContent = '';
-  listEl.classList.add('deck');
-  listEl.classList.toggle('editing', editMode);
-  const here = macros
-    .map((m, i) => ({ m, i }))
-    .filter(({ m }) => m.page === activePage);
-  if (!here.length) {
+  listEl.className = 'pagegrid' + (editMode ? ' editing' : '');
+  if (!p) return;
+  renderPage(listEl, p, { decorate: decorateTile });
+  const count = p.rows.reduce((s, r) => s + r.keys.length, 0);
+  if (!count) {
     listEl.appendChild(el('p', 'note', editMode
       ? 'Nothing on this page yet.'
       : 'Nothing on this page yet — tap New button to add one.'));
-  } else {
-    here.forEach(({ m, i }) => listEl.appendChild(deckTile(m, i)));
   }
   const editBtn = document.getElementById('deckEdit');
   if (editBtn) {
@@ -505,38 +551,71 @@ function render() {
   updateMeter();
 }
 
+function deleteKey(info) {
+  confirmDelete = null;
+  const p = Pages.pageById(pages, info.pageId || activeId);
+  if (!p) return;
+  const row = p.rows[info.row];
+  if (!row) return;
+  row.keys.splice(info.key, 1);
+  store(pages);
+}
+
 // ---------------------------------------------------------------- editor
 let editMode = false;
 let editorOpen = false;
-let editIndex = -1;
+let editAt = null;             // { row, key } on the active page, or null
 let editColour = '';
 let editHold = false;
-let editKind = 'script';       // 'script' | 'key'
+let editKind = 'script';       // script | key | modifier | page
 let editKey = null;            // { kind, code|usage } when editKind is 'key'
-let editPage = DEFAULT_PAGE;
-let deckPages = [DEFAULT_PAGE];
-let activePage = DEFAULT_PAGE;
+let editModifier = 'ShiftLeft';
+let editTarget = '';
 
-function openEditor(index) {
+function itemAt(info) {
+  const p = activePage();
+  if (!p || !info) return null;
+  const row = p.rows[info.row];
+  return row ? row.keys[info.key] || null : null;
+}
+
+function openEditor(info) {
   editorOpen = true;
-  editIndex = index;
-  const m = index >= 0 ? macros[index] : { name: '', steps: '' };
-  nameEl.value = m.name;
-  editColour = COLOURS.includes(m.colour) ? m.colour : '';
-  editHold = !!m.hold;
-  editKind = m.key ? 'key' : 'script';
-  editKey = m.key ? { ...m.key } : { kind: 'key', code: 'ArrowUp' };
+  editAt = info || null;
+  const it = editAt ? itemAt(editAt) : null;
+  const a = actionOf(it);
+
+  nameEl.value = it ? (it.label || '') : '';
+  editColour = it && COLOURS.includes(it.colour) ? it.colour : '';
+  editHold = !!(it && it.hold);
+  editKind = !it ? 'script' : a.kind === 'key' ? 'key'
+    : a.kind === 'modifier' ? 'modifier'
+    : a.kind === 'page' ? 'page' : 'script';
+  editKey = a.kind === 'key'
+    ? (a.page === 12
+        ? { kind: 'consumer', usage: Number(a.usage) || 0x00CD }
+        : { kind: 'key', code: a.code || codeForUsage(a.usage) || 'ArrowUp' })
+    : { kind: 'key', code: 'ArrowUp' };
+  editModifier = a.kind === 'modifier' ? a.code : 'ShiftLeft';
+  editTarget = a.kind === 'page' ? a.to : (activePage() ? activePage().id : '');
   const holdBox = document.getElementById('editHold');
   if (holdBox) holdBox.checked = editHold;
-  editPage = index >= 0 ? (macros[index].page || DEFAULT_PAGE) : activePage;
+
   paintColourSwatches();
-  stepsEl.value = m.blocks ? macroText(m.blocks) : String(m.steps || '');
+  paintTargets();
+  stepsEl.value = a.kind === 'sequence'
+    ? (macroText(a.blocks || []) || a.text || '')
+    : '';
   paintKind();
-  editorTitleEl.textContent = index >= 0 ? 'Edit button' : 'New button';
+  editorTitleEl.textContent = editAt ? 'Edit button' : 'New button';
   editorEl.classList.add('show');
   showSaveNote('');
   updatePreview();
   editorEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+
+function codeForUsage(usage) {
+  return Object.keys(HID_KEYS).find((c) => HID_KEYS[c] === Number(usage)) || '';
 }
 
 // Builds the key picker once, then keeps the two views of it in step.
@@ -570,6 +649,20 @@ function buildKeyChoices() {
   });
 }
 
+function paintTargets() {
+  const pick = document.getElementById('editPageTarget');
+  if (!pick) return;
+  pick.textContent = '';
+  for (const p of pages) {
+    const o = document.createElement('option');
+    o.value = p.id;
+    o.textContent = p.name;
+    if (p.id === editTarget) o.selected = true;
+    pick.appendChild(o);
+  }
+  pick.onchange = () => { editTarget = pick.value; };
+}
+
 function paintKind() {
   buildKeyChoices();
   const seg = document.getElementById('editKind');
@@ -578,16 +671,17 @@ function paintKind() {
       b.classList.toggle('on', b.dataset.kind === editKind);
     }
   }
-  const keyField = document.getElementById('editKeyField');
-  const stepsField = document.getElementById('editStepsField');
-  const insert = document.getElementById('editInsert');
   const isKey = editKind === 'key';
-  if (keyField) keyField.hidden = !isKey;
-  if (stepsField) stepsField.hidden = isKey;
-  if (insert) insert.hidden = isKey;
-  // Holding a button is its own behaviour: the hold checkbox belongs to scripts.
-  const holdField = document.getElementById('editHoldField');
-  if (holdField) holdField.hidden = isKey;
+  const isScript = editKind === 'script';
+  const isMod = editKind === 'modifier';
+  const isPage = editKind === 'page';
+  const show = (id, yes) => { const e = document.getElementById(id); if (e) e.hidden = !yes; };
+  show('editKeyField', isKey);
+  show('editStepsField', isScript);
+  show('editInsert', isScript);
+  show('editHoldField', isScript);
+  show('editModifierField', isMod);
+  show('editPageField', isPage);
 
   const pick = document.getElementById('editKey');
   if (pick && editKey) {
@@ -595,6 +689,9 @@ function paintKind() {
       ? `consumer:${editKey.usage}`
       : `key:${editKey.code}`;
   }
+  const mod = document.getElementById('editModifier');
+  if (mod) mod.value = editModifier;
+  paintTargets();
 }
 
 function paintColourSwatches() {
@@ -607,43 +704,63 @@ function paintColourSwatches() {
 
 function closeEditor() {
   editorOpen = false;
-  editIndex = -1;
+  editAt = null;
   editorEl.classList.remove('show');
   updateMeter();
 }
 
 async function saveEditor() {
+  let action = null;
+  let parsed = { steps: [], errors: [] };
+
   if (editKind === 'key') {
-    if (!editKey) {
-      showSaveNote('Not saved: no key chosen.', true);
+    if (!editKey) { showSaveNote('Not saved: no key chosen.', true); return; }
+    action = editKey.kind === 'consumer'
+      ? { kind: 'key', page: 12, usage: Number(editKey.usage) }
+      : { kind: 'key', page: 7, usage: HID_KEYS[editKey.code] || 0, code: editKey.code };
+    if (!action.usage) { showSaveNote('Not saved: that key has no HID usage.', true); return; }
+  } else if (editKind === 'modifier') {
+    action = { kind: 'modifier', code: editModifier };
+  } else if (editKind === 'page') {
+    if (!editTarget) { showSaveNote('Not saved: no page chosen.', true); return; }
+    action = { kind: 'page', to: editTarget };
+  } else {
+    if (!stepsEl.value.trim()) { showSaveNote('Not saved: the macro has no steps.', true); return; }
+    parsed = parseMacro(stepsEl.value);
+    if (parsed.errors.length) {
+      showSaveNote(`Not saved: ${parsed.errors[0].token} — ${parsed.errors[0].message}.`, true);
       return;
     }
-  } else if (!stepsEl.value.trim()) {
-    showSaveNote('Not saved: the macro has no steps.', true);
-    return;
-  }
-  const parsed = editKind === 'key' ? { steps: [], errors: [] } : parseMacro(stepsEl.value);
-  if (parsed.errors.length) {
-    showSaveNote(`Not saved: ${parsed.errors[0].token} — ${parsed.errors[0].message}.`, true);
-    return;
+    action = { kind: 'sequence', blocks: parsed.steps };
   }
 
-  const next = macros.slice();
+  const p = activePage();
+  if (!p) return;
   const entry = {
-    name: nameEl.value.trim(),
-    steps: editKind === 'key' ? '' : stepsEl.value,
-    blocks: editKind === 'key' ? null : parsed.steps,
+    label: nameEl.value.trim(),
+    alt: '',
+    w: editAt ? (itemAt(editAt) && itemAt(editAt).w) || 1 : 1,
     colour: editColour,
-    page: editPage,
     // A held key is held by definition; the flag only means something to a
     // script, and a stale one would show a HOLD tag on the wrong button.
-    hold: editKind === 'key' ? false : editHold,
-    key: editKind === 'key' ? editKey : null,
+    hold: editKind === 'sequence' ? editHold : false,
+    action,
   };
-  if (editIndex >= 0) next[editIndex] = entry;
-  else next.push(entry);
 
-  if (await store(next)) closeEditor();
+  if (editAt) {
+    const row = p.rows[editAt.row];
+    if (row) row.keys[editAt.key] = entry;
+  } else {
+    const used = (row) => row.keys.reduce((n, it) => n + (it.spacer ? Number(it.spacer) : Number(it.w) || 1), 0);
+    let row = p.rows[p.rows.length - 1];
+    if (!row || used(row) + 1 > p.columns) {
+      row = { h: 50, gap: 4, align: 'stretch', keys: [] };
+      p.rows.push(row);
+    }
+    row.keys.push(entry);
+  }
+
+  if (store(pages)) closeEditor();
 }
 
 // Live parse of what is in the box, so a bad token is named before the run
@@ -651,14 +768,28 @@ async function saveEditor() {
 function updatePreview() {
   previewEl.textContent = '';
   if (editKind === 'key') {
-    const label = keyName(editKey);
+    const label = editKey.kind === 'consumer'
+      ? keyName({ kind: 'key', page: 12, usage: editKey.usage })
+      : keyName({ kind: 'key', page: 7, code: editKey.code });
     previewEl.appendChild(el('div', 'plan',
       `${label}: sent the moment it is pressed and cleared on release, so the host repeats it.`));
     updateMeter();
     return;
   }
-  const parsed = parseMacro(stepsEl.value);
+  if (editKind === 'modifier') {
+    previewEl.appendChild(el('div', 'plan',
+      'Tapping it latches this modifier for the next key, so a capital needs one finger.'));
+    updateMeter();
+    return;
+  }
+  if (editKind === 'page') {
+    const to = Pages.pageById(pages, editTarget);
+    previewEl.appendChild(el('div', 'plan', `Jumps to “${to ? to.name : 'a missing page'}”.`));
+    updateMeter();
+    return;
+  }
 
+  const parsed = parseMacro(stepsEl.value);
   for (const e of parsed.errors) {
     previewEl.appendChild(el('div', 'err', `${e.token} (character ${e.index + 1}): ${e.message}`));
   }
@@ -668,16 +799,9 @@ function updatePreview() {
   if (parsed.errors.length) {
     previewEl.appendChild(el('div', 'err', 'This macro will not run until the tokens above are fixed.'));
   }
-
   const lines = parsed.steps.map((s, i) => `${i + 1}. ${describeMacroStep(s)}`);
   if (lines.length) previewEl.appendChild(el('div', 'plan', lines.join('\n')));
-
   updateMeter();
-}
-
-async function deleteMacro(index) {
-  confirmDelete = null;
-  await store(macros.filter((_, i) => i !== index));
 }
 
 // Tokens on a chip row: typing braces on a phone keyboard is its own small
@@ -724,9 +848,6 @@ function paintRunBar() {
   runFill.style.width = Math.round(frac * 100) + '%';
 }
 
-// The run bar is fixed to the bottom of the screen: progress has to be visible
-// while a macro plays, and the way to interrupt it has to be reachable without
-// looking.
 function showRunBar() {
   runbar.classList.add('show');
 }
@@ -742,12 +863,13 @@ function runBarRefused(title, message) {
   runStopEl.classList.remove('danger');
 }
 
-async function runMacroAt(index) {
+async function runSequenceAt(info) {
   if (running) return;
   const gen = runGen;
-  const m = macros[index];
-  const title = macroTitle(m, index);
-  const parsed = m.blocks ? { steps: m.blocks, errors: [], warnings: [] } : parseMacro(m.steps);
+  const it = itemAt(info);
+  if (!it) return;
+  const title = tileTitle(it, info.key);
+  const parsed = parseSequence(it);
 
   // An unrecognised token is never skipped: the run is refused and the token
   // is named.
@@ -775,15 +897,15 @@ async function runMacroAt(index) {
   runbar.classList.remove('error');
   showRunBar();
   runStopEl.textContent = 'Stop';
-  runStopEl.classList.add('danger');       // the button interrupts, and reads as such
+  runStopEl.classList.add('danger');
   runNameEl.textContent = title;
   runCountEl.textContent = `0 / ${runTotal} steps`;
   runStepEl.textContent = describeMacroStep(parsed.steps[0]);
   paintRunBar();
-  render();                      // disables every Run button
+  // Disable the other Run buttons without replacing the tile that is being
+  // held: a re-render would detach the element the release listener is on.
+  if (listEl) for (const b of listEl.querySelectorAll('.run')) b.disabled = true;
 
-  // Two reports per character (press, release), so the gap sets half the rate
-  // — the same arithmetic as the Type panel.
   const cps = Number(appSettings.type_speed) || 20;
   const result = await runMacro(parsed.steps, {
     send,
@@ -802,8 +924,6 @@ async function runMacroAt(index) {
     },
   });
 
-  // The view was unmounted while the run was in flight; the detached DOM is
-  // no longer ours to paint, and the socket has already been closed.
   if (gen !== runGen) return;
 
   running = false;
@@ -823,18 +943,99 @@ async function runMacroAt(index) {
     runStepEl.textContent += ` · no key for: ${result.skipped.join(' ')} (skipped)`;
   }
   if (!wsReady) runStepEl.textContent += ' · connection lost during the run';
-  render();
+  if (listEl) for (const b of listEl.querySelectorAll('.run')) b.disabled = false;
 }
 
-// ---------------------------------------------------------------- wiring
 function onRunStop() {
-  if (running) runAbort = true;          // the runner notices at the next step
+  if (running) runAbort = true;
   else runbar.classList.remove('show', 'error');
 }
 
-// ---------------------------------------------------------------- lifecycle
-// The router calls init() after mounting the macros template and destroy()
-// before replacing it.
+// ---------------------------------------------------------------- import
+// Six states, each said in the note rather than only in the appearance of the
+// button: idle (the placeholder is the instruction), empty, unreadable,
+// refused, nothing new, imported.
+function setImportNote(text, warn) {
+  if (!importNoteEl) return;
+  importNoteEl.className = 'note' + (warn ? ' warn' : '');
+  importNoteEl.textContent = text || '';
+}
+
+function importPages(text) {
+  const raw = String(text || '').trim();
+  if (!raw) {
+    setImportNote('Nothing to import — paste a page file or choose one from this device.', true);
+    return false;
+  }
+  const parsed = Pages.parsePageFile(raw);
+  if (parsed.error) {
+    setImportNote(`Not imported: ${parsed.error}. Nothing changed.`, true);
+    return false;
+  }
+
+  const merged = Pages.mergePages(pages, parsed.pages);
+  const err = Pages.writePages(merged.pages);
+  if (err) {
+    setImportNote(`Not saved: ${err}. Nothing changed.`, true);
+    return false;
+  }
+
+  pages = merged.pages;
+  if (parsed.strip && parsed.strip.length) Pages.applyStrip(parsed.strip, merged.remap);
+  if (merged.added.length) {
+    activeId = merged.added[0].id;
+    Pages.writeActive(activeId);
+  }
+  const names = merged.added.map((p) => p.name);
+  const suffix = merged.remap.size ? ' Existing ids were kept; the imported pages were renamed.' : '';
+  setImportNote(`Imported ${merged.added.length} page${merged.added.length === 1 ? '' : 's'}: ` +
+    `${names.slice(0, 4).join(', ')}${names.length > 4 ? ` and ${names.length - 4} more` : ''}.${suffix}`);
+  render();
+  return true;
+}
+
+function wireImport() {
+  const go = document.getElementById('importGo');
+  if (go) {
+    go.addEventListener('click', () => {
+      const ok = importPages(importTextEl ? importTextEl.value : '');
+      if (ok && importTextEl) importTextEl.value = '';
+    });
+  }
+  const pick = document.getElementById('importPick');
+  if (pick && importFileEl) {
+    pick.addEventListener('click', () => importFileEl.click());
+  }
+  if (importFileEl) {
+    importFileEl.addEventListener('change', async () => {
+      const file = importFileEl.files && importFileEl.files[0];
+      importFileEl.value = '';
+      if (!file) return;
+      try {
+        importPages(await file.text());
+      } catch (_) {
+        setImportNote('That file could not be read.', true);
+      }
+    });
+  }
+}
+
+// The editor is the same document GitHub Pages serves, bundled from
+// site/editor. It runs in an iframe so its styles cannot leak into the app, and
+// posts the JSON it exports to this view rather than asking for a download.
+function wireEditor() {
+  if (editorFrame && !editorFrame.dataset.ready) {
+    editorFrame.dataset.ready = '1';
+    editorFrame.src = 'editor.html';
+  }
+}
+
+function onEditorMessage(e) {
+  if (!e.data || e.data.type !== 'keebling:import') return;
+  importPages(e.data.json);
+}
+
+// ---------------------------------------------------------------- wiring
 async function init() {
   const gen = ++mountGen;
   dot = document.getElementById('dot');
@@ -855,27 +1056,31 @@ async function init() {
   runStepEl = document.getElementById('runStep');
   runFill = document.getElementById('runFill');
   runStopEl = document.getElementById('runStop');
+  importTextEl = document.getElementById('importText');
+  importNoteEl = document.getElementById('importNote');
+  importFileEl = document.getElementById('importFile');
+  editorFrame = document.getElementById('editorFrame');
 
-  macros = [];
-  // The host layout may have changed since this script loaded.
   if (typeof refreshMacroText === 'function') refreshMacroText();
-  deckPages = readPages();
-  activePage = (() => {
-    try { return localStorage.getItem(PAGE_KEY) || DEFAULT_PAGE; } catch (_) { return DEFAULT_PAGE; }
-  })();
+  pages = [];
+  activeId = '';
   confirmDelete = null;
+  pendingPageDelete = null;
   editMode = false;
   editorOpen = false;
-  editIndex = -1;
+  editAt = null;
   running = false;
   runAbort = false;
   runGen++;
   runIndex = 0;
   runTotal = 1;
   runCharFrac = 0;
+  heldCodes.clear();
+  heldConsumer = 0;
+  latched.clear();
 
   buildChips();
-  document.getElementById('macroAdd').addEventListener('click', () => openEditor(-1));
+  document.getElementById('macroAdd').addEventListener('click', () => openEditor(null));
   const holdBox = document.getElementById('editHold');
   if (holdBox) holdBox.addEventListener('change', () => { editHold = holdBox.checked; });
   const kindRow = document.getElementById('editKind');
@@ -883,7 +1088,7 @@ async function init() {
     kindRow.addEventListener('click', (e) => {
       const b = e.target.closest ? e.target.closest('button[data-kind]') : null;
       if (!b) return;
-      editKind = b.dataset.kind === 'key' ? 'key' : 'script';
+      editKind = b.dataset.kind;
       paintKind();
       updatePreview();
     });
@@ -900,6 +1105,7 @@ async function init() {
   document.getElementById('deckEdit').addEventListener('click', () => {
     editMode = !editMode;
     confirmDelete = null;
+    pendingPageDelete = null;
     render();
   });
   saveEl.addEventListener('click', saveEditor);
@@ -908,13 +1114,28 @@ async function init() {
   nameEl.addEventListener('input', updateMeter);
   runStopEl.addEventListener('click', onRunStop);
 
+  const mod = document.getElementById('editModifier');
+  if (mod) {
+    mod.textContent = '';
+    for (const [code, label] of MODIFIERS) {
+      const o = document.createElement('option');
+      o.value = code;
+      o.textContent = label;
+      mod.appendChild(o);
+    }
+    mod.addEventListener('change', () => { editModifier = mod.value; });
+  }
+
+  wireImport();
+  wireEditor();
+  window.addEventListener('message', onEditorMessage);
   window.addEventListener('pagehide', onPageHide);
   window.addEventListener('beforeunload', onPageHide);
   heartbeatTimer = setInterval(() => send(new Uint8Array([0x04])), 1000);
 
   setStatus('loading settings…', 'warn');
-  await loadMacros();        // may migrate a list left on the device
-  if (gen !== mountGen) return;   // unmounted while the list was loading
+  await loadPages();
+  if (gen !== mountGen) return;
   render();
   connect();
 }
@@ -930,15 +1151,12 @@ function destroy() {
   clearTimeout(reconnectTimer);
   reconnectTimer = null;
 
-  // Release anything the device may still be holding before the socket goes:
-  // a held key from the deck included.
   heldCodes.clear();
   heldConsumer = 0;
+  latched.clear();
   send(new Uint8Array([0x05]));
 
   if (ws) {
-    // As in pad.js: a deliberate close must not arm a reconnect after the view
-    // has been replaced.
     ws.onopen = null;
     ws.onclose = null;
     ws.onerror = null;
@@ -948,10 +1166,13 @@ function destroy() {
   wsReady = false;
   reconnectAttempts = 0;
 
+  window.removeEventListener('message', onEditorMessage);
   window.removeEventListener('pagehide', onPageHide);
   window.removeEventListener('beforeunload', onPageHide);
-  macros = [];
+  pages = [];
   confirmDelete = null;
+  pendingPageDelete = null;
+  editorFrame = null;
 }
 
 // The tests drive the real pages from the browser console, so the socket state
