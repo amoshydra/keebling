@@ -591,7 +591,10 @@ static void pass_finish(void) {
 static void pass_advance(void) {
     if (!s_pass_active || s_attempting) return;
 
-    candidates_scan();
+    // The remembered network (or a network the user chose) is attempted before
+    // the survey: a scan costs seconds and is only useful once that one has
+    // failed. This is the fast path for the common case.
+    if (s_candidate_pos > 0) candidates_scan();
     if (s_candidate_pos < s_candidate_count) {
         const char *ssid = s_candidates[s_candidate_pos++];
         attempt_start(ssid);
@@ -634,11 +637,12 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *da
 
     case WIFI_EVENT_STA_DISCONNECTED: {
         wifi_event_sta_disconnected_t *e = data;
+        const bool had_link = s_state == WIFI_MGR_STA;
         // Logged only when we were actually associated. A network that has gone
         // away is retried every few seconds, and a warning per retry fills the
         // whole 4 KB log ring - which then hides everything else, including
         // whatever you opened the log to find.
-        if (s_state == WIFI_MGR_STA) {
+        if (had_link) {
             ESP_LOGW(TAG, "STA disconnected, reason %d", e->reason);
             s_state = WIFI_MGR_CONNECTING;
         }
@@ -652,7 +656,11 @@ static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *da
         }
         if (!s_pass_active) {
             if (s_disconnected_since_ms == 0) s_disconnected_since_ms = now_ms();
-            s_next_pass_ms = 0;   // a link we had has gone; start a pass now
+            // Only a link we actually had should start a new pass immediately.
+            // A mode switch during pass_finish also emits a disconnect, and
+            // resetting the backoff there made the device scan and retry in a
+            // tight loop while the SoftAP was up.
+            if (had_link) s_next_pass_ms = 0;
         }
         break;
     }
