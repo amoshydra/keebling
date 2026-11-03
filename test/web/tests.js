@@ -3881,6 +3881,34 @@ __webTests.push({
   },
 });
 
+__webTests.push({
+  page: 'macros',
+  name: 'the one store converts a deck page into a page of keys',
+  fn: async () => {
+    // The store is additive for now: it must produce pages without disturbing
+    // the deck that still reads its own key.
+    localStorage.removeItem('esp32remote.pages');
+    localStorage.setItem('esp32remote.deckPages', JSON.stringify(['Remote']));
+    localStorage.setItem('esp32remote.macros', JSON.stringify([
+      { name: 'Up', page: 'Remote', colour: 'blue', key: { kind: 'key', code: 'ArrowUp' } },
+      { name: 'Go', page: 'Remote', steps: '{ENTER}', blocks: [{ action: 'tap', keys: [] }] },
+    ]));
+
+    const list = Pages.migrate();
+    const page = list.find((p) => p.name === 'Remote');
+    __assert(page, `no page: ${JSON.stringify(list.map((p) => p.name))}`);
+    __assert(page.columns === 4, `columns: ${page.columns}`);
+    __assert(page.rows.length === 1, `rows: ${page.rows.length}`);
+    __assert(page.rows[0].keys.length === 2, `keys: ${page.rows[0].keys.length}`);
+    __assert(page.rows[0].keys[0].label === 'Up', `label: ${page.rows[0].keys[0].label}`);
+    __assert(page.rows[0].keys[0].colour === 'blue', 'the colour was lost');
+
+    // and the deck is untouched, because it has not been rewritten yet
+    __assert(JSON.parse(localStorage.getItem('esp32remote.macros')).length === 2,
+      'the migration dropped the deck it still has to read');
+  },
+});
+
 // ---------------------------------------------------------------- deck: held keys
 async function __addKeyButton(code, name) {
   document.getElementById('macroAdd').click();

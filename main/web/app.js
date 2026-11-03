@@ -4,6 +4,7 @@
 // the view the hash names. Nothing below needs calling.
 
 import * as common from './common.js';
+import { migrate as migratePages } from './pages.js';
 import * as deck from './deck.js';
 import * as macro from './macro.js';
 import { PadView } from './pad.js';
@@ -11,6 +12,11 @@ import { MacrosView } from './macros.js';
 import { SettingsView } from './settings.js';
 import { UiView } from './ui.js';
 import { Router } from './router.js';
+import * as pages from './pages.js';
+
+// One pass at boot: whatever used to live in the deck, the deck's page list or
+// the imported layouts becomes pages, and the old keys are removed.
+migratePages();
 
 // The test harness drives the page by name - PadView.report(), parseMacro(),
 // appSettings - the way it did when each file was a plain script and every
@@ -30,6 +36,9 @@ function expose(namespace, names) {
 
 expose(common, Object.keys(common));
 expose(deck, Object.keys(deck));
+// The store is reached by name rather than through the generic loop: its
+// namespace is small and the harness needs one stable handle.
+Object.defineProperty(window, 'Pages', { value: pages, configurable: true });
 expose(macro, Object.keys(macro));
 
 for (const [name, view] of Object.entries({ PadView, MacrosView, SettingsView, UiView, Router })) {
