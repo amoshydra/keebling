@@ -794,7 +794,17 @@ function renderInspector() {
   title.textContent = p.name;
 
   body.appendChild(formRow('Name', textField(p.name, (v) => { p.name = v; renderPages(); renderStrip(); })));
-  body.appendChild(formRow('Columns', stepper(p.columns, 1, 24, (v) => { p.columns = v; renderPage(); })));
+  const del = destructive('Delete page', () => deletePage(p.id));
+  del.style.marginTop = '2px';
+  body.appendChild(del);
+  // A column change that would break a row is impossible to reach: the floor is
+  // the widest row, and it says so. No dialog, no broken state to repair.
+  const widest = p.rows.reduce((n, r) => Math.max(n, usedCols(r)), 1);
+  const cols = stepper(p.columns, widest, 24, (v) => { p.columns = v; render(); });
+  body.appendChild(formRow('Columns', cols));
+  if (widest > 1) {
+    body.appendChild(hint(`Minimum ${widest} — the widest row needs that many.`));
+  }
   body.appendChild(divider());
   body.appendChild(stripEditor());
   body.appendChild(divider());
@@ -1251,6 +1261,41 @@ $('scriptDone').addEventListener('click', () => {
   $('scriptSheet').dataset.open = '0';
   render();
 });
+
+// Deleting a page that a key jumps to would leave that key doing nothing on the
+// device, discovered in the dark. Refuse, and name the keys.
+function referrers(id) {
+  const out = [];
+  for (const pg of deck.pages) {
+    for (const row of pg.rows) {
+      for (const it of row.keys) {
+        if (it.action && it.action.kind === 'page' && it.action.to === id) {
+          out.push(`${pg.name} · ${it.label || 'untitled'}`);
+        }
+      }
+    }
+  }
+  return out;
+}
+
+function deletePage(id) {
+  const p = deck.pages.find((x) => x.id === id);
+  if (!p) return;
+  const used = referrers(id);
+  if (used.length) {
+    alert(`“${p.name}” cannot be deleted: ${used.length} key${used.length === 1 ? '' : 's'} ` +
+          `jump${used.length === 1 ? 's' : ''} here — ${used.slice(0, 3).join(', ')}` +
+          `${used.length > 3 ? ` and ${used.length - 3} more` : ''}.\n\n` +
+          'Point those keys somewhere else first.');
+    return;
+  }
+  if (deck.pages.length === 1) {
+    alert('A deck needs at least one page.');
+    return;
+  }
+  if (!confirm(`Delete “${p.name}” and everything on it?`)) return;
+  forgetPage(id);
+}
 
 function forgetPage(id) {
   deck.pages = deck.pages.filter((p) => p.id !== id);

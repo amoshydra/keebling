@@ -3719,6 +3719,49 @@ __webTests.push({
 
 __webTests.push({
   page: 'keys-deck',
+  name: 'a layout from a newer build is refused, with the reason',
+  fn: async () => {
+    const plus = [...document.querySelectorAll('#kbPages button')].find((b) => b.textContent === '+');
+    plus.click();
+    await __sleep(60);
+    const box = document.querySelector('#kbLayout textarea');
+    const go = () => [...document.querySelectorAll('#kbLayout button')]
+      .find((b) => b.textContent === 'Import layout').click();
+
+    // version from the future
+    box.value = JSON.stringify({ app: 'keebling', kind: 'layout', version: 99,
+      pages: [{ id: 'x', name: 'X', columns: 4, rows: [{ h: 50, gap: 5, keys: [] }] }] });
+    go();
+    await __sleep(60);
+    let note = document.querySelector('#kbLayout .note').textContent;
+    __assert(note.includes('version 99'), `note: ${note}`);
+
+    // an action this build cannot run
+    box.value = JSON.stringify({ app: 'keebling', kind: 'layout', version: 1,
+      pages: [{ id: 'y', name: 'Y', columns: 4, rows: [{ h: 50, gap: 5,
+        keys: [{ label: 'z', w: 1, action: { kind: 'macro' } }] }] }] });
+    go();
+    await __sleep(60);
+    note = document.querySelector('#kbLayout .note').textContent;
+    __assert(note.includes('not a valid layout'), `note: ${note}`);
+
+    // a misspelled top-level field
+    box.value = JSON.stringify({ app: 'keebling', kind: 'layout', version: 1, pagess: [],
+      pages: [{ id: 'z', name: 'Z', columns: 4, rows: [{ h: 50, gap: 5, keys: [] }] }] });
+    go();
+    await __sleep(60);
+    note = document.querySelector('#kbLayout .note').textContent;
+    __assert(note.includes('pagess'), `note: ${note}`);
+
+    // nothing was stored by any of the three
+    const stored = JSON.parse(localStorage.getItem('esp32remote.layouts') || '[]');
+    __assert(!stored.some((p) => ['x', 'y', 'z'].includes(p.id)),
+      `a refused file was stored: ${JSON.stringify(stored.map((p) => p.id))}`);
+  },
+});
+
+__webTests.push({
+  page: 'keys-deck',
   name: 'an imported layout is drawn in the slot and joins the strip',
   fn: async () => {
     const plus = [...document.querySelectorAll('#kbPages button')].find((b) => b.textContent === '+');

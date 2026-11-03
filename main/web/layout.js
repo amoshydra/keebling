@@ -28,6 +28,11 @@ export function writeLayouts(list) {
 
 // The same acceptance rule the editor and the schema apply. Anything that
 // fails is refused as a whole rather than half-drawn.
+// A file from a newer build may carry an action this build cannot run. Refusing
+// it is the only honest answer: importing it would draw a key that does nothing.
+const ACTIONS = new Set(['key', 'modifier', 'page', 'sequence']);
+export const FORMAT_VERSION = 1;
+
 export function validPage(p) {
   if (!p || typeof p !== 'object') return false;
   if (typeof p.id !== 'string' || !/^[A-Za-z0-9_-]{1,32}$/.test(p.id)) return false;
@@ -38,6 +43,10 @@ export function validPage(p) {
     if (!r || !Array.isArray(r.keys)) return false;
     const total = r.keys.reduce((n, it) => n + (it && it.spacer ? Number(it.spacer) : Number(it.w) || 1), 0);
     if (total > cols) return false;      // a row wider than the page cannot be drawn
+    for (const it of r.keys) {
+      if (!it || it.spacer) continue;
+      if (!it.action || !ACTIONS.has(it.action.kind)) return false;
+    }
   }
   return true;
 }
@@ -51,6 +60,19 @@ export function parseLayoutFile(text) {
   }
   if (!data || data.app !== 'keebling' || data.kind !== 'layout') {
     return { error: 'not a keebling layout file' };
+  }
+
+  // Newer than us: a field or an action we would silently drop.
+  const version = Number(data.version) || 0;
+  if (version > FORMAT_VERSION) {
+    return { error: `this file is version ${version}; this build understands ${FORMAT_VERSION} — update Keebling first` };
+  }
+
+  // A misspelled field would import as an empty deck, which looks like our bug.
+  const allowed = ['app', 'kind', 'version', 'strip', 'pages'];
+  const unknown = Object.keys(data).filter((k) => !allowed.includes(k));
+  if (unknown.length) {
+    return { error: `unknown field${unknown.length === 1 ? '' : 's'} ${unknown.map((k) => `“${k}”`).join(', ')}` };
   }
   const pages = Array.isArray(data.pages) ? data.pages : [];
   if (!pages.length) return { error: 'the file has no pages' };
