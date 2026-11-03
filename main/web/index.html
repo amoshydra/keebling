@@ -340,13 +340,16 @@
         <span>Current</span>
         <div class="note" id="netState">unknown</div>
       </div>
+      <div class="field">
+        <span>Saved networks <small>(tried in this order)</small></span>
+        <div class="list wifilist" id="wifiSaved"></div>
+      </div>
       <div class="row">
         <button id="wifiScan">Scan networks</button>
-        <button id="wifiForget" class="danger">Forget saved network</button>
       </div>
       <div class="list" id="wifiList"></div>
       <div class="field">
-        <span>Join a network</span>
+        <span>Add a network</span>
         <input type="text" id="wifiSsid" placeholder="Network name (SSID)"
                autocomplete="off" spellcheck="false" autocapitalize="none">
       </div>
@@ -354,12 +357,14 @@
         <span>Password</span>
         <input type="password" id="wifiPass" placeholder="Password" autocomplete="off">
       </div>
-      <div class="row">
-        <button id="wifiSave" class="primary">Save &amp; connect</button>
+      <div class="field">
+        <label><input type="checkbox" id="wifiHidden"> Hidden network</label>
       </div>
-      <p class="note">The device restarts and joins this network. If it can't, its
-        own access point comes back so you can correct it. Holding BOOT for 10
-        seconds also clears the saved network.</p>
+      <div class="row">
+        <button id="wifiSave" class="primary">Add network</button>
+      </div>
+      <p class="note" id="wifiNote">Passwords are stored on the device.
+        Reordering is used the next time it connects.</p>
     </section>
 
     <section data-page="hid">

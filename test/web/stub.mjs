@@ -128,6 +128,26 @@ export function startStub(port = 0) {
     saved: [],          // every /settings body the stub received
     restarts: 0,
     forgets: 0,
+    // The stored networks, in fallback order. last is remembered separately
+    // from the order, exactly as on the device.
+    wifi: {
+      nets: [
+        { ssid: 'HomeNet-5G', pass: 'secret5', hidden: false },
+        { ssid: 'HomeNet', pass: 'secret2', hidden: false },
+        { ssid: 'Guest', pass: '', hidden: false },
+      ],
+      last: 'HomeNet',
+      active: 'HomeNet',
+      state: 'joined',
+      connecting: '',
+      ip: '192.168.1.42',
+      ap_ip: '',
+      clients: 0,
+    },
+    wifiSaves: [],
+    wifiForgets: [],
+    wifiOrders: [],
+    wifiConnects: [],
     uiFiles: new Map(), // name -> Buffer, the uploaded UI files
     uiResets: 0,        // /ui/reset calls, including reset-all
     screenImage: null,  // Buffer, the stored screen.img (null = nothing)
@@ -211,9 +231,14 @@ export function startStub(port = 0) {
       case '/scan':
         if (!needAuth()) return;
         return json({ networks: [
-          { ssid: 'HomeNet-5G', rssi: -42, secure: true },
-          { ssid: 'HomeNet', rssi: -51, secure: true },
-          { ssid: 'Guest', rssi: -73, secure: false },
+          { ssid: 'HomeNet-5G', rssi: -42, secure: true,
+            saved: device.wifi.nets.some((n) => n.ssid === 'HomeNet-5G') },
+          { ssid: 'HomeNet', rssi: -51, secure: true,
+            saved: device.wifi.nets.some((n) => n.ssid === 'HomeNet') },
+          { ssid: 'Neighbour', rssi: -66, secure: true,
+            saved: device.wifi.nets.some((n) => n.ssid === 'Neighbour') },
+          { ssid: 'Guest', rssi: -73, secure: false,
+            saved: device.wifi.nets.some((n) => n.ssid === 'Guest') },
         ] });
 
       case '/logs':
@@ -228,25 +253,118 @@ export function startStub(port = 0) {
         res.writeHead(200); res.end('restarting'); return;
 
       case '/forget':
+      case '/wifi/forget': {
         if (!needAuth()) return;
-        device.forgets++;
-        res.writeHead(200); res.end('forgotten'); return;
+        return readBody((b) => {
+          let body = {};
+          try { body = JSON.parse(b || '{}'); } catch (_) { /* all */ }
+          const all = body.all === true || !body.ssid;
+          if (all) {
+            device.wifi.nets = [];
+            device.wifi.last = '';
+            device.wifi.active = '';
+            device.wifi.state = 'access-point';
+            device.wifi.ap_ip = '192.168.4.1';
+          } else {
+            const at = device.wifi.nets.findIndex((n) => n.ssid === body.ssid);
+            if (at < 0) { res.writeHead(404); res.end('unknown network'); return; }
+            const [gone] = device.wifi.nets.splice(at, 1);
+            if (device.wifi.last === gone.ssid) {
+              device.wifi.last = device.wifi.nets[0] ? device.wifi.nets[0].ssid : '';
+            }
+            if (device.wifi.active === gone.ssid) {
+              device.wifi.active = device.wifi.nets[0] ? device.wifi.nets[0].ssid : '';
+              if (!device.wifi.active) {
+                device.wifi.state = 'access-point';
+                device.wifi.ap_ip = '192.168.4.1';
+              }
+            }
+            device.wifiForgets.push(gone.ssid);
+          }
+          device.forgets++;
+          res.writeHead(200); res.end('forgotten');
+        });
+      }
 
       case '/save':
+      case '/wifi/save': {
         if (!needAuth()) return;
-        res.writeHead(200); res.end('saved'); return;
+        return readBody((b) => {
+          let body = {};
+          try { body = JSON.parse(b || '{}'); } catch (_) { /* refused below */ }
+          if (!body.ssid) { res.writeHead(400); res.end('invalid ssid'); return; }
+          const row = {
+            ssid: String(body.ssid),
+            pass: String(body.pass || ''),
+            hidden: !!body.hidden,
+          };
+          const at = device.wifi.nets.findIndex((n) => n.ssid === row.ssid);
+          if (at >= 0) device.wifi.nets[at] = row;
+          else if (device.wifi.nets.length < 5) device.wifi.nets.push(row);
+          else { res.writeHead(400); res.end('too many networks'); return; }
+          device.wifiSaves.push(row);
+          res.writeHead(200); res.end('saved');
+        });
+      }
+
+      case '/wifi/order': {
+        if (!needAuth()) return;
+        return readBody((b) => {
+          let body = {};
+          try { body = JSON.parse(b || '{}'); } catch (_) { /* refused below */ }
+          const order = Array.isArray(body.order) ? body.order : null;
+          const current = device.wifi.nets.map((n) => n.ssid);
+          const valid = order && order.length === current.length &&
+            current.every((ssid) => order.includes(ssid)) &&
+            new Set(order).size === current.length;
+          if (!valid) { res.writeHead(400); res.end('not a permutation'); return; }
+          const bySsid = new Map(device.wifi.nets.map((n) => [n.ssid, n]));
+          device.wifi.nets = order.map((ssid) => bySsid.get(ssid));
+          device.wifiOrders.push(order.slice());
+          res.writeHead(200); res.end('ordered');
+        });
+      }
+
+      case '/wifi/connect': {
+        if (!needAuth()) return;
+        return readBody((b) => {
+          let body = {};
+          try { body = JSON.parse(b || '{}'); } catch (_) { /* refused below */ }
+          const row = device.wifi.nets.find((n) => n.ssid === body.ssid);
+          if (!row) { res.writeHead(404); res.end('unknown network'); return; }
+          device.wifiConnects.push(row.ssid);
+          device.wifi.last = row.ssid;
+          device.wifi.active = row.ssid;
+          device.wifi.state = 'joined';
+          device.wifi.ip = '192.168.1.43';
+          res.writeHead(200); res.end('connecting');
+        });
+      }
 
       // Mirrors the /ui/* endpoints in main/web_server.c: the whitelist, the
       // size cap and the refusal statuses.
-      case '/network':
+      case '/network': {
         if (!needAuth()) return;
+        const w = device.wifi;
+        const active = w.active || '';
         return json({
-          state: 'joined',
-          ssid: 'home-wifi',
-          ip: '192.168.1.42',
-          ap_ip: '',
-          clients: 0,
+          state: w.state,
+          ssid: active,
+          ip: active ? w.ip : '',
+          ap_ip: active ? '' : (w.ap_ip || '192.168.4.1'),
+          clients: w.clients || 0,
+          active,
+          connecting: w.connecting || '',
+          saved: w.nets.map((n) => ({
+            ssid: n.ssid,
+            last: n.ssid === w.last,
+            hidden: !!n.hidden,
+            secure: !!n.pass,
+            active: n.ssid === active,
+          })),
+          order: w.nets.map((n) => n.ssid),
         });
+      }
 
       case '/ui/files':
         if (!needAuth()) return;

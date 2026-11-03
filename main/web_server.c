@@ -328,8 +328,9 @@ static bool req_authorised(httpd_req_t *req) {
 // ---------------------------------------------------------------------------
 // Network setup
 //
-// Credentials are stored and then the device reboots, so the well-tested boot
-// path handles the state transition rather than a live reconfiguration.
+// The list is edited live: adding, forgetting, reordering and choosing a
+// network all answer without a restart. The WiFi manager's tick task owns the
+// radio, so these handlers only change the stored list and let it react.
 // ---------------------------------------------------------------------------
 
 // Recent log output. Without this the device is a black box once TinyUSB owns
@@ -393,6 +394,29 @@ static esp_err_t network_handler(httpd_req_t *req) {
     cJSON_AddStringToObject(root, "ip", wifi_mgr_ip());
     cJSON_AddStringToObject(root, "ap_ip", wifi_mgr_ap_ip());
     cJSON_AddNumberToObject(root, "clients", wifi_mgr_client_count());
+
+    // The stored list, in fallback order. `last` is the remembered good one;
+    // `active` marks the row that is joined right now. The top-level `active`
+    // is its SSID, so a client need not search the array for it.
+    const char *joined = wifi_mgr_joined_ssid();
+    cJSON_AddStringToObject(root, "active", joined);
+    cJSON_AddStringToObject(root, "connecting", wifi_mgr_attempt_ssid());
+
+    wifi_mgr_net_t nets[WIFI_MGR_MAX_NETS];
+    const int count = wifi_mgr_list(nets, WIFI_MGR_MAX_NETS);
+    cJSON *saved = cJSON_AddArrayToObject(root, "saved");
+    cJSON *order = cJSON_AddArrayToObject(root, "order");
+    for (int i = 0; i < count; i++) {
+        cJSON *o = cJSON_CreateObject();
+        if (!o) break;
+        cJSON_AddStringToObject(o, "ssid", nets[i].ssid);
+        cJSON_AddBoolToObject(o, "last", nets[i].last);
+        cJSON_AddBoolToObject(o, "hidden", nets[i].hidden);
+        cJSON_AddBoolToObject(o, "secure", nets[i].secure);
+        cJSON_AddBoolToObject(o, "active", joined[0] && strcmp(joined, nets[i].ssid) == 0);
+        cJSON_AddItemToArray(saved, o);
+        cJSON_AddItemToArray(order, cJSON_CreateString(nets[i].ssid));
+    }
 
     char *json = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
@@ -479,6 +503,7 @@ static esp_err_t scan_handler(httpd_req_t *req) {
         cJSON_AddStringToObject(o, "ssid", (const char *)recs[i].ssid);
         cJSON_AddNumberToObject(o, "rssi", recs[i].rssi);
         cJSON_AddBoolToObject(o, "secure", recs[i].authmode != WIFI_AUTH_OPEN);
+        cJSON_AddBoolToObject(o, "saved", wifi_mgr_is_saved((const char *)recs[i].ssid));
         cJSON_AddItemToArray(arr, o);
     }
     free(recs);
@@ -524,7 +549,7 @@ static esp_err_t save_handler(httpd_req_t *req) {
         return ESP_FAIL;
     }
 
-    char body[256];
+    char body[384];
     if (read_body(req, body, sizeof(body)) < 0) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad body");
         return ESP_FAIL;
@@ -533,6 +558,7 @@ static esp_err_t save_handler(httpd_req_t *req) {
     cJSON *root = cJSON_Parse(body);
     const cJSON *jssid = root ? cJSON_GetObjectItem(root, "ssid") : NULL;
     const cJSON *jpass = root ? cJSON_GetObjectItem(root, "pass") : NULL;
+    const cJSON *jhidden = root ? cJSON_GetObjectItem(root, "hidden") : NULL;
     bool ok = cJSON_IsString(jssid) && jssid->valuestring[0] &&
               (!jpass || cJSON_IsString(jpass));
     char ssid[33] = {0}, pass[65] = {0};
@@ -540,20 +566,19 @@ static esp_err_t save_handler(httpd_req_t *req) {
         snprintf(ssid, sizeof(ssid), "%s", jssid->valuestring);
         snprintf(pass, sizeof(pass), "%s", jpass ? jpass->valuestring : "");
     }
+    const bool hidden = cJSON_IsTrue(jhidden);
     cJSON_Delete(root);
 
-    if (!ok || wifi_mgr_set_creds(ssid, pass) != ESP_OK) {
+    if (!ok || wifi_mgr_save_net(ssid, pass, hidden) != ESP_OK) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "invalid ssid/password");
         return ESP_FAIL;
     }
 
-    ESP_LOGW(TAG, "network credentials saved, restarting");
-    input_release_all();
+    // Adding a network while joined keeps that link; it is used when chosen
+    // with /wifi/connect or on the next reconnect. No restart, no dropped page.
+    ESP_LOGI(TAG, "network saved: \"%s\"%s", ssid, hidden ? " (hidden)" : "");
     httpd_resp_set_type(req, "text/plain");
-    httpd_resp_sendstr(req, "saved, restarting");
-    vTaskDelay(pdMS_TO_TICKS(400));   // let the response land
-    esp_restart();
-    return ESP_OK;   // not reached
+    return httpd_resp_sendstr(req, "saved");
 }
 
 static esp_err_t forget_handler(httpd_req_t *req) {
@@ -566,14 +591,112 @@ static esp_err_t forget_handler(httpd_req_t *req) {
         return ESP_FAIL;
     }
 
-    wifi_mgr_forget();
-    ESP_LOGW(TAG, "network credentials forgotten, restarting");
-    input_release_all();
+    char body[256];
+    const int got = read_body(req, body, sizeof(body));
+    cJSON *root = got > 0 ? cJSON_Parse(body) : NULL;
+    const cJSON *jssid = root ? cJSON_GetObjectItem(root, "ssid") : NULL;
+    const cJSON *jall = root ? cJSON_GetObjectItem(root, "all") : NULL;
+    const bool all = !cJSON_IsString(jssid) || cJSON_IsTrue(jall);
+    char ssid[33] = {0};
+    if (!all) snprintf(ssid, sizeof(ssid), "%s", jssid->valuestring);
+    cJSON_Delete(root);
+
+    if (all) {
+        wifi_mgr_forget();
+        ESP_LOGW(TAG, "all saved networks forgotten");
+        httpd_resp_set_type(req, "text/plain");
+        return httpd_resp_sendstr(req, "forgotten");
+    }
+
+    esp_err_t err = wifi_mgr_forget_net(ssid);
+    if (err == ESP_ERR_NOT_FOUND) {
+        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "unknown network");
+        return ESP_FAIL;
+    }
+    if (err != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "forget failed");
+        return ESP_FAIL;
+    }
+    ESP_LOGW(TAG, "network forgotten: \"%s\"", ssid);
     httpd_resp_set_type(req, "text/plain");
-    httpd_resp_sendstr(req, "forgotten, restarting");
-    vTaskDelay(pdMS_TO_TICKS(400));
-    esp_restart();
-    return ESP_OK;   // not reached
+    return httpd_resp_sendstr(req, "forgotten");
+}
+
+static esp_err_t order_handler(httpd_req_t *req) {
+    if (req->method != HTTP_POST) {
+        httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "POST only");
+        return ESP_FAIL;
+    }
+    if (!req_authorised(req)) {
+        httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "forbidden");
+        return ESP_FAIL;
+    }
+
+    char body[512];
+    if (read_body(req, body, sizeof(body)) < 0) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad body");
+        return ESP_FAIL;
+    }
+
+    cJSON *root = cJSON_Parse(body);
+    const cJSON *jorder = root ? cJSON_GetObjectItem(root, "order") : NULL;
+    const int n = cJSON_IsArray(jorder) ? cJSON_GetArraySize(jorder) : -1;
+    const char *order[WIFI_MGR_MAX_NETS] = { 0 };
+    bool ok = n >= 0 && n <= WIFI_MGR_MAX_NETS;
+    for (int i = 0; ok && i < n; i++) {
+        const cJSON *it = cJSON_GetArrayItem(jorder, i);
+        ok = cJSON_IsString(it) && it->valuestring[0];
+        if (ok) order[i] = it->valuestring;
+    }
+    esp_err_t err = ok ? wifi_mgr_set_order(order, n) : ESP_ERR_INVALID_ARG;
+    cJSON_Delete(root);
+
+    if (err != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "not a permutation of saved networks");
+        return ESP_FAIL;
+    }
+    httpd_resp_set_type(req, "text/plain");
+    return httpd_resp_sendstr(req, "ordered");
+}
+
+static esp_err_t connect_handler(httpd_req_t *req) {
+    if (req->method != HTTP_POST) {
+        httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "POST only");
+        return ESP_FAIL;
+    }
+    if (!req_authorised(req)) {
+        httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "forbidden");
+        return ESP_FAIL;
+    }
+
+    char body[256];
+    if (read_body(req, body, sizeof(body)) < 0) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "bad body");
+        return ESP_FAIL;
+    }
+
+    cJSON *root = cJSON_Parse(body);
+    const cJSON *jssid = root ? cJSON_GetObjectItem(root, "ssid") : NULL;
+    bool ok = cJSON_IsString(jssid) && jssid->valuestring[0];
+    char ssid[33] = {0};
+    if (ok) snprintf(ssid, sizeof(ssid), "%s", jssid->valuestring);
+    cJSON_Delete(root);
+
+    if (!ok) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "ssid is required");
+        return ESP_FAIL;
+    }
+    esp_err_t err = wifi_mgr_connect_net(ssid);
+    if (err == ESP_ERR_NOT_FOUND) {
+        httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "unknown network");
+        return ESP_FAIL;
+    }
+    if (err != ESP_OK) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "connect failed");
+        return ESP_FAIL;
+    }
+    httpd_resp_set_type(req, "text/plain");
+    return httpd_resp_sendstr(req, "connecting");
 }
 
 // ---------------------------------------------------------------------------
@@ -1470,6 +1593,10 @@ esp_err_t web_server_start(void) {
         { .uri = "/state",      .method = HTTP_GET,  .handler = state_handler },
         { .uri = "/save",       .method = HTTP_POST, .handler = save_handler },
         { .uri = "/forget",     .method = HTTP_POST, .handler = forget_handler },
+        { .uri = "/wifi/save",    .method = HTTP_POST, .handler = save_handler },
+        { .uri = "/wifi/forget",  .method = HTTP_POST, .handler = forget_handler },
+        { .uri = "/wifi/order",   .method = HTTP_POST, .handler = order_handler },
+        { .uri = "/wifi/connect", .method = HTTP_POST, .handler = connect_handler },
         { .uri = "/settings",   .method = HTTP_GET,  .handler = settings_get_handler },
         { .uri = "/settings",   .method = HTTP_POST, .handler = settings_post_handler },
         { .uri = "/restart",    .method = HTTP_POST, .handler = restart_handler },

@@ -290,16 +290,23 @@ never shows those screens.
 | State | SoftAP | STA |
 |---|---|---|
 | Nothing configured | on | — |
-| Provisioned and reachable | **off** | joined |
-| Unreachable for 20 s | **on** (recovery) | retrying |
+| A stored network is reachable | **off** | joined |
+| No stored network answers | **on** (recovery) | retrying the list |
 
 Provisioned devices start **STA-only** — never switching modes afterwards.
 `esp_wifi_set_mode()` restarts the whole WiFi stack, which drops every
 connection and can cost the DHCP lease, so turning the SoftAP off "once the
 link is healthy" is not safe. The SoftAP is only ever brought *up*.
 
+Up to five networks are stored in fallback order. At boot the device tries the
+one that worked last, without scanning. If that fails it scans once, tries the
+strongest stored network it can see, then the rest in stored order — which is
+how a hidden SSID still gets its turn. A full pass that fails brings the SoftAP
+up; retries back off while it stays unreachable. Adding a network while joined
+does not drop the current link.
+
 **If you get locked out:** hold **BOOT for 10 seconds** while powered. That
-wipes the saved network and restarts in AP mode. It can't be a power-on
+wipes the saved networks and restarts in AP mode. It can't be a power-on
 gesture, because holding BOOT during power-on triggers the ROM's download
 mode instead.
 

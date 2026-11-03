@@ -3729,15 +3729,153 @@ __webTests.push({
     // code ever replaced it.
     for (let i = 0; i < 40; i++) {
       const t = document.getElementById('netState').textContent;
-      if (t.includes('home-wifi')) break;
+      if (t.includes('HomeNet')) break;
       await __sleep(50);
     }
     const text = document.getElementById('netState').textContent;
-    __assert(text.includes('home-wifi'), `the network line says: ${text}`);
+    __assert(text.includes('HomeNet'), `the network line says: ${text}`);
     __assert(text.includes('192.168.1.42'), `the network line says: ${text}`);
     __assert(!text.includes('unknown'), `the network line still says: ${text}`);
   },
 });
+
+const __net = async () => (await fetch('/network?token=' + window.__CODE)).json();
+const __waitNet = async (pred, what) => {
+  for (let i = 0; i < 60; i++) {
+    const d = await __net();
+    if (pred(d)) return d;
+    await __sleep(50);
+  }
+  throw new Error(`timed out waiting for ${what}: ${JSON.stringify(await __net())}`);
+};
+const __wifiRows = () => [...document.querySelectorAll('#wifiSaved .wifirow')];
+
+__webTests.push({
+  page: 'settings',
+  name: 'saved networks list in fallback order with last-good and active badges',
+  fn: async () => {
+    await __waitNet((d) => Array.isArray(d.saved) && d.saved.length === 3, 'the saved list');
+    for (let i = 0; i < 30 && __wifiRows().length !== 3; i++) await __sleep(50);
+
+    const rows = __wifiRows();
+    __assert(rows.length === 3, `drew ${rows.length} saved rows`);
+    __assert(rows.map((r) => r.dataset.ssid).join(',') === 'HomeNet-5G,HomeNet,Guest',
+      `order is ${rows.map((r) => r.dataset.ssid).join(',')}`);
+
+    const home = rows.find((r) => r.dataset.ssid === 'HomeNet');
+    __assert(home, 'the joined network has no row');
+    __assert(home.querySelector('.wifiActive'),
+      'the joined network has no active badge');
+    __assert(home.querySelector('.wifiLast'),
+      'the last-good network has no last good badge');
+    __assert(rows[0].querySelector('button[data-move="up"]').disabled,
+      'the first row can move up');
+    __assert(rows[rows.length - 1].querySelector('button[data-move="down"]').disabled,
+      'the last row can move down');
+  },
+});
+
+__webTests.push({
+  page: 'settings',
+  name: 'reordering saved networks persists and reaches /wifi/order',
+  fn: async () => {
+    const before = await __net();
+    __assert(before.order.length >= 2, 'not enough networks to reorder');
+    const first = before.order[0];
+    const second = before.order[1];
+
+    const row = __wifiRows().find((r) => r.dataset.ssid === first);
+    __assert(row, `no row for ${first}`);
+    row.querySelector('button[data-move="down"]').click();
+
+    const after = await __waitNet((d) => d.order[0] === second && d.order[1] === first,
+      'the new order');
+    __assert(after.order.join(',') === [second, first, ...before.order.slice(2)].join(','),
+      `order became ${after.order.join(',')}`);
+
+    for (let i = 0; i < 30 && __wifiRows()[0].dataset.ssid !== second; i++) await __sleep(50);
+    __assert(__wifiRows()[0].dataset.ssid === second,
+      `the list still starts with ${__wifiRows()[0].dataset.ssid}`);
+  },
+});
+
+__webTests.push({
+  page: 'settings',
+  name: 'forget removes one network on a second tap, without a dialog',
+  fn: async () => {
+    const target = 'Guest';
+    let dialogs = 0;
+    const oldConfirm = window.confirm;
+    const oldPrompt = window.prompt;
+    window.confirm = () => { dialogs++; return false; };
+    window.prompt = () => { dialogs++; return ''; };
+    try {
+      const row = () => __wifiRows().find((r) => r.dataset.ssid === target);
+      __assert(row(), 'the network to forget is not listed');
+      row().querySelector('button[data-act="forget"]').click();
+      await __sleep(30);
+      __assert(row(), 'the first tap removed the network');
+      __assert(row().querySelector('button[data-act="forget"]').textContent.includes('Forget?'),
+        'the first tap did not arm the row');
+      __assert(dialogs === 0, `a dialog was used ${dialogs} time(s)`);
+
+      row().querySelector('button[data-act="forget"]').click();
+      const after = await __waitNet((d) => !d.saved.some((n) => n.ssid === target),
+        'the network to be forgotten');
+      __assert(after.saved.every((n) => n.ssid !== target), 'the network is still on the device');
+      for (let i = 0; i < 30 && row(); i++) await __sleep(50);
+      __assert(!row(), 'the forgotten network is still in the list');
+      __assert(dialogs === 0, `a dialog was used ${dialogs} time(s)`);
+    } finally {
+      window.confirm = oldConfirm;
+      window.prompt = oldPrompt;
+    }
+  },
+});
+
+__webTests.push({
+  page: 'settings',
+  name: 'adding a network posts /wifi/save and appears without a reload',
+  fn: async () => {
+    document.getElementById('wifiSsid').value = 'BenchNet';
+    document.getElementById('wifiPass').value = 'bench-pass';
+    document.getElementById('wifiHidden').checked = true;
+    document.getElementById('wifiSave').click();
+
+    const after = await __waitNet((d) => d.saved.some((n) => n.ssid === 'BenchNet'),
+      'the added network');
+    const added = after.saved.find((n) => n.ssid === 'BenchNet');
+    __assert(added.hidden === true, 'the hidden flag did not reach the device');
+    __assert(added.secure === true, 'the stored password is not marked secure');
+
+    for (let i = 0; i < 30 && !__wifiRows().some((r) => r.dataset.ssid === 'BenchNet'); i++) {
+      await __sleep(50);
+    }
+    const row = __wifiRows().find((r) => r.dataset.ssid === 'BenchNet');
+    __assert(row, 'the added network did not appear in the saved list');
+    __assert(row.textContent.includes('hidden'), `row says: ${row.textContent}`);
+  },
+});
+
+__webTests.push({
+  page: 'settings',
+  name: 'scan results mark the SSIDs that are already saved',
+  fn: async () => {
+    document.getElementById('wifiScan').click();
+    let items = [];
+    for (let i = 0; i < 60; i++) {
+      items = [...document.querySelectorAll('#wifiList .item')];
+      if (items.length) break;
+      await __sleep(50);
+    }
+    __assert(items.length > 0, 'the scan drew nothing');
+    const text = (ssid) => (items.find((i) => i.textContent.includes(ssid)) || {}).textContent || '';
+    __assert(text('HomeNet').includes('Saved'), `HomeNet row says: ${text('HomeNet')}`);
+    __assert(!text('Neighbour').includes('Saved'),
+      `the unsaved network was marked: ${text('Neighbour')}`);
+  },
+});
+
 
 __webTests.push({
   page: 'keys-deck',

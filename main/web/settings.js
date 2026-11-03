@@ -145,6 +145,103 @@ on('forgetCode', 'click', () => {
 // The network section used to say "unknown" for ever: the value was a
 // placeholder in the markup and nothing ever filled it. The device is the only
 // thing that knows.
+let lastNetwork = null;
+let pendingForget = '';
+
+function netNote(text, warn) {
+  const note = document.getElementById('wifiNote');
+  if (!note) return;
+  note.textContent = text;
+  note.classList.toggle('warn', !!warn);
+}
+
+function wifiBadge(text, cls) {
+  const b = document.createElement('span');
+  b.className = 'wifiBadge ' + cls;
+  b.textContent = text;
+  return b;
+}
+
+function renderNetState(d) {
+  const out = document.getElementById('netState');
+  if (!out) return;
+  if (d.state === 'joined') {
+    out.textContent = `Joined “${d.ssid || '(unknown)'}” · ${d.ip || 'no address'}`;
+  } else if (d.state === 'connecting') {
+    const trying = d.connecting || d.ssid || '';
+    out.textContent = trying ? `Connecting to “${trying}”…`
+                             : 'Connecting to a saved network…';
+  } else {
+    const n = Number(d.clients) || 0;
+    out.textContent = `Access point · ${d.ap_ip || 'no address'} · ` +
+      `${n} client${n === 1 ? '' : 's'} connected`;
+  }
+}
+
+function renderSavedNetworks(d) {
+  const box = document.getElementById('wifiSaved');
+  if (!box) return;
+  box.textContent = '';
+  const nets = Array.isArray(d && d.saved) ? d.saved : [];
+  if (!nets.length) {
+    const empty = document.createElement('div');
+    empty.className = 'wifiempty';
+    empty.textContent = 'No saved networks. Scan below and add one.';
+    box.appendChild(empty);
+    return;
+  }
+
+  const joined = d.active || (d.state === 'joined' ? d.ssid : '');
+  nets.forEach((n, i) => {
+    const row = document.createElement('div');
+    row.className = 'wifirow';
+    row.dataset.ssid = n.ssid;
+
+    const top = document.createElement('div');
+    top.className = 'wifitop';
+    const name = document.createElement('span');
+    name.className = 'wifiname';
+    name.textContent = n.ssid || '(hidden)';
+    top.appendChild(name);
+    if (n.hidden) top.appendChild(wifiBadge('hidden', 'wifiMuted'));
+    if (n.secure) top.appendChild(wifiBadge('🔒', 'wifiMuted'));
+    if (n.ssid === joined) top.appendChild(wifiBadge('active', 'wifiActive'));
+    if (n.last) top.appendChild(wifiBadge('last good', 'wifiLast'));
+
+    const acts = document.createElement('div');
+    acts.className = 'wifiActs';
+    const move = (delta, label, glyph) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'wifiMove';
+      b.dataset.move = delta < 0 ? 'up' : 'down';
+      b.textContent = glyph;
+      b.setAttribute('aria-label', label);
+      b.disabled = delta < 0 ? i === 0 : i === nets.length - 1;
+      b.addEventListener('click', () => moveSaved(i, delta));
+      return b;
+    };
+    const use = document.createElement('button');
+    use.type = 'button';
+    use.dataset.act = 'use';
+    use.textContent = 'Use now';
+    use.disabled = n.ssid === joined;
+    use.addEventListener('click', () => useSaved(n.ssid));
+
+    const forget = document.createElement('button');
+    forget.type = 'button';
+    forget.className = 'danger';
+    forget.dataset.act = 'forget';
+    forget.textContent = pendingForget === n.ssid ? 'Forget?' : 'Forget';
+    forget.addEventListener('click', () => forgetSaved(n.ssid, forget));
+
+    acts.append(move(-1, `Move ${n.ssid} up`, 'Up'),
+               move(1, `Move ${n.ssid} down`, 'Down'), use, forget);
+    row.append(top, acts);
+    box.appendChild(row);
+  });
+}
+
 async function refreshNetwork() {
   const out = document.getElementById('netState');
   if (!out) return;
@@ -155,18 +252,85 @@ async function refreshNetwork() {
       return;
     }
     const d = await r.json();
-    if (d.state === 'joined') {
-      out.textContent = `Joined “${d.ssid || '(unknown)'}” · ${d.ip || 'no address'}`;
-    } else if (d.state === 'connecting') {
-      out.textContent = 'Connecting to the saved network…';
-    } else {
-      const n = Number(d.clients) || 0;
-      out.textContent = `Access point · ${d.ap_ip || 'no address'} · ` +
-        `${n} client${n === 1 ? '' : 's'} connected`;
-    }
+    lastNetwork = d;
+    renderNetState(d);
+    renderSavedNetworks(d);
   } catch (_) {
     out.textContent = 'The device is unreachable.';
   }
+}
+
+async function moveSaved(index, delta) {
+  if (!lastNetwork || !Array.isArray(lastNetwork.saved)) return;
+  const to = index + delta;
+  if (to < 0 || to >= lastNetwork.saved.length) return;
+  const order = lastNetwork.saved.map((n) => n.ssid);
+  const tmp = order[index];
+  order[index] = order[to];
+  order[to] = tmp;
+
+  // Show the new order immediately. The device is the authority, so refresh
+  // afterwards and put the old order back if the request was refused.
+  const bySsid = new Map(lastNetwork.saved.map((n) => [n.ssid, n]));
+  lastNetwork.saved = order.map((ssid) => bySsid.get(ssid));
+  renderSavedNetworks(lastNetwork);
+
+  netNote('saving order…');
+  try {
+    const r = await apiPost('/wifi/order', { order });
+    if (!r.ok) {
+      netNote(`Could not save the order (HTTP ${r.status}).`, true);
+      await refreshNetwork();
+      return;
+    }
+    netNote('Order saved. It is used the next time the device connects.');
+  } catch (_) {
+    netNote('Could not save the order — the device is unreachable.', true);
+  }
+  await refreshNetwork();
+}
+
+async function useSaved(ssid) {
+  netNote(`Connecting to “${ssid}”…`);
+  try {
+    const r = await apiPost('/wifi/connect', { ssid });
+    if (!r.ok) {
+      netNote(`Could not start a connection (HTTP ${r.status}).`, true);
+      return;
+    }
+  } catch (_) {
+    netNote('Could not start a connection — the device is unreachable.', true);
+    return;
+  }
+  await refreshNetwork();
+}
+
+// Two taps in the row, like deleting a page: a phone dialog is easy to miss and
+// harder to hit than the button under the thumb.
+async function forgetSaved(ssid, button) {
+  if (pendingForget !== ssid) {
+    pendingForget = ssid;
+    renderSavedNetworks(lastNetwork);
+    netNote(`Tap Forget again to remove “${ssid}” from this device.`, true);
+    return;
+  }
+
+  pendingForget = '';
+  netNote(`Removing “${ssid}”…`);
+  try {
+    const r = await apiPost('/wifi/forget', { ssid });
+    if (!r.ok) {
+      netNote(`Could not forget “${ssid}” (HTTP ${r.status}).`, true);
+      await refreshNetwork();
+      return;
+    }
+    netNote(`Removed “${ssid}”.`);
+  } catch (_) {
+    netNote('Could not forget it — the device is unreachable.', true);
+    button.textContent = 'Forget';
+    return;
+  }
+  await refreshNetwork();
 }
 
 on('wifiScan', 'click', async () => {
@@ -178,7 +342,7 @@ on('wifiScan', 'click', async () => {
 
     const data = await r.json();
     const nets = (data.networks || []).slice().sort((a, b) => b.rssi - a.rssi);
-    list.innerHTML = '';
+    list.textContent = '';
     if (!nets.length) { list.textContent = 'No networks found.'; return; }
 
     for (const n of nets) {
@@ -188,11 +352,14 @@ on('wifiScan', 'click', async () => {
       name.textContent = n.ssid || '(hidden)';
       const bar = document.createElement('span');
       bar.className = 'bar';
-      bar.textContent = `${n.rssi} dBm${n.secure ? ' 🔒' : ''}`;
+      bar.textContent = `${n.rssi} dBm${n.secure ? ' 🔒' : ''}` +
+        (n.saved ? ' · Saved' : '');
       el.append(name, bar);
       el.addEventListener('click', () => {
         document.getElementById('wifiSsid').value = n.ssid || '';
         document.getElementById('wifiPass').focus();
+        const hidden = document.getElementById('wifiHidden');
+        if (hidden) hidden.checked = false;
         list.querySelectorAll('.item').forEach((i) => i.classList.remove('selected'));
         el.classList.add('selected');
       });
@@ -206,22 +373,23 @@ on('wifiScan', 'click', async () => {
 on('wifiSave', 'click', async () => {
   const ssid = document.getElementById('wifiSsid').value.trim();
   const pass = document.getElementById('wifiPass').value;
-  if (!ssid) { alert('Enter a network name first.'); return; }
-  if (!confirm(`Save "${ssid}" and restart?\n\nThe device will try to join it. ` +
-               'If that fails its own access point comes back.')) return;
-  try {
-    await apiPost('/save', { ssid, pass });
-  } catch (_) { /* the device reboots as it answers */ }
-  setStatus('restarting…', 'warn');
-  setTimeout(() => location.reload(), 8000);
-});
+  const hidden = document.getElementById('wifiHidden').checked;
+  if (!ssid) { netNote('Enter a network name first.', true); return; }
 
-on('wifiForget', 'click', async () => {
-  if (!confirm('Forget the saved network?\n\nThe device restarts in access-point ' +
-               'mode, so you will need to join "keebling" to reach it again.')) return;
-  try { await apiPost('/forget'); } catch (_) {}
-  setStatus('restarting…', 'warn');
-  setTimeout(() => location.reload(), 8000);
+  netNote(`Saving “${ssid}”…`);
+  try {
+    const r = await apiPost('/wifi/save', { ssid, pass, hidden });
+    if (!r.ok) {
+      netNote(`Could not add “${ssid}” (HTTP ${r.status}).`, true);
+      return;
+    }
+    netNote(`Added “${ssid}”. A joined network is kept until it is chosen or the device reconnects.`);
+    document.getElementById('wifiPass').value = '';
+  } catch (_) {
+    netNote('Could not add it — the device is unreachable.', true);
+    return;
+  }
+  await refreshNetwork();
 });
 
 // ---------------------------------------------------------------- web UI files
