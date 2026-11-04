@@ -2108,15 +2108,10 @@ __webTests.push({
     __assert(cards[2].querySelector('.bad'), 'the macro with an unknown token was not flagged');
     __assert(cards[0].querySelector('.run').textContent.includes('Run'), 'no Run button');
 
-    const meter = document.getElementById('blobMeter').textContent;
-    __assert(/3 keys/.test(meter) && /bytes/.test(meter),
-      `the size line says: ${meter}`);
-    // The count is the only job this line has: where macros are stored is
-    // stated above the list, and repeating it here was pure noise.
-    __assert(!/stored in this browser/.test(meter),
-      `the size line repeats the storage note: ${meter}`);
-    __assert(!meter.includes('1023'),
-      `the size line still quotes the device's old cap: ${meter}`);
+    // The size meter was for the device's old 1023-byte settings blob. Pages
+    // live in the browser now, so the count and byte total were only noise.
+    __assert(!document.getElementById('blobMeter'),
+      'the old size meter is still on the page');
   },
 });
 
@@ -2214,8 +2209,7 @@ __webTests.push({
 
     // Nothing should be complaining about a budget any more: macros are not in
     // the device's 1023-byte settings blob.
-    const meter = document.getElementById('blobMeter').textContent;
-    __assert(!meter.includes('over'), `the size line says: ${meter}`);
+    __assert(!document.getElementById('blobMeter'), 'a size meter came back');
 
     document.getElementById('editSave').click();
     await __sleep(200);

@@ -536,12 +536,14 @@ function render() {
   listEl.textContent = '';
   listEl.className = 'pagegrid' + (editMode ? ' editing' : '');
   if (!p) return;
-  renderPage(listEl, p, { decorate: decorateTile });
   const count = p.rows.reduce((s, r) => s + r.keys.length, 0);
   if (!count) {
+    // An empty page needs no blank rows: the note is the whole page.
     listEl.appendChild(el('p', 'note', editMode
       ? 'Nothing on this page yet.'
       : 'Nothing on this page yet — tap New key to add one.'));
+  } else {
+    renderPage(listEl, p, { decorate: decorateTile });
   }
   const editBtn = document.getElementById('deckEdit');
   if (editBtn) {

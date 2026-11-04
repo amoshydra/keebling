@@ -464,14 +464,9 @@
 
     <section>
       <h2>Pages</h2>
-      <p class="note">A page is rows of keys. A key can hold a HID key, latch a
-        modifier, run a script, or jump to another page. Scripts use braced tokens
-        for keys that are not characters:
-        <code>{SEARCH}chrome{ENTER}</code> presses the Search media key, types
-        “chrome” and presses Enter. Text assumes a US QWERTY layout on the host.</p>
-      <p class="note">Pages are stored in <strong>this browser</strong>, not on
-        the device. They are not shared with another phone or browser, and
-        clearing this site's data removes them.</p>
+      <p class="note">A page is rows of keys. A key can hold a key, latch a
+        modifier, run a script, or jump to another page. Pages live in
+        <strong>this browser</strong>, not on the device.</p>
       <div id="deckPages" class="pagestrip" role="tablist" aria-label="Pages"></div>
       <div id="deckPageTools" class="pagerow" hidden></div>
       <div id="macroList"></div>
@@ -480,35 +475,38 @@
         <button id="deckEdit">Edit</button>
       </div>
       <p class="note" id="saveNote"></p>
-      <p class="note" id="blobMeter"></p>
     </section>
 
-    <section id="pageImport">
-      <h2>Import a page</h2>
-      <p class="note">Paste the JSON the editor exports, or open the file. The
-        pages are added beside the ones you already have; an id or a name that
-        already exists is suffixed rather than overwritten.</p>
-      <textarea id="importText" rows="5" spellcheck="false" autocapitalize="none"
-                autocomplete="off" placeholder='{ "app": "keebling", "kind": "layout", "pages": [ … ] }'></textarea>
-      <input id="importFile" type="file" accept="application/json,.json" hidden>
-      <div class="row" style="margin-top:8px">
-        <button id="importGo" class="primary">Import from the box</button>
-        <button id="importPick">Open a file…</button>
+    <details class="tool" id="pageImport">
+      <summary>Import a page</summary>
+      <div class="toolbody">
+        <p class="note">Paste the JSON the editor exports, or open the file. The
+          pages are added beside the ones you already have; an id or a name that
+          already exists is suffixed rather than overwritten.</p>
+        <textarea id="importText" rows="5" spellcheck="false" autocapitalize="none"
+                  autocomplete="off" placeholder='{ "app": "keebling", "kind": "layout", "pages": [ … ] }'></textarea>
+        <input id="importFile" type="file" accept="application/json,.json" hidden>
+        <div class="row" style="margin-top:8px">
+          <button id="importGo" class="primary">Import from the box</button>
+          <button id="importPick">Open a file…</button>
+        </div>
+        <p class="note" id="importNote"></p>
       </div>
-      <p class="note" id="importNote"></p>
-    </section>
+    </details>
 
-    <section id="pageEditor">
-      <h2>Editor</h2>
-      <p class="note">The same editor as
-        <a href="https://amoshydra.github.io/keebling/editor/" target="_blank" rel="noopener">the hosted one</a>,
-        built from the same source. Edit a page, then press <strong>Use in Pages</strong>.</p>
-      <iframe id="editorFrame" title="Keebling layout editor" loading="lazy"
-              src="editor.html" sandbox="allow-scripts allow-downloads"></iframe>
-    </section>
+    <details class="tool" id="pageEditor">
+      <summary>Editor</summary>
+      <div class="toolbody">
+        <p class="note">The same editor as
+          <a href="https://amoshydra.github.io/keebling/editor/" target="_blank" rel="noopener">the hosted one</a>,
+          built from the same source. Edit a page, then press <strong>Use</strong>.</p>
+        <iframe id="editorFrame" title="Keebling layout editor" loading="lazy"
+                src="editor.html" sandbox="allow-scripts allow-downloads"></iframe>
+      </div>
+    </details>
 
     <section id="editor">
-      <h2 id="editorTitle">New macro</h2>
+      <h2 id="editorTitle">New key</h2>
       <div class="field">
         <span>Name</span>
         <input type="text" id="editName" maxlength="40" spellcheck="false"
@@ -516,7 +514,7 @@
       </div>
       <div class="field">
         <span>Type</span>
-        <div id="editKind" class="segmented" role="group" aria-label="Button type">
+        <div id="editKind" class="segmented" role="group" aria-label="Key type">
           <button type="button" data-kind="script" class="on">Script</button>
           <button type="button" data-kind="key">Hold a key</button>
           <button type="button" data-kind="modifier">Modifier</button>
@@ -525,7 +523,7 @@
       </div>
       <div class="field">
         <span>Colour</span>
-        <div id="editColours" class="swatches" role="group" aria-label="Button colour">
+        <div id="editColours" class="swatches" role="group" aria-label="Key colour">
           <button type="button" data-colour="grey" aria-label="Grey"></button>
           <button type="button" data-colour="blue" aria-label="Blue"></button>
           <button type="button" data-colour="amber" aria-label="Amber"></button>
@@ -569,16 +567,19 @@
       </details>
       <div class="note" id="parsePreview" style="margin-top:10px"></div>
       <div class="row" style="margin-top:12px">
-        <button id="editSave" class="primary">Save button</button>
+        <button id="editSave" class="primary">Save key</button>
         <button id="editCancel">Cancel</button>
       </div>
     </section>
 
-    <section>
-      <h2>Grammar</h2>
+    <details class="tool" id="pageGrammar">
+      <summary>Script tokens</summary>
+      <div class="toolbody">
       <p class="note">Anything outside braces is typed as literal text. A literal
         brace is written <code>{{</code> or <code>}}</code>. Tokens are not case
-        sensitive.</p>
+        sensitive. For example <code>{SEARCH}chrome{ENTER}</code> presses the
+        Search media key, types “chrome” and presses Enter; text assumes a US
+        QWERTY layout on the host.</p>
       <div class="tokens" style="margin-top:12px">
         <span>Keys</span>
         <code>{ENTER} {TAB} {ESC} {BKSP} {DEL} {INS} {UP} {DOWN} {LEFT} {RIGHT}
@@ -598,7 +599,8 @@
         <span>Delay</span>
         <code>{WAIT:500}</code> — milliseconds, up to 60000
       </div>
-    </section>
+      </div>
+    </details>
 
   </div>
 

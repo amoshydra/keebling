@@ -856,6 +856,36 @@ textarea { font-family: ui-monospace, SFMono-Regular, monospace; resize: vertica
 .wrap-macros { padding-bottom: 120px; }
 section { background: var(--panel-2); border-radius: 10px; padding: 14px; margin-bottom: 14px; }
 section h2 { font-size: 14px; color: #aaa; font-weight: 600; margin-bottom: 12px; }
+
+/* Collapsed tools keep the Pages tab to the page itself. Import, the editor
+   and the token list are each one tap away, not a second screen of prose. */
+details.tool {
+  background: var(--panel-2);
+  border-radius: 10px;
+  margin-bottom: 14px;
+}
+details.tool > summary {
+  min-height: 44px;
+  padding: 0 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  list-style: none;
+  font-size: 14px;
+  font-weight: 600;
+  color: #aaa;
+}
+details.tool > summary::-webkit-details-marker { display: none; }
+details.tool > summary::after {
+  content: '+';
+  margin-left: auto;
+  color: var(--dim);
+  font-size: 19px;
+  line-height: 1;
+}
+details.tool[open] > summary::after { content: '−'; }
+details.tool > .toolbody { padding: 0 14px 14px; }
 code { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; color: #bbb; }
 
 .savebar[hidden] { display: none; }
