@@ -2109,7 +2109,7 @@ __webTests.push({
     __assert(cards[0].querySelector('.run').textContent.includes('Run'), 'no Run button');
 
     const meter = document.getElementById('blobMeter').textContent;
-    __assert(/3 buttons/.test(meter) && /bytes/.test(meter),
+    __assert(/3 keys/.test(meter) && /bytes/.test(meter),
       `the size line says: ${meter}`);
     // The count is the only job this line has: where macros are stored is
     // stated above the list, and repeating it here was pure noise.

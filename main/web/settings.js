@@ -1270,6 +1270,10 @@ function showSetupPage(page) {
   if (list) list.hidden = !!setupPage;
   const back = document.getElementById('setupBack');
   if (back) back.hidden = !setupPage;
+  // Network changes apply immediately; a "Save now" bar would imply they do
+  // not, and it covers the form on a short screen.
+  const savebar = document.querySelector('.wrap-setup .savebar');
+  if (savebar) savebar.hidden = setupPage === 'network';
   window.scrollTo(0, 0);
 }
 

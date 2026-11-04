@@ -858,6 +858,7 @@ section { background: var(--panel-2); border-radius: 10px; padding: 14px; margin
 section h2 { font-size: 14px; color: #aaa; font-weight: 600; margin-bottom: 12px; }
 code { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; color: #bbb; }
 
+.savebar[hidden] { display: none; }
 .savebar {
   position: sticky; bottom: 0; padding: 12px 0;
   background: linear-gradient(transparent, var(--bg) 30%);
@@ -1215,6 +1216,9 @@ select#editKey {
   border: 1px solid #303030;
   border-radius: 12px;
   background: #0a0a0b;
+}
+@media (max-width: 620px) {
+  #pageEditor iframe { height: 58vh; min-height: 440px; }
 }
 .kbempty { display: flex; flex-direction: column; gap: 6px; padding: 4px 0; }
 .kbempty textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;

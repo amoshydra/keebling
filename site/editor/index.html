@@ -75,6 +75,14 @@
   .brand { font-weight: 650; letter-spacing: -.01em; }
   .brand { padding-right: 12px; border-right: 1px solid var(--line); }
   @media (max-width: 760px) { .brand { border: 0; padding: 0; } }
+  /* Embedded in the Pages tab, the editor's file actions are the app's job:
+     Use in Pages replaces Export, and the narrow topbar drops undo/redo. */
+  body.embed #export { display: none; }
+  @media (max-width: 760px) {
+    body.embed #historyGroup { display: none; }
+    body.embed #useHere { padding: 5px 9px; font-size: 11.5px; }
+    body.embed .topbar .seg button { padding: 5px 8px; }
+  }
   .brand .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%;
                 background: var(--accent); margin-right: 8px; vertical-align: 1px; }
   .spacer { flex: 1; }
@@ -356,7 +364,7 @@
           </div>
           <div class="page" id="page"></div>
         </div>
-        <div class="tabs"><span>Remote</span><span class="on">Keys</span><span>Deck</span><span>Setup</span></div>
+        <div class="tabs"><span>Remote</span><span class="on">Keys</span><span>Pages</span><span>Setup</span></div>
       </div>
     </div>
   </section>
@@ -1202,10 +1210,14 @@ $('export').addEventListener('click', () => {
 // only difference is that a parent window exists.
 const EMBED = window.parent !== window;
 if (EMBED) {
+  document.body.classList.add('embed');
   const back = document.querySelector('.back');
   if (back) back.style.display = 'none';
   const use = $('useHere');
   use.hidden = false;
+  use.textContent = 'Use';
+  use.title = 'Use in Pages';
+  use.setAttribute('aria-label', 'Use in Pages');
   use.addEventListener('click', () => {
     window.parent.postMessage({ type: 'keebling:import', json: currentJson() }, '*');
   });

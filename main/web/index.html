@@ -341,7 +341,7 @@
         <div class="note" id="netState">unknown</div>
       </div>
       <div class="field">
-        <span>Saved networks <small>(tried in this order)</small></span>
+        <span>Saved networks <small>(fallback order)</small></span>
         <div class="list wifilist" id="wifiSaved"></div>
       </div>
       <div class="row">
@@ -363,8 +363,8 @@
       <div class="row">
         <button id="wifiSave" class="primary">Add network</button>
       </div>
-      <p class="note" id="wifiNote">Passwords are stored on the device.
-        Reordering is used the next time it connects.</p>
+      <p class="note" id="wifiNote">Passwords are stored on the device. Last good is tried first; the rest
+        follow this order. Reordering applies on the next reconnect.</p>
     </section>
 
     <section data-page="hid">

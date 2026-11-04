@@ -177,7 +177,7 @@ function updateMeter() {
   if (!meterEl) return;
   const n = pages.reduce((sum, p) => sum + p.rows.reduce((s, r) => s + r.keys.filter((it) => !it.spacer).length, 0), 0);
   meterEl.className = 'note';
-  meterEl.textContent = `${n} button${n === 1 ? '' : 's'} · ${byteLength(pendingPages())} bytes`;
+  meterEl.textContent = `${n} key${n === 1 ? '' : 's'} · ${byteLength(pendingPages())} bytes`;
 }
 
 // Writes to this browser only. It claims to have saved once the write has
@@ -541,7 +541,7 @@ function render() {
   if (!count) {
     listEl.appendChild(el('p', 'note', editMode
       ? 'Nothing on this page yet.'
-      : 'Nothing on this page yet — tap New button to add one.'));
+      : 'Nothing on this page yet — tap New key to add one.'));
   }
   const editBtn = document.getElementById('deckEdit');
   if (editBtn) {
@@ -607,7 +607,7 @@ function openEditor(info) {
     ? (macroText(a.blocks || []) || a.text || '')
     : '';
   paintKind();
-  editorTitleEl.textContent = editAt ? 'Edit button' : 'New button';
+  editorTitleEl.textContent = editAt ? 'Edit key' : 'New key';
   editorEl.classList.add('show');
   showSaveNote('');
   updatePreview();
