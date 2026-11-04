@@ -2091,6 +2091,17 @@ __webTests.push({
   },
 });
 
+__webTests.push({
+  page: 'macros',
+  name: 'DSL: printing parsed steps back to text does not double the braces',
+  fn: async () => {
+    const text = '{CTRL+C}{ENTER}{SEARCH}';
+    const steps = parseMacro(text).steps;
+    __assert(macroText(steps) === text,
+      `printed ${JSON.stringify(macroText(steps))}, expected ${JSON.stringify(text)}`);
+  },
+});
+
 // ---------------------------------------------------------------- macro page
 __webTests.push({
   page: 'macros',
@@ -2430,32 +2441,36 @@ __webTests.push({
 
 __webTests.push({
   page: 'macros',
-  name: 'macro page deletes on a second tap',
+  name: 'a key deletes from its editor on a second tap',
   fn: async () => {
     const find = (name) => [...document.querySelectorAll('.macro')]
       .find((c) => c.querySelector('.name').textContent === name);
-    const tap = (card, label) => {
-      const b = [...card.querySelectorAll('.acts button')].find((x) => x.textContent === label);
-      __assert(b, `no ${label} button on the card`);
-      b.click();
-    };
 
-    // The per-tile actions only exist in edit mode, so the test has to enter it
-    // the way a person does.
+    // The tile only carries Edit: a one-column key is too narrow for two
+    // 44px actions, so Delete lives in the full-width editor.
     document.getElementById('deckEdit').click();
     __assert(document.getElementById('macroList').classList.contains('editing'),
       'the Edit button did not switch the deck into edit mode');
 
-    const before = document.querySelectorAll('.macro').length;
-    tap(find('Test Macro'), 'Delete');
-    await __sleep(30);
-    __assert(document.querySelectorAll('.macro').length === before,
-      'the first tap deleted the macro');
-    __assert(find('Test Macro'), 'the macro vanished before the confirmation');
+    const tile = find('Test Macro');
+    tile.querySelector('.acts button').click();
+    await __sleep(60);
+    __assert(document.getElementById('editor').classList.contains('show'),
+      'the tile did not open its editor');
 
-    tap(find('Test Macro'), 'Delete?');
+    const before = document.querySelectorAll('.macro').length;
+    const del = document.getElementById('editDelete');
+    __assert(del && !del.hidden, 'the editor has no delete button for an existing key');
+    del.click();
+    await __sleep(30);
+    __assert(find('Test Macro'), 'the first tap deleted the key');
+    __assert(del.textContent === 'Delete key?', `the button says ${del.textContent}`);
+
+    del.click();
     await __sleep(500);
-    __assert(!find('Test Macro'), 'the second tap did not delete the macro');
+    __assert(!find('Test Macro'), 'the second tap did not delete the key');
+    __assert(document.querySelectorAll('.macro').length === before - 1,
+      'one key disappeared, but not the right number');
     document.getElementById('deckEdit').click();     // leave edit mode again
     __assert(document.getElementById('saveNote').textContent.includes('saved'),
       `note: ${document.getElementById('saveNote').textContent}`);
@@ -4336,7 +4351,6 @@ __webTests.push({
     const tile = __keyTile('Held up');
     __assert(tile, 'the button was not added');
     __assert(tile.classList.contains('keybutton'), 'the tile is not marked as a key');
-    __assert(tile.querySelector('.holdtag'), 'the tile does not say HOLD');
     __assert(tile.querySelector('.src').textContent.includes('held'),
       `the tile says "${tile.querySelector('.src').textContent}"`);
 

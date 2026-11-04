@@ -103,7 +103,6 @@ function onPageHide() {
 // ---------------------------------------------------------------- model
 let pages = [];
 let activeId = '';
-let confirmDelete = null;      // "pageId:row:key" waiting for a second tap
 let pendingPageDelete = null;  // page id waiting for a second tap
 
 const activePage = () => Pages.pageById(pages, activeId) || pages[0] || null;
@@ -209,7 +208,8 @@ function sourceOf(it) {
     return `→ ${to ? to.name : a.to}`;
   }
   const blocks = Array.isArray(a.blocks) ? a.blocks : [];
-  return macroText(blocks) || a.text || '(empty)';
+  const text = macroText(blocks) || a.text || '(empty)';
+  return it && it.hold ? `hold · ${text}` : text;
 }
 
 function parseSequence(it) {
@@ -246,7 +246,6 @@ function addPage() {
   if (!store(next)) return;
   activeId = page.id;
   Pages.writeActive(activeId);
-  confirmDelete = null;
   pendingPageDelete = null;
   render();
 }
@@ -262,8 +261,7 @@ function renderPages() {
     b.setAttribute('aria-selected', p.id === activeId ? 'true' : 'false');
     b.addEventListener('click', () => {
       activeId = p.id;
-      confirmDelete = null;
-      pendingPageDelete = null;
+          pendingPageDelete = null;
       Pages.writeActive(activeId);
       render();
     });
@@ -503,23 +501,10 @@ function decorateTile(tile, it, info) {
     }
   }
 
-  const acts = el('div', 'acts');
-  const id = `${activeId}:${info.row}:${info.key}`;
-  if (confirmDelete === id) {
-    acts.append(
-      actionButton('Cancel', () => { confirmDelete = null; render(); }),
-      actionButton('Delete?', () => deleteKey(info), 'danger'),
-    );
-  } else {
-    acts.append(
-      actionButton('Edit', () => openEditor(info)),
-      actionButton('Delete', () => { confirmDelete = id; render(); }),
-    );
-  }
-  if (a.kind === 'key' || it.hold) tile.appendChild(el('span', 'holdtag', 'HOLD'));
-  tile.appendChild(acts);
-
   if (editMode) {
+    const acts = el('div', 'acts');
+    acts.appendChild(actionButton('Edit', () => openEditor(info)));
+    tile.appendChild(acts);
     tile.addEventListener('click', (e) => {
       if (e.target.closest && e.target.closest('.acts')) return;
       openEditor(info);
@@ -553,15 +538,6 @@ function render() {
   updateMeter();
 }
 
-function deleteKey(info) {
-  confirmDelete = null;
-  const p = Pages.pageById(pages, info.pageId || activeId);
-  if (!p) return;
-  const row = p.rows[info.row];
-  if (!row) return;
-  row.keys.splice(info.key, 1);
-  store(pages);
-}
 
 // ---------------------------------------------------------------- editor
 let editMode = false;
@@ -573,6 +549,7 @@ let editKind = 'script';       // script | key | modifier | page
 let editKey = null;            // { kind, code|usage } when editKind is 'key'
 let editModifier = 'ShiftLeft';
 let editTarget = '';
+let pendingKeyDelete = false;
 
 function itemAt(info) {
   const p = activePage();
@@ -599,7 +576,8 @@ function openEditor(info) {
         : { kind: 'key', code: a.code || codeForUsage(a.usage) || 'ArrowUp' })
     : { kind: 'key', code: 'ArrowUp' };
   editModifier = a.kind === 'modifier' ? a.code : 'ShiftLeft';
-  editTarget = a.kind === 'page' ? a.to : (activePage() ? activePage().id : '');
+  editTarget = a.kind === 'page' ? a.to
+    : ((activePage() && pages.find((p) => p.id !== activePage().id)) || activePage() || {}).id || '';
   const holdBox = document.getElementById('editHold');
   if (holdBox) holdBox.checked = editHold;
 
@@ -609,7 +587,11 @@ function openEditor(info) {
     ? (macroText(a.blocks || []) || a.text || '')
     : '';
   paintKind();
-  editorTitleEl.textContent = editAt ? 'Edit key' : 'New key';
+  editorTitleEl.textContent = (editAt ? 'Edit key' : 'New key') +
+    (activePage() ? ` on “${activePage().name}”` : '');
+  pendingKeyDelete = false;
+  const del = document.getElementById('editDelete');
+  if (del) { del.hidden = !editAt; del.textContent = 'Delete key'; }
   editorEl.classList.add('show');
   showSaveNote('');
   updatePreview();
@@ -707,8 +689,26 @@ function paintColourSwatches() {
 function closeEditor() {
   editorOpen = false;
   editAt = null;
+  pendingKeyDelete = false;
   editorEl.classList.remove('show');
   updateMeter();
+}
+
+// Deleting a key from its own editor, rather than from a cramped tile. Two
+// taps, because the button is under the same thumb as Save.
+function deleteFromEditor() {
+  const del = document.getElementById('editDelete');
+  if (!del || !editAt) return;
+  if (!pendingKeyDelete) {
+    pendingKeyDelete = true;
+    del.textContent = 'Delete key?';
+    return;
+  }
+  const p = activePage();
+  const row = p && p.rows[editAt.row];
+  if (row) row.keys.splice(editAt.key, 1);
+  pendingKeyDelete = false;
+  if (store(pages)) closeEditor();
 }
 
 async function saveEditor() {
@@ -725,6 +725,10 @@ async function saveEditor() {
     action = { kind: 'modifier', code: editModifier };
   } else if (editKind === 'page') {
     if (!editTarget) { showSaveNote('Not saved: no page chosen.', true); return; }
+    if (activePage() && editTarget === activePage().id) {
+      showSaveNote('Not saved: a jump needs a page other than this one.', true);
+      return;
+    }
     action = { kind: 'page', to: editTarget };
   } else {
     if (!stepsEl.value.trim()) { showSaveNote('Not saved: the macro has no steps.', true); return; }
@@ -1066,7 +1070,6 @@ async function init() {
   if (typeof refreshMacroText === 'function') refreshMacroText();
   pages = [];
   activeId = '';
-  confirmDelete = null;
   pendingPageDelete = null;
   editMode = false;
   editorOpen = false;
@@ -1106,12 +1109,12 @@ async function init() {
   }
   document.getElementById('deckEdit').addEventListener('click', () => {
     editMode = !editMode;
-    confirmDelete = null;
-    pendingPageDelete = null;
+      pendingPageDelete = null;
     render();
   });
   saveEl.addEventListener('click', saveEditor);
   document.getElementById('editCancel').addEventListener('click', closeEditor);
+  document.getElementById('editDelete').addEventListener('click', deleteFromEditor);
   stepsEl.addEventListener('input', updatePreview);
   nameEl.addEventListener('input', updateMeter);
   runStopEl.addEventListener('click', onRunStop);
@@ -1172,7 +1175,6 @@ function destroy() {
   window.removeEventListener('pagehide', onPageHide);
   window.removeEventListener('beforeunload', onPageHide);
   pages = [];
-  confirmDelete = null;
   pendingPageDelete = null;
   editorFrame = null;
 }

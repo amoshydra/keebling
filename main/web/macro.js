@@ -395,16 +395,25 @@ export async function runMacro(steps, opts) {
 // block tree and prints itself back into the editor. Kept here so the app and
 // the editor print the same way.
 export function macroText(steps) {
+  // A parsed token carries its braces (`{ENTER}`); a caller may supply the bare
+  // name. Strip once here so printing a key never turns into `{{ENTER}}`.
+  const bare = (token) => String(token || '').replace(/^\{/, '').replace(/\}$/, '');
   let out = '';
   for (const step of steps || []) {
     if (step.kind === 'text') out += String(step.text || '').replace(/\{/g, '{{');
     else if (step.kind === 'wait') out += `{WAIT:${step.ms}}`;
-    else if (step.kind === 'consumer') out += `{${step.token}}`;
+    else if (step.kind === 'consumer') out += `{${bare(step.token)}}`;
     else if (step.kind === 'repeatStart') out += `{REPEAT:${step.count}}`;
     else if (step.kind === 'repeatEnd') out += '{/REPEAT}';
     else if (step.kind === 'key') {
-      if (step.mod) out += `{${modName(step.mod)}+${step.token}}`;
-      else out += `{${step.token}}`;
+      if (step.mod) {
+        // A chord step may carry only the final key ("C") or the whole token
+        // ("CTRL+C"); do not prepend the modifiers twice.
+        const tok = bare(step.token);
+        out += `{${tok.includes('+') ? tok : `${modName(step.mod)}+${tok}`}}`;
+      } else {
+        out += `{${bare(step.token)}}`;
+      }
     }
   }
   return out;

@@ -83,6 +83,7 @@ input, textarea, pre, code, #logText, #hidDecoded, #hidSummary {
   box-shadow: inset 0 0 0 1px rgba(179, 38, 30, .5);
 }
 .releasechip:active { background: rgba(179, 38, 30, .4); }
+.releasechip[hidden] { display: none; }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
 .dot.on { background: #4caf50; }
 .dot.off { background: #f44336; }
@@ -933,7 +934,7 @@ input[type=checkbox], input[type=radio] { width: 18px; height: 18px; }
   min-width: 0;
   font-size: 14px;
 }
-.pagerow button { height: 44px; padding: 0 14px; font-size: 12.5px; }
+.pagerow button { height: 44px; padding: 0 14px; font-size: 12.5px; white-space: nowrap; }
 .pagerow button:disabled { opacity: .4; }
 /* Pages are drawn by the same renderer as the Keys slot: rows keep their
    height and keys keep their spans. The tile chrome (name, source, edit
@@ -964,9 +965,9 @@ input[type=checkbox], input[type=radio] { width: 18px; height: 18px; }
 #macroList .lrow { min-height: 44px; }
 /* Editing needs room for Edit/Delete inside the key, so the row stops being a
    fixed height while the mode is on. */
-#macroList.editing .lrow { height: auto !important; min-height: 96px; }
+#macroList.editing .lrow { height: auto !important; min-height: 104px; }
 #macroList.editing .macro { justify-content: flex-start; padding-bottom: 40px; }
-#macroList.editing .macro .src { display: none; }
+
 /* The whole tile runs the button; the label is only read out. */
 .macro .run {
   position: absolute;
@@ -981,13 +982,17 @@ input[type=checkbox], input[type=radio] { width: 18px; height: 18px; }
 }
 .macro .run:active { background: rgba(255, 255, 255, .06); }
 .macro .name {
+  flex: 0 0 auto;
   font-weight: 600;
   font-size: 13px;
   line-height: 1.25;
   color: var(--ink);
-  word-break: break-word;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .macro .src {
+  flex: 0 0 auto;
   font-family: ui-monospace, SFMono-Regular, monospace;
   font-size: 10.5px;
   color: #8f8f8f;
@@ -1188,6 +1193,8 @@ input[type=checkbox], input[type=radio] { width: 18px; height: 18px; }
 
 /* Two kinds of deck button; the switch reads as a pair of choices, not tabs. */
 .segmented { display: flex; gap: 4px; }
+#editKind { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+#editKind button { height: 44px; }
 .segmented button {
   flex: 1 1 0;
   height: 36px;

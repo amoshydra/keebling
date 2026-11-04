@@ -477,34 +477,6 @@
       <p class="note" id="saveNote"></p>
     </section>
 
-    <details class="tool" id="pageImport">
-      <summary>Import a page</summary>
-      <div class="toolbody">
-        <p class="note">Paste the JSON the editor exports, or open the file. The
-          pages are added beside the ones you already have; an id or a name that
-          already exists is suffixed rather than overwritten.</p>
-        <textarea id="importText" rows="5" spellcheck="false" autocapitalize="none"
-                  autocomplete="off" placeholder='{ "app": "keebling", "kind": "layout", "pages": [ … ] }'></textarea>
-        <input id="importFile" type="file" accept="application/json,.json" hidden>
-        <div class="row" style="margin-top:8px">
-          <button id="importGo" class="primary">Import from the box</button>
-          <button id="importPick">Open a file…</button>
-        </div>
-        <p class="note" id="importNote"></p>
-      </div>
-    </details>
-
-    <details class="tool" id="pageEditor">
-      <summary>Editor</summary>
-      <div class="toolbody">
-        <p class="note">The same editor as
-          <a href="https://amoshydra.github.io/keebling/editor/" target="_blank" rel="noopener">the hosted one</a>,
-          built from the same source. Edit a page, then press <strong>Use</strong>.</p>
-        <iframe id="editorFrame" title="Keebling layout editor" loading="lazy"
-                src="editor.html" sandbox="allow-scripts allow-downloads"></iframe>
-      </div>
-    </details>
-
     <section id="editor">
       <h2 id="editorTitle">New key</h2>
       <div class="field">
@@ -569,8 +541,38 @@
       <div class="row" style="margin-top:12px">
         <button id="editSave" class="primary">Save key</button>
         <button id="editCancel">Cancel</button>
+        <button id="editDelete" class="danger" hidden>Delete key</button>
       </div>
     </section>
+
+
+    <details class="tool" id="pageImport">
+      <summary>Import a page</summary>
+      <div class="toolbody">
+        <p class="note">Paste the JSON the editor exports, or open the file. The
+          pages are added beside the ones you already have; an id or a name that
+          already exists is suffixed rather than overwritten.</p>
+        <textarea id="importText" rows="5" spellcheck="false" autocapitalize="none"
+                  autocomplete="off" placeholder='{ "app": "keebling", "kind": "layout", "pages": [ … ] }'></textarea>
+        <input id="importFile" type="file" accept="application/json,.json" hidden>
+        <div class="row" style="margin-top:8px">
+          <button id="importGo" class="primary">Import from the box</button>
+          <button id="importPick">Open a file…</button>
+        </div>
+        <p class="note" id="importNote"></p>
+      </div>
+    </details>
+
+    <details class="tool" id="pageEditor">
+      <summary>Editor</summary>
+      <div class="toolbody">
+        <p class="note">The same editor as
+          <a href="https://amoshydra.github.io/keebling/editor/" target="_blank" rel="noopener">the hosted one</a>,
+          built from the same source. Edit a page, then press <strong>Use</strong>.</p>
+        <iframe id="editorFrame" title="Keebling layout editor" loading="lazy"
+                src="editor.html" sandbox="allow-scripts allow-downloads"></iframe>
+      </div>
+    </details>
 
     <details class="tool" id="pageGrammar">
       <summary>Script tokens</summary>

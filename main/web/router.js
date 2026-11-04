@@ -87,6 +87,10 @@ export const Router = (() => {
       if (link.dataset.tab === tab) link.setAttribute('aria-current', 'page');
       else link.removeAttribute('aria-current');
     }
+    // Release exists for input that is being held on the Remote/Keys pad. On
+    // the other views there is nothing to release, so it is only noise.
+    const release = document.getElementById('bRelease');
+    if (release) release.hidden = !(tab === 'remote' || tab === 'keys');
   }
 
   function unmount() {
