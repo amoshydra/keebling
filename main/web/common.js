@@ -1,6 +1,54 @@
 // Shared by the shell and all four views: the access gate, authenticated
 // requests, and the device settings blob.
 
+// ---------------------------------------------------------------- device
+// Which dongle this page is driving. The device's own UI is served by it, so
+// the origin is the device; the published UI is served by someone else and has
+// to be told. A base is always an origin - the API paths are absolute - so a
+// saved value that is not one is ignored rather than used to build a URL.
+export const DEVICE_KEY = 'esp32remote.device';
+export let deviceBase = '';
+
+function normalizeBase(base) {
+  try {
+    const u = new URL(base);
+    return (u.protocol === 'http:' || u.protocol === 'https:') ? u.origin : '';
+  } catch (_) { return ''; }
+}
+
+export function setDeviceBase(base) {
+  const next = normalizeBase(base);
+  deviceBase = next;
+  try {
+    // The origin itself needs no key: it is the fallback, and storing it would
+    // survive a move to another address for no benefit.
+    if (next && next !== location.origin) localStorage.setItem(DEVICE_KEY, next);
+    else localStorage.removeItem(DEVICE_KEY);
+  } catch (_) {}
+  return deviceBase;
+}
+
+export function currentBase() {
+  return deviceBase || location.origin;
+}
+
+export function deviceUrl(path) {
+  return currentBase() + path;
+}
+
+// ws:// for http://, wss:// for https:// - the device has no TLS yet, but a
+// published page on HTTPS still needs the mirror of whatever base it was given.
+export function wsUrl(path) {
+  return currentBase().replace(/^http/, 'ws') + path;
+}
+
+// Restored before anything can ask for a URL, which is why this runs at load
+// rather than inside the gate.
+try {
+  const saved = normalizeBase(localStorage.getItem(DEVICE_KEY) || '');
+  if (saved) deviceBase = saved;
+} catch (_) {}
+
 // ---------------------------------------------------------------- access code
 export const TOKEN_KEY = 'esp32remote.token';
 export const TOKEN_LEN = 12;
@@ -39,9 +87,13 @@ export function loadToken() {
   return loadStoredToken();
 }
 
-export async function verifyToken(t) {
+// An optional base lets the gate check a device before it becomes the current
+// one, which is what the server list needs.
+export async function verifyToken(t, base) {
+  const origin = base ? normalizeBase(base) : currentBase();
+  if (!origin) return false;
   try {
-    const r = await fetch(`/auth?token=${encodeURIComponent(t)}`, { cache: 'no-store' });
+    const r = await fetch(`${origin}/auth?token=${encodeURIComponent(t)}`, { cache: 'no-store' });
     return r.ok;
   } catch (_) { return false; }
 }
@@ -49,7 +101,7 @@ export async function verifyToken(t) {
 // ---------------------------------------------------------------- requests
 export function apiUrl(path) {
   const sep = path.includes('?') ? '&' : '?';
-  return `${path}${sep}token=${encodeURIComponent(token)}`;
+  return `${deviceUrl(path)}${sep}token=${encodeURIComponent(token)}`;
 }
 
 export async function apiFetch(path, opts) {

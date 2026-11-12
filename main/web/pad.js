@@ -17,7 +17,7 @@
 // each time; destroy() has to put back what init() took out.
 
 
-import { HID_KEYS, apiFetch, appSettings, hostLayout, layoutTextMap, token } from './common.js';
+import { HID_KEYS, apiFetch, appSettings, hostLayout, layoutTextMap, token, wsUrl } from './common.js';
 import { renderPage as renderLayoutPage } from './layout.js';
 import * as Pages from './pages.js';
 import { parseMacro, runMacro, stepsFromBlocks } from './macro.js';
@@ -70,7 +70,7 @@ const HELP_KEY = 'esp32remote.helpSeen';
 
 // ---------------------------------------------------------------- transport
 function connect() {
-  ws = new WebSocket(`ws://${location.host}/ws?token=${encodeURIComponent(token)}`);
+  ws = new WebSocket(wsUrl(`/ws?token=${encodeURIComponent(token)}`));
   ws.onopen = onSocketOpen;
   ws.onclose = onSocketClose;
   ws.onerror = () => {

@@ -11,7 +11,7 @@
 // The view is mounted and unmounted by router.js: refs and listeners belong to
 // init(), and destroy() has to stop the socket, the heartbeat and any run.
 
-import { HID_KEYS, appSettings, saveSettingsToDevice, token } from './common.js';
+import { HID_KEYS, appSettings, saveSettingsToDevice, token, wsUrl } from './common.js';
 import { COLOURS, CONSUMER_CHOICES, KEY_CHOICES, keyName } from './deck.js';
 import {
   describeMacroStep, macroText, parseMacro, refreshMacroText, runMacro, stepsFromBlocks,
@@ -68,7 +68,7 @@ let reconnectTimer = null;
 let reconnectAttempts = 0;
 
 function connect() {
-  ws = new WebSocket(`ws://${location.host}/ws?token=${encodeURIComponent(token)}`);
+  ws = new WebSocket(wsUrl(`/ws?token=${encodeURIComponent(token)}`));
   ws.onopen = () => {
     wsReady = true;
     reconnectAttempts = 0;

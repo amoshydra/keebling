@@ -95,6 +95,55 @@ __webTests.push({
 
 __webTests.push({
   page: 'control',
+  name: 'a device base is reduced to an origin and everything follows it',
+  fn: async () => {
+    const code = window.token;
+    __assert(code && code.length === 12, 'no code to build a URL with');
+
+    try {
+      // A pasted address may carry a path or a query; only the origin is useful.
+      window.setDeviceBase('http://192.168.1.50:8080/some/path?x=1');
+      __assert(window.currentBase() === 'http://192.168.1.50:8080',
+        `the base was not reduced to an origin: ${window.currentBase()}`);
+      __assert(window.apiUrl('/state') === `http://192.168.1.50:8080/state?token=${code}`,
+        `apiUrl went to ${window.apiUrl('/state')}`);
+      __assert(window.wsUrl('/ws') === 'ws://192.168.1.50:8080/ws',
+        `the socket URL went to ${window.wsUrl('/ws')}`);
+      __assert(localStorage.getItem('esp32remote.device') === 'http://192.168.1.50:8080',
+        'the base was not remembered');
+    } finally {
+      window.setDeviceBase('');
+    }
+
+    // The device's own UI is the fallback, and it must leave no key behind.
+    __assert(window.currentBase() === location.origin,
+      'clearing the base did not fall back to the page origin');
+    __assert(localStorage.getItem('esp32remote.device') === null,
+      'the saved base survived a clear');
+    __assert(window.apiUrl('/state').startsWith(`${location.origin}/state?token=`),
+      'apiUrl did not fall back to the page origin');
+  },
+});
+
+__webTests.push({
+  page: 'control',
+  name: 'a base that is not http(s) is refused',
+  fn: async () => {
+    try {
+      // A base is used to build URLs with the code in them, so a scheme that is
+      // not the device's must never be accepted.
+      window.setDeviceBase('javascript:alert(document.cookie)');
+      __assert(window.currentBase() === location.origin, 'a javascript: base was accepted');
+      window.setDeviceBase('not a url');
+      __assert(window.currentBase() === location.origin, 'a junk base was accepted');
+    } finally {
+      window.setDeviceBase('');
+    }
+  },
+});
+
+__webTests.push({
+  page: 'control',
   name: 'the captured state is wired to the socket the pad opens',
   fn: async () => {
     // The state test below calls the handlers directly; this proves the socket
