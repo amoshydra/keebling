@@ -144,6 +144,54 @@ __webTests.push({
 
 __webTests.push({
   page: 'control',
+  name: 'a device record is normalized, and one with no usable address is dropped',
+  fn: async () => {
+    localStorage.setItem('esp32remote.devices', JSON.stringify([
+      { id: 'a', name: 'Desk', hosts: ['192.168.1.9'], token: 'abcdefghjkmn' },
+      { id: 'b', hosts: [] },                            // nothing to probe
+      { id: 'c', hosts: ['javascript:alert(1)'], token: 'x' },
+    ]));
+    try {
+      const list = window.loadDevices();
+      __assert(list.length === 1, `kept ${list.length} records`);
+      __assert(list[0].hosts[0] === 'http://192.168.1.9',
+        `the address became ${list[0].hosts[0]}`);
+      __assert(list[0].token === 'ABCDEFGHJKMN',
+        `the code became ${list[0].token}`);
+    } finally {
+      localStorage.removeItem('esp32remote.devices');
+    }
+  },
+});
+
+__webTests.push({
+  page: 'control',
+  name: 'checkDevice separates a wrong code from an unreachable device',
+  fn: async () => {
+    // The difference is only visible because the firmware puts ACAO on its
+    // errors; without it both arrive as the same TypeError.
+    const ok = await window.checkDevice(location.origin, window.token);
+    __assert(ok.state === 'ok', `the stub's own code reported ${ok.state}`);
+
+    const bad = await window.checkDevice(location.origin, 'ZZZZZZZZZZZZ');
+    __assert(bad.state === 'rejected', `a wrong code reported ${bad.state}`);
+
+    const gone = await window.checkDevice('http://127.0.0.1:1', window.token);
+    __assert(gone.state === 'unreachable' || gone.state === 'timeout',
+      `a dead port reported ${gone.state}`);
+  },
+});
+
+__webTests.push({
+  page: 'control',
+  name: 'the device origin is recognised by the repair page it serves',
+  fn: async () => {
+    __assert(await window.isDeviceOrigin(), 'the stub was not recognised as a device');
+  },
+});
+
+__webTests.push({
+  page: 'control',
   name: 'the captured state is wired to the socket the pad opens',
   fn: async () => {
     // The state test below calls the handlers directly; this proves the socket

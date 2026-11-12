@@ -48,12 +48,34 @@
       <rect x="98" y="79" width="10" height="5" rx="2" fill="#e8d5b5"/>
     </svg>
     <h1>Keebling</h1>
-    <p>Enter the 12-character code shown on the device's LCD &mdash; or scan its QR.</p>
-    <input id="tokenInput" type="text" inputmode="latin" autocomplete="off"
-           autocapitalize="characters" spellcheck="false" maxlength="20"
-           placeholder="XXXXXXXXXXXX">
-    <button id="tokenGo" class="primary">Connect</button>
-    <p class="err" id="gateErr"></p>
+
+    <!-- The device's own UI: one dongle, so all it needs is the code. -->
+    <div id="gateCode">
+      <p>Enter the 12-character code shown on the device's LCD &mdash; or scan its QR.</p>
+      <input id="tokenInput" class="code" type="text" inputmode="latin" autocomplete="off"
+             autocapitalize="characters" spellcheck="false" maxlength="20"
+             placeholder="XXXXXXXXXXXX">
+      <button id="tokenGo" class="primary">Connect</button>
+      <p class="err" id="gateErr"></p>
+    </div>
+
+    <!-- The published UI: it has to be told which dongle on the network, and
+         the list is per browser because the page never learns more than that. -->
+    <div id="hub" hidden>
+      <p>Choose a device on this network.</p>
+      <ul id="hubList" class="hub-list"></ul>
+      <details id="hubAdd" class="hub-add">
+        <summary>Add a device</summary>
+        <input id="hubName" type="text" autocomplete="off" placeholder="Name (optional)">
+        <input id="hubAddr" type="text" inputmode="url" autocomplete="off"
+               spellcheck="false" placeholder="192.168.4.1">
+        <input id="hubCode" class="code" type="text" inputmode="latin" autocomplete="off"
+               autocapitalize="characters" spellcheck="false" maxlength="20"
+               placeholder="Access code">
+        <button id="hubGo" class="primary">Add and connect</button>
+      </details>
+      <p class="err" id="hubErr"></p>
+    </div>
   </div>
 </div>
 
@@ -130,8 +152,9 @@
         </li>
       </ul>
       <p class="help-note">On a computer, click the pad to capture the mouse and
-        keyboard, and press Esc to release them. While captured, the small dot
-        in the pad corner lights when input is going out.</p>
+        keyboard. Esc releases the mouse; where the browser supports keyboard
+        capture, hold Esc for two seconds to release that too. While captured,
+        the small dot in the pad corner lights when input is going out.</p>
       <button id="helpClose" class="primary" type="button">Got it</button>
     </div>
   </div>
@@ -234,6 +257,13 @@
       <p class="note">ASCII only, up to 31 characters — anything else is replaced
         with “?”. Both take effect after a restart, and the host must re-read the
         USB descriptors (replug the dongle).</p>
+      <!-- Only the published UI can be pointed at more than one dongle, so this
+           block stays hidden when the dongle itself served the page. -->
+      <div class="field" id="activeDeviceBlock" hidden>
+        <span>Page connected to</span>
+        <p class="note" id="activeDeviceBase">—</p>
+        <button id="changeDevice" type="button">Change device…</button>
+      </div>
       <div class="row">
         <button id="restart">Restart device</button>
       </div>

@@ -7,7 +7,7 @@
 // mounted.
 
 
-import { apiFetch, apiPost, appSettings, forgetCode, hostLayout, hostLayoutId, saveSettingsToDevice, setHostLayout, setLocal } from './common.js';
+import { apiFetch, apiPost, appSettings, clearStoredToken, currentBase, forgetCode, hostLayout, hostLayoutId, isDeviceOrigin, saveSettingsToDevice, setDeviceBase, setHostLayout, setLocal } from './common.js';
 import * as Pages from './pages.js';
 
 export const SettingsView = (() => {
@@ -1326,6 +1326,21 @@ async function init() {
   }
   renderSetupList();
   showSetupPage(pageFromHash());
+
+  // The published UI can be pointed at any dongle on the network; the device's
+  // own copy has exactly one and must not offer to change it.
+  const activeBlock = document.getElementById('activeDeviceBlock');
+  if (activeBlock && !(await isDeviceOrigin())) {
+    const baseEl = document.getElementById('activeDeviceBase');
+    if (baseEl) baseEl.textContent = currentBase();
+    activeBlock.hidden = false;
+    document.getElementById('changeDevice').addEventListener('click', () => {
+      // Back to the list: the saved code belongs to the device being left.
+      setDeviceBase('');
+      clearStoredToken();
+      location.reload();
+    });
+  }
   const setupBack = document.getElementById('setupBack');
   if (setupBack) setupBack.addEventListener('click', () => goToPage(''));
   probeAttach();

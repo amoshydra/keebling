@@ -10,8 +10,14 @@ export const DEVICE_KEY = 'esp32remote.device';
 export let deviceBase = '';
 
 function normalizeBase(base) {
+  let v = String(base || '').trim();
+  // A space is not a hostname. URL would read "not a url" as the host "not"
+  // with a path, which is a device at an address nobody typed.
+  if (!v || /\s/.test(v)) return '';
+  // A bare address is what the LCD shows, so it is what gets typed.
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(v)) v = 'http://' + v;
   try {
-    const u = new URL(base);
+    const u = new URL(v);
     return (u.protocol === 'http:' || u.protocol === 'https:') ? u.origin : '';
   } catch (_) { return ''; }
 }
@@ -199,8 +205,26 @@ export function hideGate() {
   if (gate) gate.classList.add('hidden');
 }
 
-// Runs onReady() once a valid code is available, prompting for it if needed.
+// Runs onReady() once this page knows which device it is driving and holds a
+// valid code for it. Who served the page changes the question: the dongle's own
+// UI has exactly one device, while the published UI has none until one is
+// picked.
 export async function requireAuth(onReady) {
+  if (await isDeviceOrigin()) {
+    await requireCode(onReady);
+    return;
+  }
+
+  // The published UI is the one that can end up on the dongle's access point
+  // with no internet, so it is the one that needs a cached shell.
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
+  await requireHub(onReady);
+}
+
+// The device's own UI: one code, one device, exactly as it always was.
+async function requireCode(onReady) {
   // URL parameter wins (an explicit hand-off), otherwise the saved code.
   // Reading localStorage unconditionally matters: this was once gated on the
   // URL having a token, which meant the saved code was written and never read.
@@ -220,6 +244,10 @@ export async function requireAuth(onReady) {
   const gate = document.getElementById('gate');
   if (!gate) return;              // no shell markup, nothing to prompt with
   gate.classList.remove('hidden');
+  const hub = document.getElementById('hub');
+  const codeBox = document.getElementById('gateCode');
+  if (hub) hub.hidden = true;
+  if (codeBox) codeBox.hidden = false;
   const input = document.getElementById('tokenInput');
   const err = document.getElementById('gateErr');
 
@@ -235,10 +263,7 @@ export async function requireAuth(onReady) {
       input.select();
       return;
     }
-    token = t;
-    storeToken(token);
-    hideGate();
-    onReady();
+    enterDevice(currentBase(), t, onReady);
   };
 
   document.getElementById('tokenGo').addEventListener('click', submit);
@@ -247,11 +272,274 @@ export async function requireAuth(onReady) {
   });
 }
 
+// Commit a choice and let the shell boot. Both gates end here, so "which device
+// is this session for" has exactly one answer.
+function enterDevice(base, code, onReady) {
+  setDeviceBase(base);
+  token = normalizeToken(code);
+  storeToken(token);
+  hideGate();
+  onReady();
+}
+
+// ---------------------------------------------------------------- device list
+// Devices the published UI has been told about, in this browser. They are not
+// discovered: a static page cannot enumerate a LAN, and sweeping addresses is
+// the fingerprinting the Local Network Access permission exists to prevent.
+export const DEVICES_KEY = 'esp32remote.devices';
+
+export function loadDevices() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(DEVICES_KEY) || '[]');
+    if (!Array.isArray(raw)) return [];
+    return raw.map((d) => {
+      if (!d || typeof d !== 'object' || !Array.isArray(d.hosts)) return null;
+      const hosts = d.hosts.map(normalizeBase).filter(Boolean);
+      if (!hosts.length) return null;
+      return {
+        id: String(d.id || hosts[0]),
+        name: String(d.name || ''),
+        hosts: [...new Set(hosts)],
+        token: normalizeToken(d.token || ''),
+      };
+    }).filter(Boolean);
+  } catch (_) { return []; }
+}
+
+export function saveDevices(devices) {
+  try { localStorage.setItem(DEVICES_KEY, JSON.stringify(devices)); } catch (_) {}
+}
+
+// An id survives the address changing, which is the point of having one.
+function newDeviceId() {
+  try {
+    if (crypto.randomUUID) return crypto.randomUUID();
+  } catch (_) {}
+  return `d${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+}
+
+// Is a device at this address, and is the code right? The 403 is only readable
+// because the firmware puts Access-Control-Allow-Origin on its error responses;
+// without that, "wrong code" and "unreachable" are the same TypeError.
+export async function checkDevice(base, code) {
+  const origin = normalizeBase(base);
+  if (!origin) return { state: 'bad-address' };
+
+  const t = normalizeToken(code);
+  if (t.length !== TOKEN_LEN) return { state: 'bad-code' };
+
+  try {
+    const r = await fetch(`${origin}/auth?token=${encodeURIComponent(t)}`,
+                          { cache: 'no-store', signal: AbortSignal.timeout(5000) });
+    if (r.ok) return { state: 'ok', base: origin };
+    if (r.status === 403) return { state: 'rejected', base: origin };
+    return { state: 'unexpected', base: origin, status: r.status };
+  } catch (e) {
+    return { state: e && e.name === 'TimeoutError' ? 'timeout' : 'unreachable', base: origin };
+  }
+}
+
+// The device serves recover.html itself, and the published build leaves it out,
+// so one request answers "am I being served by the dongle?" without a build flag
+// or a version check. Cached: the answer cannot change for a given page.
+let deviceOriginAnswer = null;
+export async function isDeviceOrigin() {
+  if (deviceOriginAnswer !== null) return deviceOriginAnswer;
+  try {
+    deviceOriginAnswer = (await fetch('recover.html', { cache: 'no-store' })).ok;
+  } catch (_) {
+    deviceOriginAnswer = false;
+  }
+  return deviceOriginAnswer;
+}
+
+// The published UI: pick a device, then boot on it.
+async function requireHub(onReady) {
+  const gate = document.getElementById('gate');
+  const hub = document.getElementById('hub');
+  if (!gate || !hub) { onReady(); return; }   // no shell markup: nothing to ask with
+
+  gate.classList.remove('hidden');
+  hub.hidden = false;
+  const codeBox = document.getElementById('gateCode');
+  if (codeBox) codeBox.hidden = true;
+
+  const listEl = document.getElementById('hubList');
+  const errEl = document.getElementById('hubErr');
+  const devices = loadDevices();
+  const status = new Map();
+
+  // A saved device that still answers boots straight through. The list is for
+  // the first visit, and for when an address has moved.
+  const savedHost = currentBase();
+  const saved = devices.find((d) => d.hosts.includes(savedHost));
+  const savedCode = (saved && saved.token) || token;
+  if (saved && savedCode && await verifyToken(savedCode, savedHost)) {
+    enterDevice(savedHost, savedCode, onReady);
+    return;
+  }
+
+  const LABEL = { on: 'online', off: 'offline', warn: 'no code', checking: 'checking' };
+  const DOT = { on: 'on', off: 'off', warn: 'warn' };
+
+  const render = () => {
+    listEl.replaceChildren();
+    if (!devices.length) {
+      const p = document.createElement('p');
+      p.className = 'hub-empty';
+      p.textContent = 'No devices yet. Add one below.';
+      listEl.append(p);
+      return;
+    }
+    for (const dev of devices) {
+      const row = document.createElement('li');
+      row.className = 'hub-row';
+
+      const pick = document.createElement('button');
+      pick.type = 'button';
+      pick.className = 'hub-pick';
+      const state = status.get(dev.id) || 'checking';
+      const dot = document.createElement('span');
+      dot.className = 'dot ' + (DOT[state] || 'off');
+      const name = document.createElement('span');
+      name.className = 'hub-name';
+      name.textContent = dev.name || dev.hosts[0];
+      const label = document.createElement('span');
+      label.className = 'hub-state';
+      label.textContent = LABEL[state] || state;
+      pick.append(dot, name, label);
+      pick.addEventListener('click', () => choose(dev));
+
+      const del = document.createElement('button');
+      del.type = 'button';
+      del.className = 'hub-del';
+      del.setAttribute('aria-label', `Remove ${dev.name || dev.hosts[0]}`);
+      del.textContent = '×';
+      del.addEventListener('click', () => {
+        devices.splice(devices.indexOf(dev), 1);
+        saveDevices(devices);
+        render();
+      });
+
+      row.append(pick, del);
+      listEl.append(row);
+    }
+  };
+
+  const choose = async (dev) => {
+    errEl.textContent = '';
+    if (!dev.token) {
+      errEl.textContent = 'That device has no saved code. Add it again below.';
+      return;
+    }
+    for (const host of dev.hosts) {
+      status.set(dev.id, 'checking');
+      render();
+      const r = await checkDevice(host, dev.token);
+      if (r.state === 'ok') {
+        // Remember the address that worked, so the next visit tries it first.
+        dev.hosts = [host, ...dev.hosts.filter((h) => h !== host)];
+        saveDevices(devices);
+        enterDevice(host, dev.token, onReady);
+        return;
+      }
+      if (r.state === 'rejected') {
+        errEl.textContent = 'Code rejected. Check the LCD on that device.';
+        return;
+      }
+    }
+    status.set(dev.id, 'off');
+    render();
+    errEl.textContent = 'No answer — is that device on this network?';
+  };
+
+  const add = async () => {
+    const name = document.getElementById('hubName').value.trim();
+    const addr = document.getElementById('hubAddr').value.trim();
+    const code = normalizeToken(document.getElementById('hubCode').value);
+    errEl.textContent = '';
+
+    if (code.length !== TOKEN_LEN) {
+      errEl.textContent = `The code is ${TOKEN_LEN} characters.`;
+      return;
+    }
+    if (!normalizeBase(addr)) {
+      errEl.textContent = 'That address does not look like one.';
+      return;
+    }
+
+    const go = document.getElementById('hubGo');
+    go.disabled = true;
+    errEl.textContent = 'checking...';
+    const r = await checkDevice(addr, code);
+    go.disabled = false;
+
+    if (r.state === 'ok') {
+      const existing = devices.find((d) => d.hosts.includes(r.base));
+      if (existing) {
+        existing.token = code;
+        if (name) existing.name = name;
+      } else {
+        devices.push({ id: newDeviceId(), name, hosts: [r.base], token: code });
+      }
+      saveDevices(devices);
+      enterDevice(r.base, code, onReady);
+      return;
+    }
+    if (r.state === 'rejected') {
+      errEl.textContent = 'Code rejected. Check the LCD on that device.';
+      return;
+    }
+    if (r.state === 'bad-code') {
+      errEl.textContent = `The code is ${TOKEN_LEN} characters.`;
+      return;
+    }
+    errEl.textContent = r.state === 'timeout'
+      ? 'No answer — is that device on this network?'
+      : 'Could not reach that address.';
+  };
+
+  const probeAll = async () => {
+    await Promise.all(devices.map(async (dev) => {
+      if (!dev.token) { status.set(dev.id, 'warn'); return; }
+      for (const host of dev.hosts) {
+        const r = await checkDevice(host, dev.token);
+        if (r.state === 'ok') { status.set(dev.id, 'on'); return; }
+        if (r.state === 'rejected') { status.set(dev.id, 'warn'); return; }
+      }
+      status.set(dev.id, 'off');
+    }));
+    render();
+  };
+
+  render();
+  document.getElementById('hubGo').addEventListener('click', add);
+  for (const id of ['hubName', 'hubAddr', 'hubCode']) {
+    document.getElementById(id).addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); add(); }
+    });
+  }
+  probeAll();
+}
+
 // ---------------------------------------------------------------- misc
 // Recover the stored code so the settings page's "Forget code" behaves.
 export function forgetCode() {
   clearStoredToken();
   token = '';
+  // On the published UI the code belongs to a device record, so clearing only
+  // the session copy would leave the hub listing a code that no longer works.
+  if (deviceBase) {
+    const devices = loadDevices();
+    let changed = false;
+    for (const d of devices) {
+      if (d.hosts.includes(deviceBase) && d.token) {
+        d.token = '';
+        changed = true;
+      }
+    }
+    if (changed) saveDevices(devices);
+  }
 }
 
 

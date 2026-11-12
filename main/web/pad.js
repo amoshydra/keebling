@@ -123,12 +123,15 @@ function setStatus(text, cls) {
 // all land on the same answer.
 function refreshCaptureUi() {
   if (!pad) return;
-  pad.classList.toggle('captured', captured);
-  pad.classList.toggle('link-down', captured && !wsReady);
+  const active = capturing();
+  pad.classList.toggle('captured', active);
+  pad.classList.toggle('link-down', active && !wsReady);
   if (escHintEl) {
-    escHintEl.textContent = wsReady
-      ? 'Mouse and keyboard captured — Esc releases it'
-      : 'Link lost — Esc releases the mouse';
+    escHintEl.textContent = !wsReady
+      ? 'Link lost — Esc releases the mouse'
+      : keysLocked
+        ? 'Keyboard captured — Esc goes to the host; hold it to release'
+        : 'Mouse and keyboard captured — Esc releases it';
   }
 }
 
@@ -137,7 +140,7 @@ function refreshCaptureUi() {
 let pulseTimer = null;
 
 function markInput() {
-  if (!captured || !pulseEl) return;
+  if (!capturing() || !pulseEl) return;
   pulseEl.classList.add('tick');
   clearTimeout(pulseTimer);
   pulseTimer = setTimeout(() => {
@@ -459,6 +462,68 @@ function onWindowBlur() {
   releaseAll();
 }
 
+// ---------------------------------------------------------------- keyboard capture
+// Pointer lock is enough for the mouse, but not for the keys the browser owns.
+// Esc is the gesture that *releases* pointer lock, so it can never reach the
+// host; Win, Alt+Tab and Ctrl+W are claimed by the OS or the browser before the
+// page sees them. The Keyboard Lock API hands them over, but only in
+// JavaScript-initiated fullscreen and only from a secure origin - which is the
+// whole reason the UI is also published from HTTPS.
+//
+// `keysLocked` is deliberately separate from `captured`: losing the pointer (a
+// tab switch, a second screen) must not silently stop the keyboard.
+let keysLocked = false;
+
+function keyCaptureSupported() {
+  return !!(navigator.keyboard && navigator.keyboard.lock &&
+            document.documentElement.requestFullscreen);
+}
+
+// A phone has no physical keyboard to hand over, and fullscreen there costs the
+// tab bar for nothing.
+function wantsKeyCapture() {
+  return keyCaptureSupported() && window.matchMedia('(pointer: fine)').matches;
+}
+
+async function requestKeyCapture() {
+  if (!wantsKeyCapture() || keysLocked) return;
+  try {
+    if (!document.fullscreenElement) await document.documentElement.requestFullscreen();
+    await navigator.keyboard.lock();
+    keysLocked = true;
+    refreshCaptureUi();
+    flash('Esc now goes to the host — hold it to release');
+  } catch (_) {
+    // Refused, or the permission prompt was dismissed. Everything still works;
+    // Esc simply stays the browser's release gesture.
+  }
+}
+
+function releaseKeyCapture() {
+  if (!keysLocked) return;
+  keysLocked = false;
+  try { navigator.keyboard.unlock(); } catch (_) {}
+  if (document.fullscreenElement) {
+    document.exitFullscreen().catch(() => {});
+  }
+  refreshCaptureUi();
+}
+
+function onFullscreenChange() {
+  // The browser's escape hatch is a long Esc press. Leaving fullscreen that way
+  // must not leave the keyboard locked and the page unable to see it.
+  if (!document.fullscreenElement && keysLocked) {
+    keysLocked = false;
+    try { navigator.keyboard.unlock(); } catch (_) {}
+    refreshCaptureUi();
+    releaseAll();
+  }
+}
+
+function capturing() {
+  return captured || keysLocked;
+}
+
 // ---------------------------------------------------------------- mouse capture
 // Pointer lock is the only way a desktop mouse can drive the remote cursor
 // without being bounded by the window edge.
@@ -484,6 +549,10 @@ function requestCapture() {
   let p;
   try { p = pad.requestPointerLock(); } catch (_) { captureRefused(); return; }
   if (p && typeof p.then === 'function') p.then(undefined, captureRefused);
+
+  // Same gesture, same moment: fullscreen and the keyboard lock both need user
+  // activation, and this pointerdown is the only one coming.
+  if (wantsKeyCapture()) requestKeyCapture();
 }
 
 function onMousePointerDown(e) {
@@ -517,9 +586,10 @@ function onPointerLockChange() {
   } else {
     // Capture is gone: Esc, a tab switch, anything. Whatever was held was held
     // in order to drive the remote, so let it go rather than leave the host with
-    // a key down and no way to lift it.
+    // a key down and no way to lift it. The keyboard lock outlives the pointer
+    // on purpose, so it keeps its keys.
     releaseWakeLock();
-    releaseAll();
+    if (!keysLocked) releaseAll();
   }
 }
 
@@ -1284,13 +1354,15 @@ function onKeyDown(e) {
     if (e.key === 'Escape') { e.preventDefault(); closeHelp(); }
     return;
   }
-  if (e.key === 'Escape' && captured) return;    // let the browser exit capture
+  // Without the keyboard lock, Esc is the browser's release gesture and must
+  // stay that way. With it, Esc belongs to the host like every other key.
+  if (e.key === 'Escape' && captured && !keysLocked) return;
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
   // A physical key goes to the host only while the pad has the pointer. Without
   // capture the page is just a page: keystrokes belong to the browser, and
   // sending them anyway means a stray key lands on the host with nothing on
   // screen saying it would. The capture hint is what says the keyboard is held.
-  if (!captured) return;
+  if (!capturing()) return;
   e.preventDefault();
   if (e.repeat || held.has(e.code)) return;      // HID reports are snapshots
   held.add(e.code);
@@ -1302,7 +1374,7 @@ function onKeyUp(e) {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
   // Losing capture runs releaseAll(), so a release that arrives afterwards has
   // nothing to lift and must not be sent either.
-  if (!captured) return;
+  if (!capturing()) return;
   e.preventDefault();
   held.delete(e.code);
   sendKeyboard();
@@ -1681,6 +1753,9 @@ function init() {
   pointers.clear();
   mode = null;
   dragHeld = false;
+  // A skipped destroy() must not leave the browser holding keys for a view that
+  // no longer exists.
+  if (keysLocked) releaseKeyCapture();
   captured = false;
   wsReady = false;
   typing = false;
@@ -1847,6 +1922,7 @@ function init() {
   document.addEventListener('visibilitychange', onVisibilityChange);
   document.addEventListener('pointerlockchange', onPointerLockChange);
   document.addEventListener('pointerlockerror', captureRefused);
+  document.addEventListener('fullscreenchange', onFullscreenChange);
 
   window.addEventListener('blur', onWindowBlur);
   window.addEventListener('mousedown', onMouseDown);
@@ -1908,6 +1984,7 @@ function destroy() {
     try { document.exitPointerLock(); } catch (_) {}
   }
   captured = false;
+  releaseKeyCapture();
   releaseWakeLock();
 
   if (ws) {
@@ -1932,6 +2009,7 @@ function destroy() {
   document.removeEventListener('visibilitychange', onVisibilityChange);
   document.removeEventListener('pointerlockchange', onPointerLockChange);
   document.removeEventListener('pointerlockerror', captureRefused);
+  document.removeEventListener('fullscreenchange', onFullscreenChange);
 
   window.removeEventListener('blur', onWindowBlur);
   window.removeEventListener('mousedown', onMouseDown);

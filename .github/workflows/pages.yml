@@ -22,13 +22,28 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
       - uses: actions/configure-pages@v5
       - name: Stage the public site
         run: |
-          mkdir -p _site
+          mkdir -p _site/app
           cp site/index.html site/styles.css site/.nojekyll site/probe.html _site/
           cp -r site/assets _site/
           cp -r site/editor _site/
+          # The app is the same bundle the firmware serves, published so it has
+          # a trusted HTTPS origin - which is what unlocks Keyboard Lock.
+          # web.zip is an upload for the device, and recover.html is the
+          # firmware-only repair page.
+          cp main/web/dist/* _site/app/
+          rm -f _site/app/web.zip _site/app/recover.html
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site

@@ -263,19 +263,78 @@ textarea { font-family: ui-monospace, SFMono-Regular, monospace; resize: vertica
 .gate-box input {
   width: 100%;
   padding: 12px;
-  font-size: 20px;
-  text-align: center;
-  letter-spacing: 3px;
-  font-family: ui-monospace, monospace;
+  font-size: 15px;
   background: #0d0d0d;
   color: var(--ink);
   border: 1px solid var(--line);
   border-radius: 8px;
   margin-bottom: 12px;
+}
+/* The access code is read off an LCD and typed blind, so it gets the wide,
+   spaced, monospaced treatment the address fields do not. */
+.gate-box input.code {
+  font-size: 20px;
+  text-align: center;
+  letter-spacing: 3px;
+  font-family: ui-monospace, monospace;
   text-transform: uppercase;
 }
-.gate-box button { width: 100%; }
+.gate-box button.primary { width: 100%; }
 .gate-box .err { color: #ff6b6b; font-size: 13px; margin: 10px 0 0; min-height: 16px; }
+
+/* The published UI's device list. The row is the whole tap target: this is a
+   phone first, and there is nothing else on the screen to aim at. */
+.hub-list { list-style: none; margin: 0; padding: 0; text-align: left; }
+.hub-row { display: flex; align-items: stretch; gap: 6px; }
+.hub-pick {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  padding: 12px 10px;
+  margin-bottom: 8px;
+  background: #0d0d0d;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+}
+.hub-pick:hover { border-color: #3a3a3a; }
+.hub-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hub-state {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: #777;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.hub-del {
+  flex: 0 0 auto;
+  width: 42px;
+  margin-bottom: 8px;
+  background: #0d0d0d;
+  color: #777;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+.hub-del:hover { color: #ff6b6b; border-color: #4a2a2a; }
+.hub-empty { font-size: 13px; color: #777; text-align: left; margin-bottom: 10px; }
+.hub-add { text-align: left; margin: 2px 0 0; }
+.hub-add summary { font-size: 13px; color: #bbb; cursor: pointer; padding: 6px 0; }
+.hub-add input { margin-top: 8px; }
 
 /* ---------------------------------------------------------------- shell */
 /* The shell owns the top bar and one <main>. The control view is a flex
