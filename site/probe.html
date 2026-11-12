@@ -209,6 +209,16 @@ async function permissionState(name) {
   }
 }
 
+// Chrome exposes local-network-access; Firefox 147+ uses local-network. Report
+// whichever this build understands, so "unsupported" means neither does.
+async function lnaState() {
+  for (const name of ['local-network-access', 'local-network']) {
+    const state = await permissionState(name);
+    if (state !== 'unsupported') return { name, state };
+  }
+  return { name: null, state: 'unsupported' };
+}
+
 async function renderEnvironment() {
   const rows = [];
   const add = (k, v) => {
@@ -224,13 +234,12 @@ async function renderEnvironment() {
   add('fullscreen API', String(!!document.documentElement.requestFullscreen));
   add('keyboard lock', String(!!(navigator.keyboard && navigator.keyboard.lock)));
   add('pointer lock', String('requestPointerLock' in Element.prototype));
-  add('local network', await permissionState('local-network-access'));
+  const lna = await lnaState();
+  add('local network', lna.state + (lna.name ? ` (${lna.name})` : ''));
 
   // Chrome 145 split the setting in two; query whatever this build knows.
-  for (const name of ['local-network', 'apps-on-device']) {
-    const state = await permissionState(name);
-    if (state !== 'unsupported') add(name, state);
-  }
+  const split = await permissionState('apps-on-device');
+  if (split !== 'unsupported') add('apps on device', split);
 
   const brands = navigator.userAgentData && navigator.userAgentData.brands;
   add('browser', brands && brands.length
@@ -249,9 +258,9 @@ function probeImage(origin) {
   return new Promise((resolve) => {
     const img = new Image();
     const started = performance.now();
-    const t = setTimeout(() => resolve({ ok: false, why: 'timeout after 4s' }), 4000);
+    const t = setTimeout(() => resolve({ ok: false, timeout: true, ms: 4000 }), 4000);
     img.onload = () => { clearTimeout(t); resolve({ ok: true, ms: Math.round(performance.now() - started) }); };
-    img.onerror = () => { clearTimeout(t); resolve({ ok: false, why: 'load error' }); };
+    img.onerror = () => { clearTimeout(t); resolve({ ok: false, ms: Math.round(performance.now() - started) }); };
     img.src = `${origin}/icon-192.png?probe=${Date.now()}`;
   });
 }
@@ -292,20 +301,33 @@ function probeWebSocket(origin, code) {
       });
     };
     ws.onerror = () => {};
-    setTimeout(() => finish({ ok: false, why: 'timeout after 6s' }), 6000);
+    setTimeout(() => finish({ ok: false, timeout: true, why: 'timeout after 6s' }), 6000);
   });
 }
 
+// Without a deadline an unroutable address leaves fetch pending for the TCP
+// timeout - a minute or more - and the report is copied half-finished.
 async function probeFetch(url, init) {
   const started = performance.now();
+  const opts = Object.assign({ cache: 'no-store', signal: AbortSignal.timeout(6000) }, init || {});
   try {
-    const r = await fetch(url, Object.assign({ cache: 'no-store' }, init || {}));
+    const r = await fetch(url, opts);
     return { ok: r.ok, status: r.status, ms: Math.round(performance.now() - started), response: r };
   } catch (e) {
+    if (e.name === 'TimeoutError') {
+      return { ok: false, timeout: true, error: 'no answer in 6s', ms: Math.round(performance.now() - started) };
+    }
     // A TypeError here is the browser refusing to hand over the response:
     // CORS, LNA, or mixed content. The status is invisible by design.
     return { ok: false, error: `${e.name}: ${e.message}`, ms: Math.round(performance.now() - started) };
   }
+}
+
+// "Blocked" and "unreachable" need different fixes: a policy block is refused
+// at once, an absent device times out. Keep the elapsed time and say which.
+function refused(probe) {
+  if (probe.timeout) return probe.error;
+  return `${probe.error || 'refused'} after ${probe.ms} ms`;
 }
 
 async function runProbe() {
@@ -324,20 +346,24 @@ async function runProbe() {
   // 1. Subresource first: this is what triggers the LNA prompt, and doing it
   //    before anything else keeps the prompt from arriving mid-test.
   const img = await probeImage(origin);
-  if (img.ok) {
-    setRow('t-img', 'ok', `icon loaded in ${img.ms} ms`);
+  const networkOk = img.ok;
+  if (networkOk) {
+    setRow('t-img', 'ok', `icon loaded in ${img.ms} ms — LNA allows this origin`);
     log('subresource: ok');
+  } else if (img.timeout) {
+    setRow('t-img', 'bad', 'no answer in 4s — is this address on the current network?');
+    log('subresource: no answer');
   } else {
-    setRow('t-img', 'bad', img.why + ' — unreachable, or LNA/mixed content blocked');
-    log(`subresource: ${img.why}`);
+    setRow('t-img', 'bad', `refused after ${img.ms} ms — mixed content or LNA policy`);
+    log(`subresource: refused after ${img.ms} ms`);
   }
 
-  const lna = await permissionState('local-network-access');
-  if (lna === 'denied') {
-    setRow('t-img', 'bad', 'local network permission denied for this origin');
-    log('LNA permission is denied — reset it in site settings before retrying');
+  const lna = await lnaState();
+  if (lna.state === 'denied') {
+    setRow('t-img', 'bad', 'local network permission is denied for this origin');
+    log('LNA permission denied — reset it in site settings');
   } else {
-    log(`LNA permission: ${lna}`);
+    log(`LNA permission: ${lna.state}${lna.name ? ` (${lna.name})` : ''}`);
   }
 
   // 2. WebSocket. No CORS applies, so this isolates LNA + the Origin check.
@@ -348,9 +374,12 @@ async function runProbe() {
   } else if (ws.opened) {
     setRow('t-ws', 'bad', `opened then closed at ${ws.closeMs} ms — 403 path (Origin or token)`);
     log(`websocket: opened then closed (code ${ws.closeCode})`);
+  } else if (ws.timeout) {
+    setRow('t-ws', 'bad', 'no answer in 6s — is this address on the current network?');
+    log('websocket: no answer');
   } else {
-    setRow('t-ws', 'bad', (ws.why || `closed at ${ws.closeMs} ms`) + ' — blocked or refused');
-    log(`websocket: failed (${ws.why || 'no open'})`);
+    setRow('t-ws', 'bad', `refused at ${ws.closeMs} ms — blocked (LNA) or rejected`);
+    log(`websocket: refused at ${ws.closeMs} ms`);
   }
 
   // 3. Simple cross-origin request. 204 means authorised; a TypeError means the
@@ -363,9 +392,12 @@ async function runProbe() {
   } else if (auth.status === 403) {
     setRow('t-auth', 'warn', '403 — reachable, code rejected');
     log('cors /auth: 403');
-  } else if (auth.error) {
-    setRow('t-auth', 'bad', `${auth.error} — no ACAO on the response`);
-    log(`cors /auth: ${auth.error}`);
+  } else if (networkOk) {
+    setRow('t-auth', 'bad', 'response withheld — the icon loaded, so this is CORS: no ACAO');
+    log('cors /auth: withheld (CORS)');
+  } else if (auth.error || auth.timeout) {
+    setRow('t-auth', 'bad', `${refused(auth)} — and the subresource failed, so the path is blocked`);
+    log(`cors /auth: ${refused(auth)}`);
   } else {
     setRow('t-auth', 'bad', `unexpected ${auth.status}`);
     log(`cors /auth: ${auth.status}`);
@@ -373,14 +405,18 @@ async function runProbe() {
 
   // 4. Read a JSON body, which is what every real endpoint needs.
   const state = await probeFetch(`${origin}/state?token=${encodeURIComponent(code)}`);
-  if (state.ok) {
+  const stateOk = state.ok;
+  if (stateOk) {
     let body = '';
     try { body = JSON.stringify(await state.response.json()).slice(0, 60); } catch (_) { body = '(not JSON)'; }
     setRow('t-state', 'ok', `200 — ${body}`);
     log('cors /state: 200');
-  } else if (state.error) {
-    setRow('t-state', 'bad', state.error);
-    log(`cors /state: ${state.error}`);
+  } else if (networkOk) {
+    setRow('t-state', 'bad', `${refused(state)} — response withheld (CORS)`);
+    log(`cors /state: ${refused(state)}`);
+  } else if (state.error || state.timeout) {
+    setRow('t-state', 'bad', `${refused(state)} — path blocked`);
+    log(`cors /state: ${refused(state)}`);
   } else {
     setRow('t-state', 'bad', `status ${state.status}`);
     log(`cors /state: ${state.status}`);
@@ -394,9 +430,13 @@ async function runProbe() {
   if (pre.ok) {
     setRow('t-pre', 'ok', 'OPTIONS handled — preflighted request succeeded');
     log('preflight: ok');
-  } else if (pre.error) {
-    setRow('t-pre', 'bad', `${pre.error} — OPTIONS is not handled`);
-    log(`preflight: ${pre.error}`);
+  } else if (networkOk) {
+    const why = stateOk ? 'OPTIONS is not handled' : 'blocked earlier — fix CORS on GET first';
+    setRow('t-pre', 'bad', `${refused(pre)} — ${why}`);
+    log(`preflight: ${refused(pre)}`);
+  } else if (pre.error || pre.timeout) {
+    setRow('t-pre', 'bad', `${refused(pre)} — path blocked`);
+    log(`preflight: ${refused(pre)}`);
   } else {
     setRow('t-pre', 'bad', `status ${pre.status} — OPTIONS is not handled`);
     log(`preflight: ${pre.status}`);
