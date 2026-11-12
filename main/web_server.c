@@ -24,6 +24,7 @@
 #include <ctype.h>
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>    // strcasecmp
 
 static const char *TAG = "web_server";
 
@@ -235,6 +236,37 @@ static bool host_is_ours(const char *host) {
     return false;
 }
 
+// The published UI is a fixed origin, so the answer can be a literal. It has to
+// be: httpd_resp_set_hdr stores the value pointer rather than copying it.
+static const char *const APP_ORIGINS[] = { WEB_APP_ORIGIN, WEB_APP_ORIGIN_DEV };
+
+// Returns the matching literal, or NULL. The array entries are also the strings
+// handed to httpd_resp_set_hdr, so their lifetime is the program's.
+static const char *app_origin(const char *origin) {
+    for (size_t i = 0; i < sizeof(APP_ORIGINS) / sizeof(APP_ORIGINS[0]); i++) {
+        if (APP_ORIGINS[i][0] && strcasecmp(origin, APP_ORIGINS[i]) == 0) {
+            return APP_ORIGINS[i];
+        }
+    }
+    return NULL;
+}
+
+// Queue CORS headers for whatever this handler sends next. Called once at the
+// top, because the headers ride on the request and survive into
+// httpd_resp_send_err: without that, a 403 with no Access-Control-Allow-Origin
+// is indistinguishable from an unreachable device in the page.
+static void cors_apply(httpd_req_t *req) {
+    char origin[128];
+    if (httpd_req_get_hdr_value_str(req, "Origin", origin, sizeof(origin)) != ESP_OK) {
+        return;   // not a browser request; nothing to negotiate
+    }
+    const char *allowed = app_origin(origin);
+    if (!allowed) return;
+
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", allowed);
+    httpd_resp_set_hdr(req, "Vary", "Origin");
+}
+
 static bool req_host_allowed(httpd_req_t *req) {
     char host[96];
     if (httpd_req_get_hdr_value_str(req, "Host", host, sizeof(host)) != ESP_OK) {
@@ -256,6 +288,10 @@ static bool req_origin_allowed(httpd_req_t *req) {
         // Non-browser client (curl, test scripts). Host + token still apply.
         return true;
     }
+    // The page served from the published origin is as legitimate as the one the
+    // device serves itself, and it is not one of our hostnames.
+    if (app_origin(origin)) return true;
+
     const char *p = origin;
     if (strncmp(p, "http://", 7) == 0)       p += 7;
     else if (strncmp(p, "https://", 8) == 0) p += 8;
@@ -337,6 +373,7 @@ static bool req_authorised(httpd_req_t *req) {
 // the USB port, which makes field bugs like "the socket will not reconnect"
 // impossible to diagnose.
 static esp_err_t logs_handler(httpd_req_t *req) {
+    cors_apply(req);
     if (!req_authorised(req)) {
         httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "forbidden");
         return ESP_FAIL;
@@ -354,6 +391,7 @@ static esp_err_t logs_handler(httpd_req_t *req) {
 // websocket frame: the page already speaks HTTP, and a keyboard LED is not
 // worth a second transport.
 static esp_err_t state_handler(httpd_req_t *req) {
+    cors_apply(req);
     if (!req_authorised(req)) {
         httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "forbidden");
         return ESP_FAIL;
@@ -374,6 +412,7 @@ static esp_err_t state_handler(httpd_req_t *req) {
 // this from its own state machine; the browser cannot guess it, which is why
 // the page used to say "unknown" for ever.
 static esp_err_t network_handler(httpd_req_t *req) {
+    cors_apply(req);
     if (!req_authorised(req)) {
         httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "forbidden");
         return ESP_FAIL;
@@ -432,6 +471,7 @@ static esp_err_t network_handler(httpd_req_t *req) {
 }
 
 static esp_err_t hid_handler(httpd_req_t *req) {
+    cors_apply(req);
     if (!req_authorised(req)) {
         httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "forbidden");
         return ESP_FAIL;
@@ -483,6 +523,7 @@ static esp_err_t hid_handler(httpd_req_t *req) {
 }
 
 static esp_err_t scan_handler(httpd_req_t *req) {
+    cors_apply(req);
     if (!req_authorised(req)) {
         httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "forbidden");
         return ESP_FAIL;
@@ -540,6 +581,7 @@ static int read_body(httpd_req_t *req, char *buf, size_t buflen) {
 }
 
 static esp_err_t save_handler(httpd_req_t *req) {
+    cors_apply(req);
     if (req->method != HTTP_POST) {
         httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "POST only");
         return ESP_FAIL;
@@ -582,6 +624,7 @@ static esp_err_t save_handler(httpd_req_t *req) {
 }
 
 static esp_err_t forget_handler(httpd_req_t *req) {
+    cors_apply(req);
     if (req->method != HTTP_POST) {
         httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "POST only");
         return ESP_FAIL;
@@ -623,6 +666,7 @@ static esp_err_t forget_handler(httpd_req_t *req) {
 }
 
 static esp_err_t order_handler(httpd_req_t *req) {
+    cors_apply(req);
     if (req->method != HTTP_POST) {
         httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "POST only");
         return ESP_FAIL;
@@ -660,6 +704,7 @@ static esp_err_t order_handler(httpd_req_t *req) {
 }
 
 static esp_err_t connect_handler(httpd_req_t *req) {
+    cors_apply(req);
     if (req->method != HTTP_POST) {
         httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "POST only");
         return ESP_FAIL;
@@ -708,6 +753,7 @@ static esp_err_t connect_handler(httpd_req_t *req) {
 // ---------------------------------------------------------------------------
 
 static esp_err_t settings_get_handler(httpd_req_t *req) {
+    cors_apply(req);
     if (!req_authorised(req)) {
         httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "forbidden");
         return ESP_FAIL;
@@ -720,6 +766,7 @@ static esp_err_t settings_get_handler(httpd_req_t *req) {
 }
 
 static esp_err_t settings_post_handler(httpd_req_t *req) {
+    cors_apply(req);
     if (req->method != HTTP_POST) {
         httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "POST only");
         return ESP_FAIL;
@@ -748,6 +795,7 @@ static esp_err_t settings_post_handler(httpd_req_t *req) {
 // Settings that only apply at boot (the USB name in particular) need a restart
 // to take effect, and the host has to re-read the descriptors after that.
 static esp_err_t restart_handler(httpd_req_t *req) {
+    cors_apply(req);
     if (req->method != HTTP_POST) {
         httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "POST only");
         return ESP_FAIL;
@@ -804,6 +852,7 @@ static bool uri_matches(const char *uri, const char *path) {
 // a broken uploaded UI, so it must not itself be replaceable by an upload - which
 // is why it is not in s_assets and has no entry in the upload whitelist.
 static esp_err_t recover_handler(httpd_req_t *req) {
+    cors_apply(req);
     httpd_resp_set_type(req, "text/html");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
     return httpd_resp_send(req, (const char *)recover_html_start,
@@ -811,6 +860,7 @@ static esp_err_t recover_handler(httpd_req_t *req) {
 }
 
 static esp_err_t static_handler(httpd_req_t *req) {
+    cors_apply(req);
     for (size_t i = 0; i < ASSET_COUNT; i++) {
         if (!uri_matches(req->uri, s_assets[i].path)) continue;
 
@@ -863,6 +913,7 @@ static esp_err_t static_handler(httpd_req_t *req) {
 // What the upload page needs to show: every file, whether the device is
 // serving a stored copy, and how much room is left.
 static esp_err_t ui_files_handler(httpd_req_t *req) {
+    cors_apply(req);
     if (!req_authorised(req)) {
         httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "forbidden");
         return ESP_FAIL;
@@ -1013,6 +1064,7 @@ static esp_err_t upload_refuse(httpd_req_t *req, const char *status, int code, c
 
 // POST /ui/upload with a stored zip as the body.
 static esp_err_t ui_upload_handler(httpd_req_t *req) {
+    cors_apply(req);
     if (req->method != HTTP_POST) {
         httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "POST only");
         return ESP_FAIL;
@@ -1157,6 +1209,7 @@ static esp_err_t ui_upload_handler(httpd_req_t *req) {
 // a broken view script is recoverable from another view's page; a broken
 // index.html takes the whole shell with it and is not recoverable this way.
 static esp_err_t ui_reset_handler(httpd_req_t *req) {
+    cors_apply(req);
     if (req->method != HTTP_POST) {
         httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "POST only");
         return ESP_FAIL;
@@ -1222,6 +1275,7 @@ static esp_err_t ui_reset_handler(httpd_req_t *req) {
 // 404 when there is nothing valid, which is also the answer the BOOT cycle's
 // skip rule is built on.
 static esp_err_t screen_image_get_handler(httpd_req_t *req) {
+    cors_apply(req);
     if (!req_authorised(req)) {
         httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "forbidden");
         return ESP_FAIL;
@@ -1259,6 +1313,7 @@ static esp_err_t screen_image_get_handler(httpd_req_t *req) {
 // into place once the whole thing validates - so a body the device would not
 // draw never replaces an image it would.
 static esp_err_t screen_image_upload_handler(httpd_req_t *req) {
+    cors_apply(req);
     if (req->method != HTTP_POST) {
         httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "POST only");
         return ESP_FAIL;
@@ -1353,6 +1408,7 @@ static esp_err_t screen_image_upload_handler(httpd_req_t *req) {
 // POST /screen/reset deletes the stored image, so the BOOT cycle stops offering
 // the mode and the settings page goes back to "nothing stored".
 static esp_err_t screen_image_reset_handler(httpd_req_t *req) {
+    cors_apply(req);
     if (req->method != HTTP_POST) {
         httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "POST only");
         return ESP_FAIL;
@@ -1373,9 +1429,23 @@ static esp_err_t screen_image_reset_handler(httpd_req_t *req) {
     return httpd_resp_sendstr(req, "reset");
 }
 
+// CORS preflight. Deliberately unauthenticated: a preflight carries no body and
+// no credentials, and answering it discloses only that this origin may ask.
+// Every POST from the published UI needs it, because application/json and the
+// upload content types are not CORS-simple.
+static esp_err_t options_handler(httpd_req_t *req) {
+    cors_apply(req);
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    httpd_resp_set_hdr(req, "Access-Control-Allow-Headers", "Content-Type");
+    httpd_resp_set_hdr(req, "Access-Control-Max-Age", "600");
+    httpd_resp_set_status(req, "204 No Content");
+    return httpd_resp_send(req, NULL, 0);
+}
+
 // Lets the web UI check a code before opening the WebSocket, so a wrong code
 // gives a clear message instead of a silently failing connection.
 static esp_err_t auth_handler(httpd_req_t *req) {
+    cors_apply(req);
     if (req->method != HTTP_GET) {
         httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "GET only");
         return ESP_FAIL;
@@ -1414,6 +1484,7 @@ static void reboot_to_bootloader(void) {
 }
 
 static esp_err_t bootloader_handler(httpd_req_t *req) {
+    cors_apply(req);
     if (req->method != HTTP_POST) {
         httpd_resp_send_err(req, HTTPD_405_METHOD_NOT_ALLOWED, "POST only");
         return ESP_FAIL;
@@ -1582,6 +1653,8 @@ esp_err_t web_server_start(void) {
     };
 
     httpd_uri_t uris[] = {
+        // Method-scoped, so it cannot shadow the GET and POST routes below.
+        { .uri = "/*", .method = HTTP_OPTIONS, .handler = options_handler },
         { .uri = "/recover.html", .method = HTTP_GET, .handler = recover_handler },
         { .uri = "/auth",       .method = HTTP_GET,  .handler = auth_handler },
         { .uri = "/ws",         .method = HTTP_GET,  .handler = ws_handler, .is_websocket = true },

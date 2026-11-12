@@ -30,6 +30,12 @@ Then open <http://localhost:8080/>. Pushes to `main` deploy the landing page wit
 GitHub Actions (`.github/workflows/pages.yml`); the brand sheet and OG source stay
 in the repository but are not part of the public site.
 
+`site/probe.html` is a diagnostic page rather than a product page: it measures,
+from the real Pages origin, what the browser will allow toward a dongle — the
+Local Network Access permission, a cross-origin fetch, the WebSocket, and
+Keyboard Lock. It is the fastest way to tell "CORS" from "wrong address" without
+flashing anything.
+
 ## Hardware
 
 | | |
@@ -375,8 +381,11 @@ is scrubbed from the URL bar after load so it does not linger in history.
 
 **3. Origin validation.** Any page you visit can attempt
 `new WebSocket('ws://192.168.1.50/ws')` against a LAN address. Requests whose
-`Origin` is not one of our own hostnames are rejected, which blocks
-cross-site WebSocket hijacking.
+`Origin` is neither one of our own hostnames nor the published UI's fixed origin
+(`WEB_APP_ORIGIN` in `web_server.h`) are rejected, which blocks cross-site
+WebSocket hijacking. That origin is a `github.io` address shared with every other
+project page on the same account, so it is one trusted app, not a per-device
+boundary.
 
 **4. Host header validation.** Defeats DNS rebinding, where an attacker points
 `evil.com` at our IP and then talks to `ws://evil.com/ws`. The `Host` header
@@ -395,6 +404,11 @@ own device by spamming bad tokens. The real protection is the 60 bits.
   the code. That is the intended boundary.
 - **NVS is unencrypted**, so a stored WiFi password is readable by anyone who
   takes the dongle apart.
+- **The published UI is code you did not receive from the dongle.** Anything
+  served from that origin can drive every host whose code it holds, so a
+  compromised Pages deployment is a keyboard, not a nuisance. The device's own
+  copy remains the floor: it needs no internet, no permission prompt, and no
+  third party.
 
 ## Safety model
 

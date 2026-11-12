@@ -422,11 +422,11 @@ async function runProbe() {
     log(`cors /state: ${state.status}`);
   }
 
-  // 5. A custom header forces a preflight, which is what every POST from the
-  //    real UI will do (application/json is not a simple content type). The GET
-  //    itself is harmless; only the OPTIONS exchange is being measured.
+  // 5. A content type that CORS does not consider safe forces a preflight,
+  //    which is what every apiPost from the real UI does. The GET itself is
+  //    harmless; only the OPTIONS exchange is being measured.
   const pre = await probeFetch(`${origin}/state?token=${encodeURIComponent(code)}`,
-                               { headers: { 'X-Probe': '1' } });
+                               { headers: { 'Content-Type': 'application/json' } });
   if (pre.ok) {
     setRow('t-pre', 'ok', 'OPTIONS handled — preflighted request succeeded');
     log('preflight: ok');
