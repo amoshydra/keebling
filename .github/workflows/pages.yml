@@ -26,7 +26,7 @@ jobs:
       - name: Stage the public site
         run: |
           mkdir -p _site
-          cp site/index.html site/styles.css site/.nojekyll _site/
+          cp site/index.html site/styles.css site/.nojekyll site/probe.html _site/
           cp -r site/assets _site/
           cp -r site/editor _site/
       - uses: actions/upload-pages-artifact@v3

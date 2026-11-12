@@ -1,0 +1,552 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<link rel="icon" href="data:,">
+<title>Keebling — local network probe</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0d1117; --panel: #161b22; --line: #30363d;
+    --ink: #e6edf3; --dim: #8b949e;
+    --ok: #3fb950; --warn: #d29922; --bad: #f85149; --accent: #58a6ff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px 20px 64px;
+    background: var(--bg); color: var(--ink);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+    max-width: 780px; margin-inline: auto;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; letter-spacing: -0.01em; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em;
+       color: var(--dim); margin: 32px 0 10px; font-weight: 600; }
+  p { margin: 0 0 12px; color: var(--dim); }
+  a { color: var(--accent); }
+  code { font: 13px ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+         background: #21262d; padding: 1px 5px; border-radius: 4px; color: var(--ink); }
+  .card { background: var(--panel); border: 1px solid var(--line);
+          border-radius: 10px; padding: 14px 16px; }
+  label { display: block; font-size: 13px; color: var(--dim); margin-bottom: 10px; }
+  input[type=text] {
+    display: block; width: 100%; margin-top: 4px; padding: 9px 11px;
+    background: #0d1117; color: var(--ink); border: 1px solid var(--line);
+    border-radius: 7px; font: 14px ui-monospace, Menlo, Consolas, monospace;
+  }
+  input[type=text]:focus { outline: none; border-color: var(--accent); }
+  .row2 { display: grid; grid-template-columns: 1fr 150px; gap: 12px; }
+  button {
+    font: inherit; font-size: 14px; font-weight: 600;
+    padding: 9px 16px; border-radius: 7px; cursor: pointer;
+    background: #21262d; color: var(--ink); border: 1px solid var(--line);
+  }
+  button:hover { border-color: #484f58; }
+  button.primary { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+  button.primary:hover { background: #2f81f7; }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+
+  .env { display: grid; grid-template-columns: 1fr auto; gap: 6px 16px;
+         font-size: 13px; }
+  .env dt { color: var(--dim); }
+  .env dd { margin: 0; font: 13px ui-monospace, Menlo, Consolas, monospace;
+            text-align: right; word-break: break-all; }
+
+  .test { display: grid; grid-template-columns: 150px 78px 1fr;
+          gap: 4px 12px; padding: 10px 0; border-top: 1px solid var(--line);
+          font-size: 13px; }
+  .test:first-of-type { border-top: 0; }
+  .test .name { color: var(--ink); font-weight: 600; }
+  .test .state { font: 11px ui-monospace, Menlo, monospace; letter-spacing: 0.06em;
+                 text-transform: uppercase; align-self: start; margin-top: 2px; }
+  .test .detail { color: var(--dim); font: 12px ui-monospace, Menlo, monospace;
+                  word-break: break-word; }
+  .state.pending { color: var(--dim); }
+  .state.ok      { color: var(--ok); }
+  .state.warn    { color: var(--warn); }
+  .state.bad     { color: var(--bad); }
+
+  pre { margin: 0; padding: 14px 16px; background: #010409; border: 1px solid var(--line);
+        border-radius: 10px; overflow: auto; max-height: 340px;
+        font: 12px/1.6 ui-monospace, Menlo, Consolas, monospace; color: var(--dim); }
+  pre b { color: var(--ink); font-weight: 600; }
+  .keys { font: 13px ui-monospace, Menlo, monospace; min-height: 62px;
+          display: flex; flex-wrap: wrap; gap: 6px; align-content: flex-start; }
+  .key { background: #21262d; border: 1px solid var(--line); border-radius: 5px;
+         padding: 3px 8px; color: var(--ink); }
+  .key.hot { border-color: var(--warn); color: var(--warn); }
+  .note { font-size: 13px; color: var(--dim); margin-top: 10px; }
+  .note strong { color: var(--ink); font-weight: 600; }
+</style>
+</head>
+<body>
+
+<h1>Local network probe</h1>
+<p>Measures what this origin is allowed to do with a Keebling dongle on the
+local network. Nothing leaves this page: the only requests are the ones you see
+in the log, and they go to the address you type.</p>
+
+<h2>Device</h2>
+<div class="card">
+  <div class="row2">
+    <label>Address or origin
+      <input id="host" type="text" inputmode="url" autocomplete="off"
+             spellcheck="false" placeholder="192.168.4.1">
+    </label>
+    <label>Access code
+      <input id="code" type="text" inputmode="latin" autocomplete="off"
+             spellcheck="false" maxlength="16" placeholder="XXXXXXXXXXXX">
+    </label>
+  </div>
+  <div class="actions">
+    <button id="run" class="primary">Run probe</button>
+    <button id="clear">Clear</button>
+  </div>
+  <p class="note" style="margin-bottom:0">The code is kept in <code>sessionStorage</code>
+    for this tab only — this page shares an origin with the public site, so it is
+    not somewhere to leave a secret lying around.</p>
+</div>
+
+<h2>Environment</h2>
+<div class="card"><dl class="env" id="env"></dl></div>
+
+<h2>Transport</h2>
+<div class="card" id="tests">
+  <div class="test" id="t-img"><span class="name">Subresource</span><span class="state pending">idle</span><span class="detail">not run</span></div>
+  <div class="test" id="t-ws"><span class="name">WebSocket</span><span class="state pending">idle</span><span class="detail">not run</span></div>
+  <div class="test" id="t-auth"><span class="name">CORS · /auth</span><span class="state pending">idle</span><span class="detail">not run</span></div>
+  <div class="test" id="t-state"><span class="name">CORS · /state</span><span class="state pending">idle</span><span class="detail">not run</span></div>
+  <div class="test" id="t-pre"><span class="name">Preflight</span><span class="state pending">idle</span><span class="detail">not run</span></div>
+</div>
+
+<h2>Keyboard capture</h2>
+<div class="card">
+  <p style="margin-top:0">Independent of the dongle: proves whether this origin
+    can take keys the browser and the OS normally keep. Press <strong>Esc</strong>
+    after it starts — a single tap should appear below. Hold Esc for about two
+    seconds to leave fullscreen.</p>
+  <div class="actions" style="margin-bottom:14px">
+    <button id="keys">Test keyboard lock</button>
+  </div>
+  <div class="keys" id="keylog"><span style="color:var(--dim)">no keys yet</span></div>
+  <p class="note" id="keynote" style="margin-bottom:0"></p>
+</div>
+
+<h2>Log</h2>
+<pre id="log">ready</pre>
+<div class="actions">
+  <button id="copy">Copy report</button>
+</div>
+
+<script>
+'use strict';
+
+const $ = (id) => document.getElementById(id);
+const HOST_KEY = 'keebling.probe.host';
+const CODE_KEY = 'keebling.probe.code';
+
+// sessionStorage throws in some privacy modes; a probe that breaks on load is
+// worse than one that forgets where it was.
+function store(key, value) {
+  try {
+    if (value === null) sessionStorage.removeItem(key);
+    else sessionStorage.setItem(key, value);
+  } catch (_) {}
+}
+function stored(key) {
+  try { return sessionStorage.getItem(key); } catch (_) { return null; }
+}
+
+const logEl = $('log');
+const lines = [];
+
+function log(msg) {
+  const t = new Date().toISOString().slice(11, 23);
+  lines.push(`${t}  ${msg}`);
+  logEl.textContent = lines.join('\n');
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function setRow(id, state, detail) {
+  const row = $(id);
+  row.querySelector('.state').className = 'state ' + state;
+  row.querySelector('.state').textContent =
+    state === 'pending' ? 'idle' : state === 'ok' ? 'pass' : state === 'warn' ? 'warn' : 'fail';
+  row.querySelector('.detail').textContent = detail;
+}
+
+// A bare host is assumed to be plain HTTP; anything with a scheme is taken as
+// typed, so an HTTPS build can be probed the same way.
+function normaliseOrigin(v) {
+  v = v.trim();
+  if (!v) return null;
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(v)) v = 'http://' + v;
+  try {
+    const u = new URL(v);
+    return (u.protocol === 'http:' || u.protocol === 'https:') ? u.origin : null;
+  } catch (_) { return null; }
+}
+
+function normaliseCode(v) {
+  return v.trim().toUpperCase().replace(/[^0-9A-Z]/g, '');
+}
+
+function wsOrigin(origin) {
+  return origin.replace(/^http/, 'ws');
+}
+
+// ---------------------------------------------------------------- environment
+
+async function permissionState(name) {
+  if (!navigator.permissions || !navigator.permissions.query) return 'no permissions API';
+  try {
+    const p = await navigator.permissions.query({ name });
+    return p.state;
+  } catch (e) {
+    return 'unsupported';
+  }
+}
+
+async function renderEnvironment() {
+  const rows = [];
+  const add = (k, v) => {
+    const dt = document.createElement('dt');
+    dt.textContent = k;
+    const dd = document.createElement('dd');
+    dd.textContent = v;
+    rows.push(dt, dd);
+  };
+
+  add('origin', location.origin);
+  add('secure context', String(window.isSecureContext));
+  add('fullscreen API', String(!!document.documentElement.requestFullscreen));
+  add('keyboard lock', String(!!(navigator.keyboard && navigator.keyboard.lock)));
+  add('pointer lock', String('requestPointerLock' in Element.prototype));
+  add('local network', await permissionState('local-network-access'));
+
+  // Chrome 145 split the setting in two; query whatever this build knows.
+  for (const name of ['local-network', 'apps-on-device']) {
+    const state = await permissionState(name);
+    if (state !== 'unsupported') add(name, state);
+  }
+
+  const brands = navigator.userAgentData && navigator.userAgentData.brands;
+  add('browser', brands && brands.length
+    ? brands.map((b) => `${b.brand} ${b.version}`).join(', ')
+    : navigator.userAgent);
+
+  $('env').replaceChildren(...rows);
+}
+
+// ---------------------------------------------------------------- transport
+
+// A no-cors subresource is the only way to ask "is anything there" without
+// CORS in the way. If this fails and the LNA permission is granted, the device
+// is not reachable at that address at all.
+function probeImage(origin) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    const started = performance.now();
+    const t = setTimeout(() => resolve({ ok: false, why: 'timeout after 4s' }), 4000);
+    img.onload = () => { clearTimeout(t); resolve({ ok: true, ms: Math.round(performance.now() - started) }); };
+    img.onerror = () => { clearTimeout(t); resolve({ ok: false, why: 'load error' }); };
+    img.src = `${origin}/icon-192.png?probe=${Date.now()}`;
+  });
+}
+
+// esp_http_server sends 101 before the handler runs, so "open" is not proof of
+// auth: a rejected session opens and is then torn down. Stay connected for a
+// moment and report which of the two happened.
+function probeWebSocket(origin, code) {
+  return new Promise((resolve) => {
+    const url = `${wsOrigin(origin)}/ws?token=${encodeURIComponent(code)}`;
+    const started = performance.now();
+    let openedAt = 0;
+    let settled = false;
+    let ws;
+    const finish = (r) => {
+      if (settled) return;
+      settled = true;
+      try { ws.close(); } catch (_) {}
+      resolve(r);
+    };
+    try { ws = new WebSocket(url); } catch (e) {
+      resolve({ ok: false, why: `constructor: ${e.message}` });
+      return;
+    }
+    ws.onopen = () => {
+      openedAt = performance.now();
+      try { ws.send(new Uint8Array([0x04])); } catch (_) {}
+      setTimeout(() => finish({ ok: true, openMs: Math.round(openedAt - started) }), 700);
+    };
+    ws.onclose = (ev) => {
+      finish({
+        ok: false,
+        opened: !!openedAt,
+        openMs: openedAt ? Math.round(openedAt - started) : null,
+        closeMs: Math.round(performance.now() - started),
+        closeCode: ev.code,
+        reason: ev.reason || '',
+      });
+    };
+    ws.onerror = () => {};
+    setTimeout(() => finish({ ok: false, why: 'timeout after 6s' }), 6000);
+  });
+}
+
+async function probeFetch(url, init) {
+  const started = performance.now();
+  try {
+    const r = await fetch(url, Object.assign({ cache: 'no-store' }, init || {}));
+    return { ok: r.ok, status: r.status, ms: Math.round(performance.now() - started), response: r };
+  } catch (e) {
+    // A TypeError here is the browser refusing to hand over the response:
+    // CORS, LNA, or mixed content. The status is invisible by design.
+    return { ok: false, error: `${e.name}: ${e.message}`, ms: Math.round(performance.now() - started) };
+  }
+}
+
+async function runProbe() {
+  const origin = normaliseOrigin($('host').value);
+  const code = normaliseCode($('code').value);
+  if (!origin) { log('need an address'); return; }
+  if (!code) { log('need an access code'); return; }
+
+  store(HOST_KEY, $('host').value);
+  store(CODE_KEY, $('code').value);
+
+  $('run').disabled = true;
+  for (const id of ['t-img', 't-ws', 't-auth', 't-state', 't-pre']) setRow(id, 'pending', 'running…');
+  log(`probe ${origin} (code ${code.length} chars)`);
+
+  // 1. Subresource first: this is what triggers the LNA prompt, and doing it
+  //    before anything else keeps the prompt from arriving mid-test.
+  const img = await probeImage(origin);
+  if (img.ok) {
+    setRow('t-img', 'ok', `icon loaded in ${img.ms} ms`);
+    log('subresource: ok');
+  } else {
+    setRow('t-img', 'bad', img.why + ' — unreachable, or LNA/mixed content blocked');
+    log(`subresource: ${img.why}`);
+  }
+
+  const lna = await permissionState('local-network-access');
+  if (lna === 'denied') {
+    setRow('t-img', 'bad', 'local network permission denied for this origin');
+    log('LNA permission is denied — reset it in site settings before retrying');
+  } else {
+    log(`LNA permission: ${lna}`);
+  }
+
+  // 2. WebSocket. No CORS applies, so this isolates LNA + the Origin check.
+  const ws = await probeWebSocket(origin, code);
+  if (ws.ok) {
+    setRow('t-ws', 'ok', `open and held (${ws.openMs} ms)`);
+    log('websocket: accepted');
+  } else if (ws.opened) {
+    setRow('t-ws', 'bad', `opened then closed at ${ws.closeMs} ms — 403 path (Origin or token)`);
+    log(`websocket: opened then closed (code ${ws.closeCode})`);
+  } else {
+    setRow('t-ws', 'bad', (ws.why || `closed at ${ws.closeMs} ms`) + ' — blocked or refused');
+    log(`websocket: failed (${ws.why || 'no open'})`);
+  }
+
+  // 3. Simple cross-origin request. 204 means authorised; a TypeError means the
+  //    response was withheld, which is what a missing Access-Control-Allow-Origin
+  //    looks like.
+  const auth = await probeFetch(`${origin}/auth?token=${encodeURIComponent(code)}`);
+  if (auth.status === 204) {
+    setRow('t-auth', 'ok', '204 — code accepted, CORS readable');
+    log('cors /auth: 204');
+  } else if (auth.status === 403) {
+    setRow('t-auth', 'warn', '403 — reachable, code rejected');
+    log('cors /auth: 403');
+  } else if (auth.error) {
+    setRow('t-auth', 'bad', `${auth.error} — no ACAO on the response`);
+    log(`cors /auth: ${auth.error}`);
+  } else {
+    setRow('t-auth', 'bad', `unexpected ${auth.status}`);
+    log(`cors /auth: ${auth.status}`);
+  }
+
+  // 4. Read a JSON body, which is what every real endpoint needs.
+  const state = await probeFetch(`${origin}/state?token=${encodeURIComponent(code)}`);
+  if (state.ok) {
+    let body = '';
+    try { body = JSON.stringify(await state.response.json()).slice(0, 60); } catch (_) { body = '(not JSON)'; }
+    setRow('t-state', 'ok', `200 — ${body}`);
+    log('cors /state: 200');
+  } else if (state.error) {
+    setRow('t-state', 'bad', state.error);
+    log(`cors /state: ${state.error}`);
+  } else {
+    setRow('t-state', 'bad', `status ${state.status}`);
+    log(`cors /state: ${state.status}`);
+  }
+
+  // 5. A custom header forces a preflight, which is what every POST from the
+  //    real UI will do (application/json is not a simple content type). The GET
+  //    itself is harmless; only the OPTIONS exchange is being measured.
+  const pre = await probeFetch(`${origin}/state?token=${encodeURIComponent(code)}`,
+                               { headers: { 'X-Probe': '1' } });
+  if (pre.ok) {
+    setRow('t-pre', 'ok', 'OPTIONS handled — preflighted request succeeded');
+    log('preflight: ok');
+  } else if (pre.error) {
+    setRow('t-pre', 'bad', `${pre.error} — OPTIONS is not handled`);
+    log(`preflight: ${pre.error}`);
+  } else {
+    setRow('t-pre', 'bad', `status ${pre.status} — OPTIONS is not handled`);
+    log(`preflight: ${pre.status}`);
+  }
+
+  $('run').disabled = false;
+  log('done');
+}
+
+// ---------------------------------------------------------------- keyboard
+
+// Keys are built as nodes rather than markup: e.key is whatever the keyboard
+// reports, and this page is on the same origin as the app.
+function renderKeys(entries) {
+  const el = $('keylog');
+  el.textContent = '';
+  if (!entries.length) {
+    const span = document.createElement('span');
+    span.style.color = 'var(--dim)';
+    span.textContent = 'no keys yet';
+    el.append(span);
+    return;
+  }
+  for (const e of entries) {
+    const k = document.createElement('span');
+    k.className = 'key' + (/Escape|Meta|Tab/.test(e.code) ? ' hot' : '');
+    k.textContent = e.code;
+    const sub = document.createElement('span');
+    sub.style.color = 'var(--dim)';
+    sub.textContent = ' · ' + e.key;
+    k.append(sub);
+    el.append(k);
+  }
+}
+
+let keyHandler = null;
+let fsHandler = null;
+
+// A second run must not stack listeners: one key would then be reported twice.
+function stopKeyTest() {
+  if (keyHandler) {
+    window.removeEventListener('keydown', keyHandler, true);
+    keyHandler = null;
+  }
+  if (fsHandler) {
+    document.removeEventListener('fullscreenchange', fsHandler);
+    fsHandler = null;
+  }
+  if (navigator.keyboard && navigator.keyboard.unlock) {
+    try { navigator.keyboard.unlock(); } catch (_) {}
+  }
+}
+
+async function startKeyTest() {
+  stopKeyTest();
+
+  const canLock = !!(navigator.keyboard && navigator.keyboard.lock);
+  const entries = [];
+  keyHandler = (e) => {
+    entries.unshift({ code: e.code || '(empty)', key: e.key || '?' });
+    renderKeys(entries.slice(0, 14));
+    log(`key ${e.code || '(empty)'} / ${e.key}  ctrl=${e.ctrlKey} alt=${e.altKey} meta=${e.metaKey}`);
+  };
+  window.addEventListener('keydown', keyHandler, true);
+
+  try {
+    await document.documentElement.requestFullscreen();
+    log('fullscreen: entered');
+  } catch (e) {
+    log(`fullscreen: refused (${e.name})`);
+  }
+
+  if (canLock) {
+    try {
+      await navigator.keyboard.lock();
+      log('keyboard lock: granted');
+    } catch (e) {
+      log(`keyboard lock: refused (${e.name}: ${e.message})`);
+    }
+  }
+
+  const entered = !!document.fullscreenElement;
+  fsHandler = () => {
+    if (document.fullscreenElement) return;
+    stopKeyTest();
+    log('fullscreen: left, keyboard unlocked');
+  };
+  document.addEventListener('fullscreenchange', fsHandler);
+
+  $('keynote').textContent = !canLock
+    ? 'This browser has no Keyboard Lock API — Esc and Meta will not arrive here.'
+    : entered
+      ? 'Keyboard lock requested. A single Esc should appear below; hold it to leave.'
+      : 'Fullscreen was refused, so the lock may not apply. Keys still log below.';
+}
+
+// ---------------------------------------------------------------- report
+
+function buildReport() {
+  const rowText = (id) => {
+    const r = $(id);
+    return `${r.querySelector('.name').textContent}: ${r.querySelector('.state').textContent} — ${r.querySelector('.detail').textContent}`;
+  };
+  const env = [...$('env').querySelectorAll('dt')]
+    .map((dt) => `${dt.textContent}: ${dt.nextElementSibling ? dt.nextElementSibling.textContent : ''}`)
+    .join(' | ');
+  return [
+    '# Keebling LNA probe',
+    `origin: ${location.origin}`,
+    `secure context: ${window.isSecureContext}`,
+    `browser: ${navigator.userAgent}`,
+    `env: ${env}`,
+    '',
+    rowText('t-img'),
+    rowText('t-ws'),
+    rowText('t-auth'),
+    rowText('t-state'),
+    rowText('t-pre'),
+    '',
+    ...lines,
+  ].join('\n');
+}
+
+$('run').addEventListener('click', runProbe);
+$('keys').addEventListener('click', startKeyTest);
+$('copy').addEventListener('click', async () => {
+  const text = buildReport();
+  try {
+    await navigator.clipboard.writeText(text);
+    log('report copied');
+  } catch (_) {
+    log('clipboard refused — select the log instead');
+  }
+});
+$('clear').addEventListener('click', () => {
+  store(HOST_KEY, null);
+  store(CODE_KEY, null);
+  $('host').value = '192.168.4.1';
+  $('code').value = '';
+  lines.length = 0;
+  logEl.textContent = 'ready';
+  for (const id of ['t-img', 't-ws', 't-auth', 't-state', 't-pre']) setRow(id, 'pending', 'not run');
+  renderKeys([]);
+  $('keynote').textContent = '';
+  log('cleared');
+});
+
+$('host').value = stored(HOST_KEY) || '192.168.4.1';
+$('code').value = stored(CODE_KEY) || '';
+renderEnvironment();
+</script>
+</body>
+</html>
