@@ -339,18 +339,11 @@ export async function checkDevice(base, code) {
   }
 }
 
-// The device serves recover.html itself, and the published build leaves it out,
-// so one request answers "am I being served by the dongle?" without a build flag
-// or a version check. Cached: the answer cannot change for a given page.
-let deviceOriginAnswer = null;
+// The Pages deployment injects this marker into the shell; the firmware's copy
+// has none. It costs no request, leaves no 404 in the console, and cannot be
+// confused by a host that answers 200 for every path.
 export async function isDeviceOrigin() {
-  if (deviceOriginAnswer !== null) return deviceOriginAnswer;
-  try {
-    deviceOriginAnswer = (await fetch('recover.html', { cache: 'no-store' })).ok;
-  } catch (_) {
-    deviceOriginAnswer = false;
-  }
-  return deviceOriginAnswer;
+  return !document.querySelector('meta[name="keebling-published"]');
 }
 
 // The published UI: pick a device, then boot on it.

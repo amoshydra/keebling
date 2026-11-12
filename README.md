@@ -36,6 +36,14 @@ Local Network Access permission, a cross-origin fetch, the WebSocket, and
 Keyboard Lock. It is the fastest way to tell "CORS" from "wrong address" without
 flashing anything.
 
+The UI itself is published too, at
+<https://amoshydra.github.io/keebling/app/>. It is the same bundle the firmware
+serves, built by the same `pnpm build`. The HTTPS origin is not decoration: it
+is what makes `navigator.keyboard.lock()` available, which is the only way a
+browser can send Esc, the Windows key and Alt+Tab to the host. Only the
+published copy asks *which* dongle to drive, because unlike the device's own UI
+it is not being served by one.
+
 ## Hardware
 
 | | |
@@ -125,6 +133,13 @@ the network can't be reached, it runs its own access point instead.
 The code is remembered in `localStorage`, so step 4 is a one-time thing per
 browser. You can also skip it entirely with
 `http://<address>/?token=YOURCODE`.
+
+Driving it from <https://amoshydra.github.io/keebling/app/> is the desktop
+option: HTTPS is what lets the browser hand over Esc, Win and Alt+Tab, and a
+fullscreen keyboard lock is what keeps them. Add the dongle once by address and
+code; the list is kept in this browser. Install it to the home screen before you
+need it if you also use the dongle's own access point — that network has no
+internet, so the service worker's cached copy is what loads.
 
 ### The four tabs
 

@@ -184,9 +184,20 @@ __webTests.push({
 
 __webTests.push({
   page: 'control',
-  name: 'the device origin is recognised by the repair page it serves',
+  name: 'a shell with no publish marker is the device',
   fn: async () => {
     __assert(await window.isDeviceOrigin(), 'the stub was not recognised as a device');
+
+    // The published deployment adds this meta tag; the firmware's shell has no
+    // marker, so the same bundle can answer both questions.
+    const marker = document.createElement('meta');
+    marker.name = 'keebling-published';
+    document.head.append(marker);
+    try {
+      __assert(!(await window.isDeviceOrigin()), 'the marker was ignored');
+    } finally {
+      marker.remove();
+    }
   },
 });
 
