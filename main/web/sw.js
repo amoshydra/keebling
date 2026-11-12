@@ -24,13 +24,17 @@ const SHELL = [
 ];
 
 self.addEventListener('install', (event) => {
+  // Not awaited, and not inside waitUntil: the canonical form. Awaiting it
+  // deadlocks the install - the promise needs the worker to activate, and the
+  // worker cannot activate until install finishes.
+  self.skipWaiting();
+
   event.waitUntil((async () => {
     const cache = await caches.open(CACHE);
     // A missing file must not fail the whole install: an offline shell with
     // one gap is still better than no shell at all.
     await Promise.all(SHELL.map((url) =>
       cache.add(new Request(url, { cache: 'reload' })).catch(() => {})));
-    await self.skipWaiting();
   })());
 });
 
