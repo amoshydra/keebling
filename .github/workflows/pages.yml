@@ -47,7 +47,7 @@ jobs:
           # Tell the app it is the published copy. The firmware's shell has no
           # marker, which is how the same bundle shows a device list here and a
           # code prompt there.
-          sed -i 's#</head>#<meta name="keebling-published" content="1"></head>#' _site/app/index.html
+          sed -i "s#</head>#<meta name=\"keebling-published\" content=\"1\" data-build=\"${GITHUB_SHA::7}\"></head>#" _site/app/index.html
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site

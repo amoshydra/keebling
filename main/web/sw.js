@@ -57,9 +57,13 @@ self.addEventListener('fetch', (event) => {
 async function networkFirst(req) {
   const cache = await caches.open(CACHE);
   try {
+    // no-store on purpose: GitHub Pages sends max-age=600, so a plain fetch
+    // here would keep serving the previous deploy for ten minutes after a push
+    // even though this worker is network-first.
+    //
     // A network that is up but has no route can take a minute to give up; the
     // cached shell should not wait for it.
-    const res = await fetch(req, { signal: AbortSignal.timeout(3000) });
+    const res = await fetch(req, { cache: 'no-store', signal: AbortSignal.timeout(3000) });
     if (res && res.ok) cache.put(req, res.clone());
     return res;
   } catch (_) {

@@ -217,8 +217,15 @@ export async function requireAuth(onReady) {
 
   // The published UI is the one that can end up on the dongle's access point
   // with no internet, so it is the one that needs a cached shell.
+  //
+  // The build id is part of the URL so a deploy is noticed immediately. Without
+  // it, GitHub Pages' ten-minute cache would keep the old worker script - and
+  // therefore the old shell - current long after the push.
   if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
+    const published = document.querySelector('meta[name="keebling-published"]');
+    const build = published && published.dataset ? published.dataset.build : '';
+    const query = build ? `?v=${encodeURIComponent(build)}` : '';
+    navigator.serviceWorker.register(`sw.js${query}`).catch(() => {});
   }
   await requireHub(onReady);
 }
