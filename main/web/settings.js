@@ -7,7 +7,7 @@
 // mounted.
 
 
-import { apiFetch, apiPost, appSettings, clearStoredToken, currentBase, forgetCode, hostLayout, hostLayoutId, isDeviceOrigin, saveSettingsToDevice, setDeviceBase, setHostLayout, setLocal } from './common.js';
+import { apiFetch, apiPost, appSettings, currentBase, forgetCode, hostLayout, hostLayoutId, isDeviceOrigin, saveSettingsToDevice, setHostLayout, setLocal } from './common.js';
 import * as Pages from './pages.js';
 
 export const SettingsView = (() => {
@@ -1334,11 +1334,10 @@ async function init() {
     const baseEl = document.getElementById('activeDeviceBase');
     if (baseEl) baseEl.textContent = currentBase();
     activeBlock.hidden = false;
+    // The list is a view, not a reset: it can also edit an address, which is
+    // the recovery when DHCP has moved the dongle.
     document.getElementById('changeDevice').addEventListener('click', () => {
-      // Back to the list: the saved code belongs to the device being left.
-      setDeviceBase('');
-      clearStoredToken();
-      location.reload();
+      location.hash = '#/devices';
     });
   }
   const setupBack = document.getElementById('setupBack');

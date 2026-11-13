@@ -285,6 +285,7 @@ function enterDevice(base, code, onReady) {
   setDeviceBase(base);
   token = normalizeToken(code);
   storeToken(token);
+  setupDeviceChip();
   hideGate();
   onReady();
 }
@@ -353,6 +354,16 @@ export async function isDeviceOrigin() {
   return !document.querySelector('meta[name="keebling-published"]');
 }
 
+// Leaving a running app for another device: reload rather than rebind. A reload
+// rebuilds the socket, the listeners and the settings in one step, and it is
+// the only path that cannot leave half a session talking to the old dongle.
+export function switchDevice(base, code) {
+  setDeviceBase(base);
+  token = normalizeToken(code);
+  storeToken(token);
+  location.reload();
+}
+
 // The published UI: pick a device, then boot on it.
 async function requireHub(onReady) {
   const gate = document.getElementById('gate');
@@ -364,13 +375,9 @@ async function requireHub(onReady) {
   const codeBox = document.getElementById('gateCode');
   if (codeBox) codeBox.hidden = true;
 
-  const listEl = document.getElementById('hubList');
-  const errEl = document.getElementById('hubErr');
-  const devices = loadDevices();
-  const status = new Map();
-
   // A saved device that still answers boots straight through. The list is for
   // the first visit, and for when an address has moved.
+  const devices = loadDevices();
   const savedHost = currentBase();
   const saved = devices.find((d) => d.hosts.includes(savedHost));
   const savedCode = (saved && saved.token) || token;
@@ -379,8 +386,42 @@ async function requireHub(onReady) {
     return;
   }
 
+  mountDevices(hub, {
+    onPick: (dev, base) => enterDevice(base, dev.token, onReady),
+  });
+}
+
+// ---------------------------------------------------------------- device list
+// One renderer for the boot gate and the Devices view. They show the same list
+// in the same state, and the gate is only seen when something is wrong - which
+// is exactly when two drifting copies would hurt most.
+export function mountDevices(host, opts) {
+  const tpl = document.getElementById('devices-ui');
+  if (!tpl || !host) return null;
+  host.replaceChildren(tpl.content.cloneNode(true));
+
+  const q = (role) => host.querySelector(`[data-role="${role}"]`);
+  const listEl = q('list');
+  const errEl = q('err');
+  const devices = loadDevices();
+  const status = new Map();
+  const pick = (opts && opts.onPick) || ((dev, base) => switchDevice(base, dev.token));
+  let editingId = null;
+
   const LABEL = { on: 'online', off: 'offline', warn: 'no code', checking: 'checking' };
   const DOT = { on: 'on', off: 'off', warn: 'warn' };
+
+  // The chip names the active device, so it follows a rename here.
+  const save = () => { saveDevices(devices); setupDeviceChip(); };
+
+  const act = (text, onClick, cls) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = cls;
+    b.textContent = text;
+    b.addEventListener('click', onClick);
+    return b;
+  };
 
   const render = () => {
     listEl.replaceChildren();
@@ -391,14 +432,48 @@ async function requireHub(onReady) {
       listEl.append(p);
       return;
     }
+
     for (const dev of devices) {
       const row = document.createElement('li');
       row.className = 'hub-row';
 
-      const pick = document.createElement('button');
-      pick.type = 'button';
-      pick.className = 'hub-pick';
+      if (editingId === dev.id) {
+        // Editing in place rather than behind a modal: the address is the thing
+        // that moved, and seeing the old one next to the field is the point.
+        row.classList.add('hub-editing');
+
+        const name = document.createElement('input');
+        name.type = 'text';
+        name.className = 'hub-input';
+        name.placeholder = 'Name';
+        name.value = dev.name;
+
+        const addr = document.createElement('input');
+        addr.type = 'text';
+        addr.className = 'hub-input';
+        addr.placeholder = 'Address';
+        addr.spellcheck = false;
+        addr.value = dev.hosts[0];
+
+        const fields = document.createElement('div');
+        fields.className = 'hub-editrow';
+        fields.append(name, addr);
+
+        const actions = document.createElement('div');
+        actions.className = 'hub-editrow';
+        actions.append(
+          act('Save', () => commitEdit(dev, name, addr), 'primary'),
+          act('Cancel', () => { editingId = null; render(); }, 'hub-act'));
+
+        row.append(fields, actions);
+        listEl.append(row);
+        continue;
+      }
+
       const state = status.get(dev.id) || 'checking';
+      const chooseBtn = document.createElement('button');
+      chooseBtn.type = 'button';
+      chooseBtn.className = 'hub-pick';
       const dot = document.createElement('span');
       dot.className = 'dot ' + (DOT[state] || 'off');
       const name = document.createElement('span');
@@ -407,23 +482,39 @@ async function requireHub(onReady) {
       const label = document.createElement('span');
       label.className = 'hub-state';
       label.textContent = LABEL[state] || state;
-      pick.append(dot, name, label);
-      pick.addEventListener('click', () => choose(dev));
+      chooseBtn.append(dot, name, label);
+      chooseBtn.addEventListener('click', () => choose(dev));
 
-      const del = document.createElement('button');
-      del.type = 'button';
-      del.className = 'hub-del';
-      del.setAttribute('aria-label', `Remove ${dev.name || dev.hosts[0]}`);
-      del.textContent = '×';
-      del.addEventListener('click', () => {
+      const edit = act('✎', () => { editingId = dev.id; render(); }, 'hub-act');
+      edit.setAttribute('aria-label', `Edit ${dev.name || dev.hosts[0]}`);
+
+      const del = act('×', () => {
         devices.splice(devices.indexOf(dev), 1);
-        saveDevices(devices);
+        save();
         render();
-      });
+      }, 'hub-del');
+      del.setAttribute('aria-label', `Remove ${dev.name || dev.hosts[0]}`);
 
-      row.append(pick, del);
+      row.append(chooseBtn, edit, del);
       listEl.append(row);
     }
+  };
+
+  // Asynchronous answers must not redraw over a field being edited.
+  const draw = () => { if (editingId === null) render(); };
+
+  const commitEdit = (dev, nameEl, addrEl) => {
+    const addr = normalizeBase(addrEl.value);
+    if (!addr) { errEl.textContent = 'That address does not look like one.'; return; }
+    dev.name = nameEl.value.trim();
+    // The edited address replaces the list: the user is correcting a move, not
+    // asking to keep probing the address that stopped answering.
+    dev.hosts = [addr];
+    save();
+    editingId = null;
+    errEl.textContent = '';
+    render();
+    probeOne(dev);
   };
 
   const choose = async (dev) => {
@@ -434,29 +525,31 @@ async function requireHub(onReady) {
     }
     for (const host of dev.hosts) {
       status.set(dev.id, 'checking');
-      render();
+      draw();
       const r = await checkDevice(host, dev.token);
       if (r.state === 'ok') {
         // Remember the address that worked, so the next visit tries it first.
         dev.hosts = [host, ...dev.hosts.filter((h) => h !== host)];
-        saveDevices(devices);
-        enterDevice(host, dev.token, onReady);
+        save();
+        pick(dev, host);
         return;
       }
       if (r.state === 'rejected') {
+        status.set(dev.id, 'warn');
+        draw();
         errEl.textContent = 'Code rejected. Check the LCD on that device.';
         return;
       }
     }
     status.set(dev.id, 'off');
-    render();
+    draw();
     errEl.textContent = 'No answer — is that device on this network?';
   };
 
   const add = async () => {
-    const name = document.getElementById('hubName').value.trim();
-    const addr = document.getElementById('hubAddr').value.trim();
-    const code = normalizeToken(document.getElementById('hubCode').value);
+    const name = q('name').value.trim();
+    const addr = q('addr').value.trim();
+    const code = normalizeToken(q('code').value);
     errEl.textContent = '';
 
     if (code.length !== TOKEN_LEN) {
@@ -468,22 +561,23 @@ async function requireHub(onReady) {
       return;
     }
 
-    const go = document.getElementById('hubGo');
+    const go = q('go');
     go.disabled = true;
     errEl.textContent = 'checking...';
     const r = await checkDevice(addr, code);
     go.disabled = false;
 
     if (r.state === 'ok') {
-      const existing = devices.find((d) => d.hosts.includes(r.base));
-      if (existing) {
-        existing.token = code;
-        if (name) existing.name = name;
+      let dev = devices.find((d) => d.hosts.includes(r.base));
+      if (dev) {
+        dev.token = code;
+        if (name) dev.name = name;
       } else {
-        devices.push({ id: newDeviceId(), name, hosts: [r.base], token: code });
+        dev = { id: newDeviceId(), name, hosts: [r.base], token: code };
+        devices.push(dev);
       }
-      saveDevices(devices);
-      enterDevice(r.base, code, onReady);
+      save();
+      pick(dev, r.base);
       return;
     }
     if (r.state === 'rejected') {
@@ -499,27 +593,55 @@ async function requireHub(onReady) {
       : 'Could not reach that address.';
   };
 
+  const probeOne = async (dev) => {
+    if (!dev.token) { status.set(dev.id, 'warn'); draw(); return; }
+    for (const host of dev.hosts) {
+      const r = await checkDevice(host, dev.token);
+      if (r.state === 'ok') { status.set(dev.id, 'on'); draw(); return; }
+      if (r.state === 'rejected') { status.set(dev.id, 'warn'); draw(); return; }
+    }
+    status.set(dev.id, 'off');
+    draw();
+  };
+
   const probeAll = async () => {
-    await Promise.all(devices.map(async (dev) => {
-      if (!dev.token) { status.set(dev.id, 'warn'); return; }
-      for (const host of dev.hosts) {
-        const r = await checkDevice(host, dev.token);
-        if (r.state === 'ok') { status.set(dev.id, 'on'); return; }
-        if (r.state === 'rejected') { status.set(dev.id, 'warn'); return; }
-      }
-      status.set(dev.id, 'off');
-    }));
-    render();
+    await Promise.all(devices.map(probeOne));
+    draw();
   };
 
   render();
-  document.getElementById('hubGo').addEventListener('click', add);
-  for (const id of ['hubName', 'hubAddr', 'hubCode']) {
-    document.getElementById(id).addEventListener('keydown', (e) => {
+  q('go').addEventListener('click', add);
+  for (const role of ['name', 'addr', 'code']) {
+    const el = q(role);
+    if (el) el.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') { e.preventDefault(); add(); }
     });
   }
   probeAll();
+
+  return { devices, render, probe: probeAll };
+}
+
+// The published shell says which dongle it is typing into, and the chip is the
+// way back to the list. The device's own UI has one device and hides it.
+function setupDeviceChip() {
+  const chip = document.getElementById('deviceChip');
+  if (!chip) return;
+  // The firmware's copy has one device and no chip.
+  if (!document.querySelector('meta[name="keebling-published"]')) return;
+
+  const base = currentBase();
+  const dev = loadDevices().find((d) => d.hosts.includes(base));
+  chip.textContent = (dev && dev.name) || base.replace(/^https?:\/\//, '');
+  chip.title = base;
+  chip.hidden = false;
+
+  // Wire once: this is called again whenever the list changes, so a rename is
+  // visible on the chip without a reload.
+  if (!chip.dataset.wired) {
+    chip.dataset.wired = '1';
+    chip.addEventListener('click', () => { location.hash = '#/devices'; });
+  }
 }
 
 // ---------------------------------------------------------------- misc

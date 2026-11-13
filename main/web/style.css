@@ -334,7 +334,73 @@ textarea { font-family: ui-monospace, SFMono-Regular, monospace; resize: vertica
 .hub-empty { font-size: 13px; color: #777; text-align: left; margin-bottom: 10px; }
 .hub-add { text-align: left; margin: 2px 0 0; }
 .hub-add summary { font-size: 13px; color: #bbb; cursor: pointer; padding: 6px 0; }
-.hub-add input { margin-top: 8px; }
+.hub-intro { font-size: 13px; color: #999; margin-bottom: 12px; text-align: left; }
+.hub-err { color: #ff6b6b; font-size: 13px; min-height: 16px; margin: 8px 0 0; text-align: left; }
+
+/* Inputs are styled here, not by .gate-box: the same list is also a page of
+   its own, outside the gate. */
+.hub-add input,
+.hub-input {
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 15px;
+  background: #0d0d0d;
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin-bottom: 8px;
+}
+.hub-add input.code {
+  font-size: 18px;
+  text-align: center;
+  letter-spacing: 2px;
+  font-family: ui-monospace, monospace;
+  text-transform: uppercase;
+}
+.hub-editrow { display: flex; gap: 6px; }
+.hub-editrow input { flex: 1 1 auto; min-width: 0; }
+.hub-editrow button { flex: 0 0 auto; }
+.hub-editrow button.primary { width: auto; padding: 0 14px; }
+.hub-editing { display: block; margin-bottom: 8px; }
+.hub-editing .hub-input { margin-bottom: 6px; }
+.hub-act {
+  flex: 0 0 auto;
+  width: 38px;
+  margin-bottom: 8px;
+  background: #0d0d0d;
+  color: #bbb;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+}
+.hub-act:hover { color: #fff; border-color: #3a3a3a; }
+
+/* The Devices page, reached from the chip or from Setup. */
+.wrap-devices { max-width: 560px; }
+.devhead { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.devhead h2 { margin: 0; font-size: 18px; }
+.devhead .setupback { margin: 0; height: 36px; }
+
+/* Which dongle this page is typing into. Ellipsised rather than wrapped: the
+   bar's height must not move when a long name is chosen. */
+.devicechip {
+  max-width: 42%;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: #21262d;
+  color: #bbb;
+  border: 1px solid var(--line);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.devicechip:hover { color: #fff; border-color: #3a3a3a; }
+.devicechip[hidden] { display: none; }
 
 /* ---------------------------------------------------------------- shell */
 /* The shell owns the top bar and one <main>. The control view is a flex

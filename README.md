@@ -137,9 +137,11 @@ browser. You can also skip it entirely with
 Driving it from <https://amoshydra.github.io/keebling/app/> is the desktop
 option: HTTPS is what lets the browser hand over Esc, Win and Alt+Tab, and a
 fullscreen keyboard lock is what keeps them. Add the dongle once by address and
-code; the list is kept in this browser. Install it to the home screen before you
-need it if you also use the dongle's own access point — that network has no
-internet, so the service worker's cached copy is what loads.
+code; the list is kept in this browser. The chip in the status bar names the
+dongle being driven and goes back to that list, where one can be renamed or its
+address corrected — the recovery when DHCP has moved it. Install the app to the
+home screen before you need it if you also use the dongle's own access point:
+that network has no internet, so the service worker's cached copy is what loads.
 
 ### The four tabs
 

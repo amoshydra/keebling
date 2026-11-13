@@ -22,6 +22,10 @@
      are <template>s below and the router mounts exactly one at a time. -->
 <div class="topbar">
   <span><span class="dot off" id="dot"></span><span id="statusText">connecting…</span></span>
+  <!-- Which dongle this page is typing into, and the way back to the list.
+       Only the published UI has more than one, so the firmware's copy leaves it
+       hidden. -->
+  <button id="deviceChip" class="devicechip" type="button" hidden></button>
   <!-- Always reachable, never adjacent to a button you press in a hurry. It is
        the one action you look for when something is stuck on the host. -->
   <button id="bRelease" class="releasechip" type="button">Release</button>
@@ -60,24 +64,36 @@
     </div>
 
     <!-- The published UI: it has to be told which dongle on the network, and
-         the list is per browser because the page never learns more than that. -->
-    <div id="hub" hidden>
-      <p>Choose a device on this network.</p>
-      <ul id="hubList" class="hub-list"></ul>
-      <details id="hubAdd" class="hub-add">
-        <summary>Add a device</summary>
-        <input id="hubName" type="text" autocomplete="off" placeholder="Name (optional)">
-        <input id="hubAddr" type="text" inputmode="url" autocomplete="off"
-               spellcheck="false" placeholder="192.168.4.1">
-        <input id="hubCode" class="code" type="text" inputmode="latin" autocomplete="off"
-               autocapitalize="characters" spellcheck="false" maxlength="20"
-               placeholder="Access code">
-        <button id="hubGo" class="primary">Add and connect</button>
-      </details>
-      <p class="err" id="hubErr"></p>
-    </div>
+         the list is per browser because the page never learns more than that.
+         Filled from the #devices-ui template, the same one the Devices view
+         uses, so the gate and the page cannot drift. -->
+    <div id="hub" hidden></div>
   </div>
 </div>
+
+<!-- The device list, cloned into the gate and into the Devices view. One
+     template, so the page you reach while everything works and the page you
+     see when nothing does are the same list with the same behaviour. -->
+<template id="devices-ui">
+  <div class="devlist">
+    <p class="hub-intro">Choose a device on this network.</p>
+    <ul class="hub-list" data-role="list"></ul>
+    <p class="err hub-err" data-role="err"></p>
+    <details class="hub-add" data-role="add">
+      <summary>Add a device</summary>
+      <input data-role="name" name="device-name" aria-label="Device name"
+             type="text" autocomplete="off" placeholder="Name (optional)">
+      <input data-role="addr" name="device-address" aria-label="Device address"
+             type="text" inputmode="url" autocomplete="off"
+             spellcheck="false" placeholder="192.168.4.1">
+      <input data-role="code" name="device-code" aria-label="Access code"
+             class="code" type="text" inputmode="latin" autocomplete="off"
+             autocapitalize="characters" spellcheck="false" maxlength="20"
+             placeholder="Access code">
+      <button data-role="go" class="primary" type="button">Add and connect</button>
+    </details>
+  </div>
+</template>
 
 <!-- The router clones one template here. Templates are inert, so their IDs do
      not exist until they are mounted - which is what keeps the four views'
@@ -230,6 +246,16 @@
   </div>
 </template>
 
+<template id="view-devices">
+  <div class="wrap wrap-devices">
+    <div class="devhead">
+      <button id="devicesBack" class="setupback" type="button">‹ Back</button>
+      <h2>Devices</h2>
+    </div>
+    <div id="devicesHost"></div>
+  </div>
+</template>
+
 <template id="view-settings">
   <div class="wrap wrap-setup">
     <!-- A list of sections rather than one long page: nine screens of settings
@@ -262,7 +288,7 @@
       <div class="field" id="activeDeviceBlock" hidden>
         <span>Page connected to</span>
         <p class="note" id="activeDeviceBase">—</p>
-        <button id="changeDevice" type="button">Change device…</button>
+        <button id="changeDevice" type="button">Manage devices…</button>
       </div>
       <div class="row">
         <button id="restart">Restart device</button>

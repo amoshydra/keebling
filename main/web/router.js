@@ -17,6 +17,7 @@
 import { PadView } from './pad.js';
 import { MacrosView } from './macros.js';
 import { SettingsView } from './settings.js';
+import { DevicesView } from './devices.js';
 import { appSettings, loadSettings, requireAuth } from './common.js';
 
 // The UI-files page is a repair tool, not the pad. It is a separate file so the
@@ -42,6 +43,10 @@ export const Router = (() => {
                  template: 'view-macros',   name: 'macros' },
     '/settings': { view: () => (typeof SettingsView === 'undefined' ? null : SettingsView),
                    template: 'view-settings', name: 'settings' },
+    // Not a tab: reached from the device chip or Setup, and it deliberately
+    // highlights none of the four so the way back is the Back button.
+    '/devices': { view: () => (typeof DevicesView === 'undefined' ? null : DevicesView),
+                  template: 'view-devices', name: 'devices' },
     '/ui':     { view: loadUiView, template: 'view-ui', name: 'ui' },
   };
 

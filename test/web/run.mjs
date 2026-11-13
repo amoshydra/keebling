@@ -248,6 +248,15 @@ try {
         'esp32remote.pagesActive': 'tv',
       } },
 
+    // The Devices view, reached while everything is working rather than from
+    // the gate. Seeded at the stub's own address so the probe answers at once.
+    { page: 'devices', url: `${base}/?token=${CODE}#/devices`, metrics: PHONE,
+      seedStorage: {
+        'esp32remote.devices': JSON.stringify([
+          { id: 'stub', name: 'Stub dongle', hosts: [base], token: CODE },
+        ]),
+      } },
+
     { page: 'recover', url: `${base}/recover.html`, metrics: PHONE,
       clearStorage: true,
       // A whole broken bundle, not one broken file: the UI is one script now,

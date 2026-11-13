@@ -81,6 +81,92 @@ async function __playMacro(text) {
   return { cap, parsed, result };
 }
 
+// ---------------------------------------------------------------- devices page
+// The published UI's list, reached while everything works. The same renderer is
+// behind the boot gate, so these cover both.
+const __devices = () => document.getElementById('devicesHost');
+
+__webTests.push({
+  page: 'devices',
+  name: 'the saved device is listed with a live state',
+  fn: async () => {
+    await __sleep(400);
+    const rows = [...__devices().querySelectorAll('.hub-row')];
+    __assert(rows.length === 1, `listed ${rows.length} rows`);
+    __assert(rows[0].textContent.includes('Stub dongle'), 'the name is missing');
+    const state = rows[0].querySelector('.hub-state').textContent;
+    __assert(state === 'online', `state is "${state}"`);
+  },
+});
+
+__webTests.push({
+  page: 'devices',
+  name: 'a device can be renamed, and the change is stored',
+  fn: async () => {
+    __devices().querySelector('.hub-row .hub-act').click();      // the pencil
+    __devices().querySelector('.hub-input').value = 'Renamed';
+    __devices().querySelector('.hub-editrow button.primary').click();
+    await __sleep(60);
+
+    const stored = JSON.parse(localStorage.getItem('esp32remote.devices'));
+    __assert(stored[0].name === 'Renamed', `stored name is "${stored[0].name}"`);
+    const shown = __devices().querySelector('.hub-name').textContent;
+    __assert(shown === 'Renamed', `the row still says "${shown}"`);
+  },
+});
+
+__webTests.push({
+  page: 'devices',
+  name: 'an edit with an unusable address is refused, and the old one is kept',
+  fn: async () => {
+    __devices().querySelector('.hub-row .hub-act').click();
+    __devices().querySelectorAll('.hub-input')[1].value = 'not a url';
+    __devices().querySelector('.hub-editrow button.primary').click();
+    await __sleep(40);
+
+    const stored = JSON.parse(localStorage.getItem('esp32remote.devices'));
+    __assert(stored[0].hosts[0].startsWith('http://'),
+      `the address became "${stored[0].hosts[0]}"`);
+    __assert(__devices().querySelector('[data-role="err"]').textContent.includes('address'),
+      'no error was shown');
+    __devices().querySelector('.hub-editrow button.hub-act').click();   // cancel
+  },
+});
+
+__webTests.push({
+  page: 'devices',
+  name: 'the add form refuses a short code before touching the network',
+  fn: async () => {
+    __devices().querySelector('details.hub-add').open = true;
+    __devices().querySelector('[data-role="code"]').value = 'ABC';
+    __devices().querySelector('[data-role="go"]').click();
+    await __sleep(20);
+    const err = __devices().querySelector('[data-role="err"]').textContent;
+    __assert(err.includes('12'), `the error was "${err}"`);
+  },
+});
+
+__webTests.push({
+  page: 'devices',
+  name: 'the chip is hidden when the device served the page',
+  fn: async () => {
+    __assert(document.getElementById('deviceChip').hidden,
+      'the chip is showing on the device, where there is only one');
+  },
+});
+
+__webTests.push({
+  page: 'devices',
+  name: 'delete removes the last device and leaves the empty state',
+  fn: async () => {
+    __devices().querySelector('.hub-del').click();
+    await __sleep(30);
+    const stored = JSON.parse(localStorage.getItem('esp32remote.devices'));
+    __assert(stored.length === 0, `stored ${stored.length} devices`);
+    __assert(__devices().querySelector('.hub-empty'), 'the empty state is missing');
+  },
+});
+
 // ---------------------------------------------------------------- control page
 __webTests.push({
   page: 'control',
