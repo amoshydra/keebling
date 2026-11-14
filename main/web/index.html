@@ -283,6 +283,13 @@
       <p class="note">ASCII only, up to 31 characters — anything else is replaced
         with “?”. Both take effect after a restart, and the host must re-read the
         USB descriptors (replug the dongle).</p>
+      <!-- The device's own UI is where this link belongs: on the published
+           copy it would point at the page you are already on. -->
+      <div class="field" id="hostedAppBlock" hidden>
+        <span>Run it from the web <small>(a desktop browser can send Esc, Win and Alt+Tab)</small></span>
+        <p class="note" id="hostedAppNote">—</p>
+        <button id="openHostedApp" type="button">Open the hosted app</button>
+      </div>
       <!-- Only the published UI can be pointed at more than one dongle, so this
            block stays hidden when the dongle itself served the page. -->
       <div class="field" id="activeDeviceBlock" hidden>

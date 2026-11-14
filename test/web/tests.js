@@ -289,6 +289,44 @@ __webTests.push({
 
 __webTests.push({
   page: 'control',
+  name: 'the hand-off link carries the address and code in the fragment',
+  fn: async () => {
+    const url = window.hostedAppUrl(location.origin, window.__CODE);
+    __assert(url.startsWith(`${window.HOSTED_APP}#`), `the link is ${url}`);
+    __assert(url.includes(`h=${encodeURIComponent(location.origin)}`),
+      'the address is not in the fragment');
+    __assert(url.includes(`t=${window.__CODE}`), 'the code is not in the fragment');
+    __assert(!url.includes('?h='), 'the address was put in a query');
+  },
+});
+
+__webTests.push({
+  page: 'control',
+  name: 'a hand-off pairs the device without a form',
+  fn: async () => {
+    localStorage.removeItem('esp32remote.devices');
+    try {
+      const hash = `#h=${encodeURIComponent(location.origin)}&t=${window.__CODE}`;
+      __assert(window.consumeHandoff(hash), 'the hand-off was not consumed');
+
+      const dev = window.loadDevices().find((d) => d.hosts.includes(location.origin));
+      __assert(dev, 'the device was not stored');
+      __assert(dev.token === window.__CODE, `the code became ${dev.token}`);
+      __assert(window.currentBase() === location.origin,
+        `the base became ${window.currentBase()}`);
+
+      __assert(!window.consumeHandoff('#h=nope&t=SHORT'),
+        'a hand-off with a short code was accepted');
+    } finally {
+      localStorage.removeItem('esp32remote.devices');
+      localStorage.removeItem('esp32remote.device');
+      window.setDeviceBase('');
+    }
+  },
+});
+
+__webTests.push({
+  page: 'control',
   name: 'the captured state is wired to the socket the pad opens',
   fn: async () => {
     // The state test below calls the handlers directly; this proves the socket

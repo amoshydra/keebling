@@ -7,7 +7,7 @@
 // mounted.
 
 
-import { apiFetch, apiPost, appSettings, currentBase, forgetCode, hostLayout, hostLayoutId, isDeviceOrigin, saveSettingsToDevice, setHostLayout, setLocal } from './common.js';
+import { apiFetch, apiPost, appSettings, currentBase, forgetCode, hostLayout, hostLayoutId, HOSTED_APP, hostedAppUrl, isDeviceOrigin, saveSettingsToDevice, setHostLayout, setLocal, token } from './common.js';
 import * as Pages from './pages.js';
 
 export const SettingsView = (() => {
@@ -1327,10 +1327,27 @@ async function init() {
   renderSetupList();
   showSetupPage(pageFromHash());
 
-  // The published UI can be pointed at any dongle on the network; the device's
-  // own copy has exactly one and must not offer to change it.
+  // The two halves of the same question, and each is offered only where it
+  // makes sense: the dongle's own UI can send you to the published app, and
+  // the published app can send you back to the list.
+  const onDevice = await isDeviceOrigin();
+
+  const hostedBlock = document.getElementById('hostedAppBlock');
+  if (hostedBlock && onDevice) {
+    hostedBlock.hidden = false;
+    const note = document.getElementById('hostedAppNote');
+    if (note) {
+      note.textContent = `Opens ${HOSTED_APP} with this device already added — no code to retype.`;
+    }
+    document.getElementById('openHostedApp').addEventListener('click', () => {
+      // The code is read at click time so "Forget code" cannot leave a stale
+      // one in the link.
+      window.open(hostedAppUrl(location.origin, token), '_blank', 'noopener');
+    });
+  }
+
   const activeBlock = document.getElementById('activeDeviceBlock');
-  if (activeBlock && !(await isDeviceOrigin())) {
+  if (activeBlock && !onDevice) {
     const baseEl = document.getElementById('activeDeviceBase');
     if (baseEl) baseEl.textContent = currentBase();
     activeBlock.hidden = false;

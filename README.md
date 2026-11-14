@@ -139,9 +139,12 @@ option: HTTPS is what lets the browser hand over Esc, Win and Alt+Tab, and a
 fullscreen keyboard lock is what keeps them. Add the dongle once by address and
 code; the list is kept in this browser. The chip in the status bar names the
 dongle being driven and goes back to that list, where one can be renamed or its
-address corrected — the recovery when DHCP has moved it. Install the app to the
-home screen before you need it if you also use the dongle's own access point:
-that network has no internet, so the service worker's cached copy is what loads.
+address corrected — the recovery when DHCP has moved it. Setup → Device →
+**Open the hosted app** on the dongle opens this page with the address and code
+in the URL fragment, so the device is already in the list. Install the app to
+the home screen before you need it if you also use the dongle's own access
+point: that network has no internet, so the service worker's cached copy is
+what loads.
 
 ### The four tabs
 
@@ -419,6 +422,12 @@ own device by spamming bad tokens. The real protection is the 60 bits.
   shared network this becomes the weakest link — that is what Phase 3 HTTPS is for.
 - **Physical access wins.** Anyone who can read the LCD, or pull the flash, has
   the code. That is the intended boundary.
+- **Which keys the page can capture is the controller's OS, not the browser's.**
+  With Keyboard Lock (desktop Chromium, JavaScript fullscreen) Linux hands over
+  Super, Alt+Tab and Ctrl+Alt+Del; Windows hands over Super and Alt+Tab but
+  keeps Ctrl+Alt+Del, the secure attention sequence, which no user-space
+  program can intercept. The on-screen keyboard and the Deck can always send
+  those usages, because the browser is not involved in delivering them.
 - **NVS is unencrypted**, so a stored WiFi password is readable by anyone who
   takes the dongle apart.
 - **The published UI is code you did not receive from the dongle.** Anything

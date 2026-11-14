@@ -1,6 +1,11 @@
 // Shared by the shell and all four views: the access gate, authenticated
 // requests, and the device settings blob.
 
+// Where the UI is also published. The device's own Setup links here, and that
+// link carries the address and code so the published app starts already paired
+// instead of asking for both again.
+export const HOSTED_APP = 'https://amoshydra.github.io/keebling/app/';
+
 // ---------------------------------------------------------------- device
 // Which dongle this page is driving. The device's own UI is served by it, so
 // the origin is the device; the published UI is served by someone else and has
@@ -227,6 +232,10 @@ export async function requireAuth(onReady) {
     const query = build ? `?v=${encodeURIComponent(build)}` : '';
     navigator.serviceWorker.register(`sw.js${query}`).catch(() => {});
   }
+
+  // A link from the device's own UI arrives paired. Anything else falls
+  // through to the list.
+  consumeHandoff();
   await requireHub(onReady);
 }
 
@@ -352,6 +361,45 @@ export async function checkDevice(base, code) {
 // confused by a host that answers 200 for every path.
 export async function isDeviceOrigin() {
   return !document.querySelector('meta[name="keebling-published"]');
+}
+
+// The hand-off link the device's UI opens. A fragment, not a query: the code
+// never reaches a server, and it is scrubbed once read.
+export function hostedAppUrl(base, code) {
+  const origin = normalizeBase(base) || currentBase();
+  return `${HOSTED_APP}#h=${encodeURIComponent(origin)}&t=${encodeURIComponent(normalizeToken(code))}`;
+}
+
+// Apply a hand-off (#h=<origin>&t=<code>) so the link is a pairing, not a form.
+// Returns true when it was applied; anything malformed is ignored, and the app
+// falls back to the list.
+export function consumeHandoff(hash) {
+  const raw = String(hash === undefined ? location.hash : hash).replace(/^#/, '');
+  if (!raw) return false;
+
+  const params = new URLSearchParams(raw);
+  const host = normalizeBase(params.get('h') || '');
+  const code = normalizeToken(params.get('t') || '');
+  if (!host || code.length !== TOKEN_LEN) return false;
+
+  const devices = loadDevices();
+  const existing = devices.find((d) => d.hosts.includes(host));
+  if (existing) {
+    existing.token = code;
+    existing.hosts = [host, ...existing.hosts.filter((h) => h !== host)];
+  } else {
+    devices.push({ id: newDeviceId(), name: '', hosts: [host], token: code });
+  }
+  saveDevices(devices);
+
+  setDeviceBase(host);
+  token = code;
+  storeToken(token);
+
+  // The fragment held the code. Rewrite the history entry rather than leaving
+  // it there for the next person to read over a shoulder.
+  history.replaceState(null, '', location.pathname + location.search + '#/');
+  return true;
 }
 
 // Leaving a running app for another device: reload rather than rebind. A reload
@@ -632,8 +680,11 @@ function setupDeviceChip() {
 
   const base = currentBase();
   const dev = loadDevices().find((d) => d.hosts.includes(base));
-  chip.textContent = (dev && dev.name) || base.replace(/^https?:\/\//, '');
-  chip.title = base;
+  const label = (dev && dev.name) || base.replace(/^https?:\/\//, '');
+  // The chevron is the affordance: a bare pill reads as a label, not a control.
+  chip.textContent = `${label} ▾`;
+  chip.title = `${base} — change device`;
+  chip.setAttribute('aria-label', `Change device, currently ${label}`);
   chip.hidden = false;
 
   // Wire once: this is called again whenever the list changes, so a rename is
