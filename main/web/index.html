@@ -252,6 +252,14 @@
       <button id="devicesBack" class="setupback" type="button">‹ Back</button>
       <h2>Devices</h2>
     </div>
+    <!-- Served by the dongle: one device, itself. The published copy shows the
+         list instead, because it is the one that can reach several. -->
+    <div id="devicesDeviceNote" hidden>
+      <p class="note">This page is served by the dongle itself, so it drives that
+        dongle only. To keep more than one, and to send Esc, Win and Alt+Tab from
+        a desktop, use the hosted app.</p>
+      <button id="devicesHosted" type="button">Open the hosted app</button>
+    </div>
     <div id="devicesHost"></div>
   </div>
 </template>

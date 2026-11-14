@@ -125,6 +125,13 @@ async function waitForDevtools(port, timeoutMs = 15000) {
 const { server, port: stubPort, device } = await startStub(0);
 const base = `http://127.0.0.1:${stubPort}`;
 
+// A second stub standing in for GitHub Pages: same bundle, with the marker the
+// deployment injects. The published pass then drives the first stub across
+// origins, which is the only way to test the gate, the hand-off and the CORS
+// path the app actually uses.
+const app = await startStub(0, { published: true });
+const appBase = `http://127.0.0.1:${app.port}`;
+
 // The device starts with no settings. Macros used to be seeded here; they live
 // in the browser now, so the macro page is seeded through localStorage instead
 // (see the targets below) and the migration pass gives the device a legacy list
@@ -248,14 +255,20 @@ try {
         'esp32remote.pagesActive': 'tv',
       } },
 
-    // The Devices view, reached while everything is working rather than from
-    // the gate. Seeded at the stub's own address so the probe answers at once.
-    { page: 'devices', url: `${base}/?token=${CODE}#/devices`, metrics: PHONE,
-      seedStorage: {
-        'esp32remote.devices': JSON.stringify([
-          { id: 'stub', name: 'Stub dongle', hosts: [base], token: CODE },
-        ]),
-      } },
+    // The published app's first run: nothing stored, so the gate has to offer
+    // the list. The origin is new each run (the stub takes a random port), so
+    // this is genuinely a fresh browser.
+    { page: 'gate-published', url: `${appBase}/`, metrics: PHONE },
+
+    // The published app, from the second stub, driving the device stub across
+    // origins. The hand-off URL pairs it exactly as the dongle's own Setup
+    // does, so this is the real first-run path rather than a seeded one.
+    { page: 'devices',
+      url: `${appBase}/#h=${encodeURIComponent(base)}&t=${CODE}`, metrics: PHONE },
+
+    // The same route on the dongle's own copy: not a list there, a pointer to
+    // the app that has one.
+    { page: 'device-page', url: `${base}/?token=${CODE}#/devices`, metrics: PHONE },
 
     { page: 'recover', url: `${base}/recover.html`, metrics: PHONE,
       clearStorage: true,
@@ -437,6 +450,7 @@ try {
 } finally {
   chrome.kill();
   server.close();
+  app.server.close();
 }
 
 process.exit(failures ? 1 : 0);

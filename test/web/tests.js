@@ -81,19 +81,58 @@ async function __playMacro(text) {
   return { cap, parsed, result };
 }
 
-// ---------------------------------------------------------------- devices page
-// The published UI's list, reached while everything works. The same renderer is
-// behind the boot gate, so these cover both.
-const __devices = () => document.getElementById('devicesHost');
+// ---------------------------------------------------------------- published app
+// Two targets are served by the second stub (the one standing in for GitHub
+// Pages): the first-run gate with no device, and the same app paired by a
+// hand-off. Both drive the device stub across origins, which is the real path.
+
+const __openDevices = async () => {
+  if (location.hash !== '#/devices') {
+    location.hash = '#/devices';
+    await __sleep(350);
+  }
+  return document.getElementById('devicesHost');
+};
+
+__webTests.push({
+  page: 'gate-published',
+  name: 'the published gate offers the device list, not a code form',
+  fn: async () => {
+    await __sleep(600);
+    __assert(!(await window.isDeviceOrigin()), 'the published stub was taken for a device');
+    __assert(!document.getElementById('gate').classList.contains('hidden'), 'the gate is hidden');
+    __assert(document.getElementById('gateCode').hidden, 'the single-code form is showing');
+    const hub = document.getElementById('hub');
+    __assert(!hub.hidden, 'the list is hidden');
+    __assert(hub.querySelector('.hub-empty'), 'the empty list is missing');
+    __assert(document.getElementById('deviceChip').hidden, 'the chip is showing with no device');
+  },
+});
 
 __webTests.push({
   page: 'devices',
-  name: 'the saved device is listed with a live state',
+  name: 'the hand-off paired the device and scrubbed the code',
   fn: async () => {
-    await __sleep(400);
-    const rows = [...__devices().querySelectorAll('.hub-row')];
+    await __sleep(600);
+    const base = window.currentBase();
+    __assert(base.startsWith('http://127.0.0.1:'), `the base is ${base}`);
+    __assert(window.loadDevices().length === 1, `stored ${window.loadDevices().length} devices`);
+    __assert(window.loadDevices()[0].hosts.includes(base),
+      'the handed-off address is not the one stored');
+    __assert(location.hash === '#/', `the hash is still ${location.hash}`);
+    __assert(!location.href.includes(window.__CODE), 'the code survived in the URL');
+  },
+});
+
+__webTests.push({
+  page: 'devices',
+  name: 'the list shows the paired device and its live state',
+  fn: async () => {
+    const host = await __openDevices();
+    const rows = [...host.querySelectorAll('.hub-row')];
     __assert(rows.length === 1, `listed ${rows.length} rows`);
-    __assert(rows[0].textContent.includes('Stub dongle'), 'the name is missing');
+    const base = window.currentBase().replace(/^https?:\/\//, '');
+    __assert(rows[0].textContent.includes(base), `the row does not name ${base}`);
     const state = rows[0].querySelector('.hub-state').textContent;
     __assert(state === 'online', `state is "${state}"`);
   },
@@ -103,14 +142,15 @@ __webTests.push({
   page: 'devices',
   name: 'a device can be renamed, and the change is stored',
   fn: async () => {
-    __devices().querySelector('.hub-row .hub-act').click();      // the pencil
-    __devices().querySelector('.hub-input').value = 'Renamed';
-    __devices().querySelector('.hub-editrow button.primary').click();
+    const host = await __openDevices();
+    host.querySelector('.hub-row .hub-act').click();          // the pencil
+    host.querySelector('.hub-input').value = 'Renamed';
+    host.querySelector('.hub-editrow button.primary').click();
     await __sleep(60);
 
     const stored = JSON.parse(localStorage.getItem('esp32remote.devices'));
     __assert(stored[0].name === 'Renamed', `stored name is "${stored[0].name}"`);
-    const shown = __devices().querySelector('.hub-name').textContent;
+    const shown = host.querySelector('.hub-name').textContent;
     __assert(shown === 'Renamed', `the row still says "${shown}"`);
   },
 });
@@ -119,17 +159,18 @@ __webTests.push({
   page: 'devices',
   name: 'an edit with an unusable address is refused, and the old one is kept',
   fn: async () => {
-    __devices().querySelector('.hub-row .hub-act').click();
-    __devices().querySelectorAll('.hub-input')[1].value = 'not a url';
-    __devices().querySelector('.hub-editrow button.primary').click();
+    const host = await __openDevices();
+    host.querySelector('.hub-row .hub-act').click();
+    host.querySelectorAll('.hub-input')[1].value = 'not a url';
+    host.querySelector('.hub-editrow button.primary').click();
     await __sleep(40);
 
     const stored = JSON.parse(localStorage.getItem('esp32remote.devices'));
     __assert(stored[0].hosts[0].startsWith('http://'),
       `the address became "${stored[0].hosts[0]}"`);
-    __assert(__devices().querySelector('[data-role="err"]').textContent.includes('address'),
+    __assert(host.querySelector('[data-role="err"]').textContent.includes('address'),
       'no error was shown');
-    __devices().querySelector('.hub-editrow button.hub-act').click();   // cancel
+    host.querySelector('.hub-editrow button.hub-act').click();   // cancel
   },
 });
 
@@ -137,21 +178,26 @@ __webTests.push({
   page: 'devices',
   name: 'the add form refuses a short code before touching the network',
   fn: async () => {
-    __devices().querySelector('details.hub-add').open = true;
-    __devices().querySelector('[data-role="code"]').value = 'ABC';
-    __devices().querySelector('[data-role="go"]').click();
+    const host = await __openDevices();
+    host.querySelector('details.hub-add').open = true;
+    host.querySelector('[data-role="code"]').value = 'ABC';
+    host.querySelector('[data-role="go"]').click();
     await __sleep(20);
-    const err = __devices().querySelector('[data-role="err"]').textContent;
+    const err = host.querySelector('[data-role="err"]').textContent;
     __assert(err.includes('12'), `the error was "${err}"`);
   },
 });
 
 __webTests.push({
   page: 'devices',
-  name: 'the chip is hidden when the device served the page',
+  name: 'the chip names the device, follows a rename, and offers the way back',
   fn: async () => {
-    __assert(document.getElementById('deviceChip').hidden,
-      'the chip is showing on the device, where there is only one');
+    const chip = document.getElementById('deviceChip');
+    __assert(!chip.hidden, 'the chip is hidden on the published app');
+    __assert(chip.textContent.includes('Renamed'), `the chip reads "${chip.textContent}"`);
+    __assert(chip.textContent.includes('▾'), 'the chip does not read as a control');
+    __assert(chip.getAttribute('aria-label').startsWith('Change device'),
+      'the chip has no accessible name for what it does');
   },
 });
 
@@ -159,11 +205,46 @@ __webTests.push({
   page: 'devices',
   name: 'delete removes the last device and leaves the empty state',
   fn: async () => {
-    __devices().querySelector('.hub-del').click();
+    const host = await __openDevices();
+    host.querySelector('.hub-del').click();
     await __sleep(30);
     const stored = JSON.parse(localStorage.getItem('esp32remote.devices'));
     __assert(stored.length === 0, `stored ${stored.length} devices`);
-    __assert(__devices().querySelector('.hub-empty'), 'the empty state is missing');
+    __assert(host.querySelector('.hub-empty'), 'the empty state is missing');
+  },
+});
+
+// The same route on the dongle's own copy: not a list, a pointer to the app.
+__webTests.push({
+  page: 'device-page',
+  name: 'the dongle points at the hosted app instead of listing devices',
+  fn: async () => {
+    await __sleep(400);
+    const note = document.getElementById('devicesDeviceNote');
+    const host = document.getElementById('devicesHost');
+    __assert(await window.isDeviceOrigin(), 'the device stub was taken for the published app');
+    __assert(note && !note.hidden, 'the note is not shown');
+    __assert(host && host.hidden, 'the device list is still shown');
+    __assert(document.getElementById('deviceChip').hidden,
+      'the device chip is showing on the dongle');
+  },
+});
+
+__webTests.push({
+  page: 'device-page',
+  name: 'its link is a hand-off for this device',
+  fn: async () => {
+    await __sleep(400);
+    let opened = null;
+    const real = window.open;
+    window.open = (u) => { opened = u; return null; };
+    document.getElementById('devicesHosted').click();
+    window.open = real;
+
+    __assert(opened, 'the button opened nothing');
+    __assert(opened.includes('#h='), `the link is not a hand-off: ${opened}`);
+    __assert(opened.includes(`t=${window.__CODE}`), 'the link lost the code');
+    __assert(!opened.includes('?h='), 'the link used a query');
   },
 });
 

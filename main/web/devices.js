@@ -5,15 +5,34 @@
 // something is wrong, so two implementations would be two chances to disagree
 // at the worst moment.
 
-import { mountDevices, switchDevice } from './common.js';
+import { hostedAppUrl, isDeviceOrigin, mountDevices, switchDevice, token } from './common.js';
 
 export const DevicesView = (() => {
   let host = null;
 
-  function init() {
-    host = document.getElementById('devicesHost');
+  async function init() {
     const back = document.getElementById('devicesBack');
     if (back) back.addEventListener('click', () => { location.hash = '#/'; });
+
+    const note = document.getElementById('devicesDeviceNote');
+    host = document.getElementById('devicesHost');
+
+    // The dongle's own page drives exactly one device: itself. The list is a
+    // published-UI idea, and offering it here would be a form that can never
+    // succeed - one device's origin is not in another's allowlist. So this
+    // becomes the pointer to the app that does have a list.
+    if (await isDeviceOrigin()) {
+      if (host) host.hidden = true;
+      if (!note) return;
+      note.hidden = false;
+      const open = document.getElementById('devicesHosted');
+      if (open) {
+        open.addEventListener('click', () => {
+          window.open(hostedAppUrl(location.origin, token), '_blank', 'noopener');
+        });
+      }
+      return;
+    }
 
     if (!host) return;
     mountDevices(host, {

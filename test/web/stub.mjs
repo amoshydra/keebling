@@ -119,7 +119,12 @@ function screenImageOk(b) {
   return zlib.crc32(b.subarray(f.header)) === b.readUInt32LE(4);
 }
 
-export function startStub(port = 0) {
+// `published` makes this stub stand in for GitHub Pages rather than for the
+// device: the shell gets the marker the deployment injects, so the app shows the
+// device list instead of the single-code gate. Cross-origin calls to the *other*
+// stub then exercise the real CORS path.
+export function startStub(port = 0, opts = {}) {
+  const PUBLISHED = !!opts.published;
   // What the "device" holds. Tests can read and change this.
   const device = {
     // The host's lock keys, for the Keys view's badge.
@@ -157,6 +162,25 @@ export function startStub(port = 0) {
     const url = new URL(req.url, 'http://localhost');
     const p = url.pathname;
     const authed = (url.searchParams.get('token') || '').toUpperCase() === CODE;
+
+    // The firmware answers CORS for the published origin; the stub answers any
+    // origin, because the test's "published origin" is 127.0.0.1:<random>.
+    // setHeader before the routes, so every response - including 403 and 404 -
+    // carries it, which is the property the app relies on.
+    const origin = req.headers.origin;
+    if (origin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Vary', 'Origin');
+    }
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204, {
+        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type',
+        'Access-Control-Max-Age': '600',
+      });
+      res.end();
+      return;
+    }
 
     const json = (o, status = 200) => {
       // Mirrors the firmware: its JSON endpoints are never cached, so a stale
@@ -509,8 +533,15 @@ export function startStub(port = 0) {
     // serves any flat name in its partition, which is what lets a user's own
     // bundler ship whatever it emits.
     const stored = device.uiFiles.get(file);
-    const body = stored && stored.length ? stored : (hasBuiltIn ? fs.readFileSync(builtIn) : null);
+    let body = stored && stored.length ? stored : (hasBuiltIn ? fs.readFileSync(builtIn) : null);
     if (!body) { res.writeHead(404); res.end('not found'); return; }
+
+    // What the Pages workflow does to the shell. Without it the app would think
+    // it was served by a dongle and show the single-code gate.
+    if (PUBLISHED && file === 'index.html') {
+      body = Buffer.from(body.toString('utf8').replace('</head>',
+        '<meta name="keebling-published" content="1" data-build="test"></head>'));
+    }
 
     // Mirrors the firmware: these are never cached, so an upload cannot look
     // like it did nothing.
