@@ -41,10 +41,21 @@ function findChrome() {
     const n = (s) => Number((s.match(/(\d+)/g) || []).pop() || 0);
     return n(b) - n(a);
   });
-  if (!found.length) {
-    throw new Error('no Chromium found. Install one, or set CHROME=/path/to/chrome');
+  if (found.length) return found[0];
+
+  // A CI runner has no Playwright cache: it has Chrome on PATH. Checked after
+  // the caches so a developer's tests keep using the browser they already have,
+  // and in this order so the real Chrome beats a snap shim that needs snapd.
+  const names = ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser'];
+  for (const dir of (process.env.PATH || '').split(path.delimiter)) {
+    if (!dir) continue;
+    for (const name of names) {
+      const candidate = path.join(dir, name);
+      if (existsSync(candidate)) return candidate;
+    }
   }
-  return found[0];
+
+  throw new Error('no Chromium found. Install one, or set CHROME=/path/to/chrome');
 }
 
 // ---------------------------------------------------------------- CDP
@@ -138,7 +149,7 @@ const appBase = `http://127.0.0.1:${app.port}`;
 // on purpose.
 
 const debugPort = 9333;
-const chrome = spawn(findChrome(), [
+const chromeArgs = [
   '--headless=new',
   `--remote-debugging-port=${debugPort}`,
   '--no-first-run',
@@ -146,8 +157,14 @@ const chrome = spawn(findChrome(), [
   '--disable-gpu',
   '--disable-dev-shm-usage',
   '--user-data-dir=' + path.join(os.tmpdir(), `webui-test-${process.pid}`),
-  'about:blank',
-], { stdio: 'ignore' });
+];
+// A runner or container without user namespaces refuses Chrome's sandbox.
+// Local runs keep it: the tests load local pages, but the browser should still
+// be the browser.
+if (process.env.CI) chromeArgs.push('--no-sandbox', '--disable-setuid-sandbox');
+chromeArgs.push('about:blank');
+
+const chrome = spawn(findChrome(), chromeArgs, { stdio: 'ignore' });
 
 let failures = 0;
 let passed = 0;

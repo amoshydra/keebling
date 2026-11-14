@@ -6,7 +6,9 @@
   "scripts": {
     "build": "node tools/build-web.mjs",
     "watch": "node tools/build-web.mjs --watch",
-    "test": "node test/web/run.mjs"
+    "test": "node tools/build-web.mjs && node test/web/run.mjs",
+    "test:web": "node test/web/run.mjs",
+    "test:firmware": "test/firmware/run.sh"
   },
   "devDependencies": {
     "esbuild": "^0.25.0",

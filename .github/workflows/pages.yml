@@ -1,25 +1,24 @@
-name: Deploy GitHub Pages
+name: CI and Pages
 
 on:
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
+# A pull request must not cancel a main deploy, and two pull requests on
+# different branches must not cancel each other.
 concurrency:
-  group: pages
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+  test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -30,24 +29,58 @@ jobs:
           node-version: 20
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm build
-      - uses: actions/configure-pages@v5
+
+      # Host tests: no ESP-IDF and no board, about a second.
+      - name: Firmware host tests
+        run: test/firmware/run.sh
+
+      # `pnpm test` builds main/web/dist first, because the browser suite
+      # serves exactly what the firmware ships. Chrome comes from PATH on a
+      # runner; test/web/run.mjs looks there after the Playwright cache.
+      - name: Web UI tests
+        run: pnpm test
+
+      # Stage the public site now, from the build that was just tested. The
+      # deploy job downloads this instead of rebuilding, so what ships is what
+      # passed.
       - name: Stage the public site
         run: |
           mkdir -p _site/app
           cp site/index.html site/styles.css site/.nojekyll site/probe.html _site/
           cp -r site/assets _site/
           cp -r site/editor _site/
-          # The app is the same bundle the firmware serves, published so it has
-          # a trusted HTTPS origin - which is what unlocks Keyboard Lock.
-          # web.zip is an upload for the device, and recover.html is the
-          # firmware-only repair page.
           cp main/web/dist/* _site/app/
           rm -f _site/app/web.zip _site/app/recover.html
-          # Tell the app it is the published copy. The firmware's shell has no
-          # marker, which is how the same bundle shows a device list here and a
-          # code prompt there.
+          # Tell the app it is the published copy; the firmware's shell has no
+          # marker. The build id doubles as the service worker's cache key.
           sed -i "s#</head>#<meta name=\"keebling-published\" content=\"1\" data-build=\"${GITHUB_SHA::7}\"></head>#" _site/app/index.html
+      - uses: actions/upload-artifact@v4
+        with:
+          name: site
+          path: _site
+          # .nojekyll is load-bearing: without it Pages runs the site through
+          # Jekyll and drops files it does not understand.
+          include-hidden-files: true
+          retention-days: 1
+
+  # Only a green test job can deploy, and only from main.
+  deploy:
+    needs: test
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: site
+          path: _site
+      - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site

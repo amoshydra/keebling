@@ -551,6 +551,8 @@ Recovery from it is a plain power cycle.
 | Task | Command |
 |---|---|
 | Build the UI | `pnpm build` (or `pnpm watch`) |
+| Run the web tests | `pnpm test` (builds first; 180 checks, ~40 s) |
+| Run the firmware host tests | `test/firmware/run.sh` (105 checks, <1 s) |
 | Build | `idf.py build` |
 | Flash (download mode) | `idf.py -p /dev/ttyACM0 flash` |
 | Enter download mode | unplug → hold BOOT → replug |

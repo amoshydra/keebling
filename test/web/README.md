@@ -5,13 +5,26 @@ packages** — it uses Node's built-in `WebSocket` and `fetch` to speak the
 DevTools protocol, and reuses whatever Chromium is already on disk.
 
 ```bash
-node test/web/run.mjs              # run everything
+pnpm test                          # build, then run everything
+pnpm test:web                      # run against the current dist
 node test/web/run.mjs --verbose    # also list passing tests
 CHROME=/path/to/chrome node test/web/run.mjs
 node test/web/stub.mjs             # just the stub, on :8101, for poking by hand
 ```
 
+`pnpm test` builds `main/web/dist` first on purpose: the suite serves the
+minified bundle the firmware ships, so testing a stale build would be testing
+code that is not in the repository. `pnpm test:web` skips the build for a
+faster loop when `dist` is already current.
+
 Exit code is non-zero if anything fails.
+
+The browser is found in this order: `CHROME`, the Playwright/Puppeteer caches,
+then `google-chrome` / `chromium` on `PATH`. That last step is what makes the
+same command work on a CI runner.
+
+CI runs this and the firmware host tests on every push and pull request, and
+the Pages deploy waits for them (`.github/workflows/pages.yml`).
 
 ## Why this exists
 
@@ -27,7 +40,7 @@ If you change anything under `main/web/`, run this first.
 
 | File | Purpose |
 |---|---|
-| `stub.mjs` | serves `main/web/` and stands in for the firmware's endpoints |
+| `stub.mjs` | serves the built UI and stands in for the firmware's endpoints. A second instance runs with `published: true`: the marker GitHub Pages injects, so the app shows the device list, and CORS, so it can drive the first instance across origins |
 | `tests.js` | the assertions, injected into the page and run there |
 | `run.mjs` | launches Chromium, navigates, runs the tests, reports |
 
