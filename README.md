@@ -256,7 +256,7 @@ An upload replaces the built-in copy until it is reset, so a bad *build* can
 break the UI — but not permanently: `/recover.html` is served by the firmware
 itself and deletes the stored copies. Uploads are token-gated, names are
 matched against the asset table rather than used to build a path, and the
-archive is capped at 192 KB with 96 KB per entry.
+archive is capped at 224 KB with 160 KB per entry.
 
 ### Custom screen image
 
@@ -477,7 +477,7 @@ are snapshots of current state, so this maps 1:1 onto the hardware with no queue
 | `GET /ws?token=` | token | control channel |
 | `POST /bootloader?token=` | token | reboot into USB download mode |
 | `GET /ui/files?token=` | token | each UI file: stored on the device or still embedded |
-| `POST /ui/upload?token=` | token | store a whole UI (stored zip, 192 KB, 96 KB per entry, 24 entries, flat names) |
+| `POST /ui/upload?token=` | token | store a whole UI (stored zip, 224 KB, 160 KB per entry, 32 entries, flat names) |
 | `POST /ui/reset?token=&name=` (or `&all=1`) | token | delete stored copies, restoring the embedded ones |
 | `GET /screen/image?token=` | token | the stored screen image, header and CRC included (404 when there is none) |
 | `POST /screen/image?token=` | token | store the packed screen image (raw body, exactly 6,408 bytes) |
