@@ -15,6 +15,15 @@ import os from 'node:os';
 
 import { startStub, CODE } from './stub.mjs';
 
+// The DevTools client below is Node's built-in WebSocket, which is only global
+// from Node 22. CI pins the version, but a contributor on an older Node would
+// otherwise get "WebSocket is not defined" from deep inside the runner.
+if (typeof WebSocket === 'undefined') {
+  throw new Error(
+    `Node 22 or newer is required (found ${process.version}): the test runner ` +
+    'uses the built-in WebSocket to speak DevTools');
+}
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const VERBOSE = process.argv.includes('--verbose');
 

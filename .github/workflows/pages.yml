@@ -26,7 +26,9 @@ jobs:
           version: 9
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          # The test runner's DevTools client is Node's built-in WebSocket,
+          # which is only global from Node 22.
+          node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
 
@@ -38,7 +40,21 @@ jobs:
       # serves exactly what the firmware ships. Chrome comes from PATH on a
       # runner; test/web/run.mjs looks there after the Playwright cache.
       - name: Web UI tests
-        run: pnpm test
+        run: |
+          # Logs need admin to read; the step summary is visible on the run
+          # page, so a failure carries its own tail with it.
+          set +e
+          pnpm test 2>&1 | tee /tmp/web-tests.log
+          code=${PIPESTATUS[0]}
+          if [ "$code" -ne 0 ]; then
+            {
+              echo '## Web tests failed'
+              echo '```'
+              tail -60 /tmp/web-tests.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit "$code"
 
       # Stage the public site now, from the build that was just tested. The
       # deploy job downloads this instead of rebuilding, so what ships is what

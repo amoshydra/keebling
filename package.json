@@ -3,6 +3,9 @@
   "private": true,
   "type": "module",
   "description": "Build pipeline for the device's web UI. The firmware ships dist/, never the sources.",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "build": "node tools/build-web.mjs",
     "watch": "node tools/build-web.mjs --watch",
