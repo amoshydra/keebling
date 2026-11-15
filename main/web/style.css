@@ -991,11 +991,14 @@ textarea { font-family: ui-monospace, SFMono-Regular, monospace; resize: vertica
 /* media keys */
 #media { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
 .m {
-  padding: 14px 2px;
+  padding: 12px 2px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
   text-align: center;
   background: #2c2c2c;
   border-radius: 6px;
-  font-size: 19px;
   line-height: 1;
   user-select: none;
   -webkit-user-select: none;
@@ -1003,7 +1006,10 @@ textarea { font-family: ui-monospace, SFMono-Regular, monospace; resize: vertica
   touch-action: none;
   -webkit-tap-highlight-color: transparent;
 }
-.m small { display: block; font-size: 9px; color: #999; margin-top: 5px; }
+/* 20px of Lucide ink in the same 88x61 cell the glyphs used. currentColor, so
+   the active state tints the icon and its label together. */
+.m .ico { width: 20px; height: 20px; color: currentColor; }
+.m small { display: block; font-size: 9px; line-height: 1; color: var(--ink-2); }
 .m.active { background: var(--accent); color: #1b1308; }
 .m.active small { color: rgba(27, 19, 8, .65); }
 
@@ -1039,7 +1045,9 @@ textarea { font-family: ui-monospace, SFMono-Regular, monospace; resize: vertica
 }
 .setuprow .lb { flex: 1; }
 .setuprow .vl { font-size: 12px; color: #7d7d7d; }
-.setuprow .ch { color: #555; font-size: 17px; }
+/* #555 was 2.3:1: the affordance that says the row opens was the least
+   legible thing on it. --dim is 5.2:1. */
+.setuprow .ch { color: var(--dim); font-size: 17px; }
 .setupback {
   height: 40px;
   margin: 4px 0 14px;

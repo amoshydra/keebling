@@ -1553,20 +1553,10 @@ function preventContextMenu(e) { e.preventDefault(); }
 // ---------------------------------------------------------------- media keys
 // Consumer Control (usage page 0x0C). Sent as a press/release pair like any
 // other key: holding a media key down is unusual, so each one is momentary.
-const MEDIA_KEYS = [
-  ['⏮', 0x00B6, 'prev'],
-  ['⏯', 0x00CD, 'play'],
-  ['⏭', 0x00B5, 'next'],
-  ['⏹', 0x00B7, 'stop'],
-  ['🔉', 0x00EA, 'vol −'],
-  ['🔇', 0x00E2, 'mute'],
-  ['🔊', 0x00E9, 'vol +'],
-  ['🌐', 0x0223, 'home'],
-  ['◀', 0x0224, 'back'],
-  ['▶', 0x0225, 'fwd'],
-  ['🔍', 0x0221, 'search'],
-  ['🧮', 0x0192, 'calc'],
-];
+//
+// The keys and their usages live in the template, not here: the SVGs are
+// inlined by the build, and emoji/glyphs were rendering as colour bitmaps on
+// Android and as monochrome text elsewhere. The usage is the data attribute.
 
 function sendConsumer(usage) {
   send(new Uint8Array([0x03, usage & 0xFF, (usage >> 8) & 0xFF]));
@@ -1577,10 +1567,9 @@ function buildMedia() {
   mediaEl = document.getElementById('media');
   mediaPanel = document.getElementById('mediaPanel');
 
-  for (const [glyph, usage, label] of MEDIA_KEYS) {
-    const el = document.createElement('div');
-    el.className = 'm';
-    el.innerHTML = `${glyph}<small>${label}</small>`;
+  for (const el of mediaEl.querySelectorAll('.m')) {
+    const usage = Number(el.dataset.usage);
+    const label = el.querySelector('small').textContent;
 
     const press = (e) => {
       e.preventDefault();
@@ -1599,7 +1588,6 @@ function buildMedia() {
     el.addEventListener('pointerup', rel);
     el.addEventListener('pointerleave', rel);
     el.addEventListener('pointercancel', rel);
-    mediaEl.appendChild(el);
   }
 
   mediaPanel.addEventListener('contextmenu', preventContextMenu);

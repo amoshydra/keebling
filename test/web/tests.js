@@ -1192,8 +1192,10 @@ __webTests.push({
   fn: async () => {
     __resetInput();
     const cap = __capture();
-    const el = document.querySelector('#media .m');
-    __assert(el, 'media panel is empty');
+    const cells = [...document.querySelectorAll('#media .m')];
+    __assert(cells.length === 12, `media panel has ${cells.length} keys, expected 12`);
+    const el = cells.find((c) => c.querySelector('small').textContent === 'vol +');
+    __assert(el, 'the volume-up key is missing');
 
     el.dispatchEvent(new PointerEvent('pointerdown', {
       pointerId: 4, pointerType: 'touch', clientX: 10, clientY: 10, bubbles: true,
@@ -1206,6 +1208,10 @@ __webTests.push({
 
     const press = cap.find((r) => r[0] === 3 && (r[1] || r[2]));
     __assert(press, 'no consumer report was sent');
+    // The usage now lives in the template; a typo there would still send a
+    // consumer report, so the bytes are part of the assertion.
+    __assert(press[1] === 0xE9 && press[2] === 0,
+      `volume-up sent usage ${(press[2] << 8 | press[1]).toString(16)}`);
     const release = cap.find((r) => r[0] === 3 && !r[1] && !r[2]);
     __assert(release, 'no consumer release report was sent');
   },

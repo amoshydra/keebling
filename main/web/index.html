@@ -151,9 +151,9 @@
     <!-- Three buttons that need to be reachable without leaving the pad. They
          float over it at the thumb rather than sitting in a row of their own. -->
     <div id="mouseButtons">
-      <button id="bLeft" type="button">L</button>
-      <button id="bMid" type="button">M</button>
-      <button id="bRight" type="button">R</button>
+      <button id="bLeft" type="button" aria-label="Left click">L</button>
+      <button id="bMid" type="button" aria-label="Middle click">M</button>
+      <button id="bRight" type="button" aria-label="Right click">R</button>
     </div>
     <button id="helpOpen" type="button" aria-label="Gesture help">?</button>
   </div>
@@ -251,7 +251,20 @@
 
     <div class="panel" id="mediaPanel">
       <h2>Media &amp; browser keys</h2>
-      <div id="media"></div>
+      <div id="media">
+        <div class="m" data-usage="0xB6"><svg data-icon="skip-back" class="ico"></svg><small>prev</small></div>
+        <div class="m" data-usage="0xCD"><svg data-icon="play" class="ico"></svg><small>play</small></div>
+        <div class="m" data-usage="0xB5"><svg data-icon="skip-forward" class="ico"></svg><small>next</small></div>
+        <div class="m" data-usage="0xB7"><svg data-icon="square" class="ico"></svg><small>stop</small></div>
+        <div class="m" data-usage="0xEA"><svg data-icon="volume-1" class="ico"></svg><small>vol −</small></div>
+        <div class="m" data-usage="0xE2"><svg data-icon="volume-x" class="ico"></svg><small>mute</small></div>
+        <div class="m" data-usage="0xE9"><svg data-icon="volume-2" class="ico"></svg><small>vol +</small></div>
+        <div class="m" data-usage="0x223"><svg data-icon="house" class="ico"></svg><small>home</small></div>
+        <div class="m" data-usage="0x224"><svg data-icon="arrow-left" class="ico"></svg><small>back</small></div>
+        <div class="m" data-usage="0x225"><svg data-icon="arrow-right" class="ico"></svg><small>fwd</small></div>
+        <div class="m" data-usage="0x221"><svg data-icon="search" class="ico"></svg><small>search</small></div>
+        <div class="m" data-usage="0x192"><svg data-icon="calculator" class="ico"></svg><small>calc</small></div>
+      </div>
       <p class="note" id="mediaNote">These are Consumer Control usages. Whether
         they do anything depends on the host — macOS and Windows handle the
         transport and volume keys; some Linux desktops need the keybound to an
