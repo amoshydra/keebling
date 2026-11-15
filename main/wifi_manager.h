@@ -64,6 +64,7 @@ const char *wifi_mgr_last_ssid(void);      // "" when none is remembered
 const char *wifi_mgr_attempt_ssid(void);   // "" when no attempt is in flight
 
 // Status.
+const char *wifi_mgr_ap_ssid(void);       // "keebling-XXXXXX", from the AP MAC
 wifi_mgr_state_t wifi_mgr_state(void);
 const char *wifi_mgr_ip(void);            // "" when not associated
 const char *wifi_mgr_ap_ip(void);         // SoftAP gateway address, "" if down

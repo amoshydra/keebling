@@ -15,6 +15,7 @@
 #define CODE  "ABCDEFGHJKLM"
 #define STA   "192.168.1.42"
 #define AP    "192.168.4.1"
+#define SSID  "keebling-3F2A1B"
 #define APP   "https://amoshydra.github.io/keebling/app/"
 
 // Version 4 at EC level L holds 78 bytes. Staying under that is what keeps the
@@ -25,7 +26,7 @@ static char s_buf[QR_PAYLOAD_MAX];
 
 static const char *build(const char *sta, const char *ap, int clients) {
     s_buf[0] = '\0';
-    qr_payload_build(s_buf, sizeof(s_buf), sta, ap, clients, CODE);
+    qr_payload_build(s_buf, sizeof(s_buf), SSID, sta, ap, clients, CODE);
     return s_buf;
 }
 
@@ -55,11 +56,12 @@ static void test_access_point_with_client_is_the_device_url(void) {
 }
 
 static void test_join_payload_when_nothing_is_reachable(void) {
-    CHECK_STR(build("", AP, 0), "WIFI:T:WPA;S:keebling;P:" CODE ";;");
+    // The join payload names the runtime SSID, which carries the MAC suffix.
+    CHECK_STR(build("", AP, 0), "WIFI:T:WPA;S:" SSID ";P:" CODE ";;");
 
     // No client, or no address to point one at: there is no URL to open.
-    CHECK_STR(build("", "", 1), "WIFI:T:WPA;S:keebling;P:" CODE ";;");
-    CHECK_STR(build("", "", 0), "WIFI:T:WPA;S:keebling;P:" CODE ";;");
+    CHECK_STR(build("", "", 1), "WIFI:T:WPA;S:" SSID ";P:" CODE ";;");
+    CHECK_STR(build("", "", 0), "WIFI:T:WPA;S:" SSID ";P:" CODE ";;");
 }
 
 static void test_url_predicate_matches_payload(void) {
@@ -83,7 +85,7 @@ static void test_longest_address_fits_without_truncation(void) {
 
 static void test_short_buffer_stays_terminated(void) {
     char small[8];
-    qr_payload_build(small, sizeof(small), STA, AP, 0, CODE);
+    qr_payload_build(small, sizeof(small), SSID, STA, AP, 0, CODE);
     CHECK_INT(small[sizeof(small) - 1], '\0');
     // Truncated, not dropped: the prefix that did fit is still there.
     CHECK_STR(small, "https:/");

@@ -134,7 +134,9 @@ static void draw_qr_panel(void) {
         display_text_line(x, 1, l);
         draw_qr_address(x, 2, sta_ip);
     } else {
-        display_text_line(x, 1, "AP " AP_SSID);
+        char l[24];
+        snprintf(l, sizeof(l), "AP %s", wifi_mgr_ap_ssid());
+        display_text_line(x, 1, l);
         draw_qr_address(x, 2, wifi_mgr_ap_ip());
     }
 
@@ -157,7 +159,9 @@ static void show_status_screen(void) {
         snprintf(l, sizeof(l), "http://%s", wifi_mgr_ip());
         display_status(LCD_LINE_ADDR, l);
     } else {
-        display_status(LCD_LINE_NET,  "AP: " AP_SSID);
+        char l[40];
+        snprintf(l, sizeof(l), "AP: %s", wifi_mgr_ap_ssid());
+        display_status(LCD_LINE_NET, l);
         display_status(LCD_LINE_ADDR, "http://192.168.4.1");
     }
 
@@ -180,6 +184,7 @@ static void apply_display_mode(void) {
     case DISP_QR: {
         char payload[QR_PAYLOAD_MAX];
         qr_payload_build(payload, sizeof(payload),
+                         wifi_mgr_ap_ssid(),   // unique per dongle
                          wifi_mgr_ip(),        // "" when not associated
                          wifi_mgr_ap_ip(),     // "" when the AP is down
                          wifi_mgr_client_count(), security_code());

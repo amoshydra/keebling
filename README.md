@@ -124,14 +124,19 @@ the network can't be reached, it runs its own access point instead.
      paired;
    - **on the device's own access point** — the device's UI at that address, with
      the code in the URL, so it needs no typing;
-   - **with nothing reachable** — the Wi-Fi join payload, which joins `keebling`
-     (the password is the code printed beside the QR).
+   - **with nothing reachable** — the Wi-Fi join payload, which joins the access
+     point named on the LCD (`keebling-XXXXXX`; the password is the code printed
+     beside the QR).
 3. **Join the device.** Either:
-   - **its own AP** — network `keebling`, password is the code, then browse
-     to `http://192.168.4.1`; or
+   - **its own AP** — the network named on the LCD (`keebling-XXXXXX`), password
+     is the code, then browse to `http://192.168.4.1`; or
    - **your own network** — open **📶 Network**, scan, pick your SSID, enter the
      password, and save. The device restarts and joins it; the LCD then shows
      `STA: <ssid>` and its address.
+
+   The `XXXXXX` suffix is the last three bytes of the access point's MAC, so
+   several dongles can sit in one room without advertising the same network.
+   The MAC is public; the code is not in the SSID, and it remains the password.
 4. Open the device's address (or the app the QR opened) and paste the code when
    prompted.
 5. Tap the pad to capture the pointer. Your mouse and keyboard now drive the
@@ -383,11 +388,12 @@ the dongle itself, so no internet is needed.
 it — so the only way in is to join the network. The standard Wi-Fi join payload:
 
 ```
-WIFI:T:WPA;S:keebling;P:<code>;;
+WIFI:T:WPA;S:keebling-XXXXXX;P:<code>;;
 ```
 
 A phone camera understands that, so joining the access point no longer means
-typing a twelve-character password.
+typing a twelve-character password. The SSID is the runtime one — the MAC
+suffix — so the payload points at this dongle and not its neighbour.
 
 The earlier design encoded only the bare code, and argued against a URL because
 the address is the part that moves. That is why the URL appears only once the
@@ -422,7 +428,8 @@ bits. It is deliberately *not* derived from the MAC address: the MAC is
 broadcast in every beacon, so a MAC-derived secret would be public.
 
 The same code is the SoftAP password and the API token, so there is exactly one
-secret to manage. Nothing derived from it appears in the SSID.
+secret to manage. Nothing derived from it appears in the SSID: the `-XXXXXX`
+suffix is the access point's MAC, which is public.
 
 **2. Token on every privileged endpoint.** `/auth`, `/ws` and `/bootloader`
 all require `?token=`. Static assets (`/`, `/*.js`) are public — they contain

@@ -2,7 +2,7 @@
 
 #include <stdio.h>
 
-#include "web_server.h"   // AP_SSID, WEB_APP_URL
+#include "web_server.h"   // AP_SSID_PREFIX, WEB_APP_URL
 
 // An address counts only when it is actually set. The WiFi manager reports ""
 // while it has none, and a caller could in principle pass NULL.
@@ -16,6 +16,7 @@ bool qr_payload_is_url(const char *sta_ip, const char *ap_ip, int client_count) 
 }
 
 void qr_payload_build(char *out, size_t len,
+                      const char *ap_ssid,
                       const char *sta_ip, const char *ap_ip,
                       int client_count, const char *code) {
     // On a real network the phone keeps its internet, so the useful hand-off is
@@ -35,5 +36,8 @@ void qr_payload_build(char *out, size_t len,
         return;
     }
 
-    snprintf(out, len, "WIFI:T:WPA;S:%s;P:%s;;", AP_SSID, code);
+    // The join payload names the access point exactly as it is advertised, so
+    // several dongles in the room do not make the phone guess.
+    snprintf(out, len, "WIFI:T:WPA;S:%s;P:%s;;",
+             (ap_ssid && ap_ssid[0]) ? ap_ssid : AP_SSID_PREFIX, code);
 }

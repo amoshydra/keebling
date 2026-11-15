@@ -1,6 +1,6 @@
 #include "wifi_manager.h"
 #include "security.h"
-#include "web_server.h"   // AP_SSID
+#include "web_server.h"   // AP_SSID_PREFIX
 
 #include "esp_log.h"
 #include "esp_mac.h"
@@ -416,13 +416,35 @@ esp_err_t wifi_mgr_connect_net(const char *ssid) {
 // Mode / AP control
 // ---------------------------------------------------------------------------
 
+// The SoftAP name, unique per dongle: "keebling-" plus the last three bytes of
+// the AP MAC. The MAC is public and stable across reflashes and NVS wipes; the
+// code is not used, because an SSID is broadcast and the code is the password.
+// Three bytes is a 1-in-16.7M collision and keeps the name to 15 characters.
+const char *wifi_mgr_ap_ssid(void) {
+    static char ssid[32];
+
+    if (!ssid[0]) {
+        uint8_t mac[6] = { 0 };
+        if (esp_read_mac(mac, ESP_MAC_WIFI_SOFTAP) == ESP_OK) {
+            snprintf(ssid, sizeof(ssid), "%s-%02X%02X%02X", AP_SSID_PREFIX,
+                     mac[3], mac[4], mac[5]);
+        } else {
+            // A failed MAC read is not worth refusing the AP over; it just
+            // loses the suffix.
+            snprintf(ssid, sizeof(ssid), "%s", AP_SSID_PREFIX);
+        }
+    }
+    return ssid;
+}
+
 // Build and apply the SoftAP config. Only valid once the mode includes AP --
 // esp_wifi_set_config() rejects an interface the current mode does not have,
 // which is why this is never called while running STA-only.
 static esp_err_t ap_config(void) {
     wifi_config_t ap = { 0 };
-    snprintf((char *)ap.ap.ssid, sizeof(ap.ap.ssid), "%s", AP_SSID);
-    ap.ap.ssid_len = strlen(AP_SSID);
+    const char *ssid = wifi_mgr_ap_ssid();
+    snprintf((char *)ap.ap.ssid, sizeof(ap.ap.ssid), "%s", ssid);
+    ap.ap.ssid_len = strlen(ssid);
     ap.ap.channel = 1;
     ap.ap.max_connection = 4;
     ap.ap.authmode = WIFI_AUTH_WPA2_PSK;
