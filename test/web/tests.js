@@ -164,6 +164,12 @@ __webTests.push({
     await __waitFor(() => rows[0].querySelector('.hub-sub').textContent === 'online');
     const sub = rows[0].querySelector('.hub-sub').textContent;
     __assert(sub === 'online', `the second line says "${sub}"`);
+
+    // The dot belongs to the name's line, not the middle of a two-line row.
+    const dot = rows[0].querySelector('.dot').getBoundingClientRect();
+    const primary = rows[0].querySelector('.hub-name').getBoundingClientRect();
+    const off = (dot.top + dot.height / 2) - (primary.top + primary.height / 2);
+    __assert(Math.abs(off) <= 1, `the status dot is ${off.toFixed(1)}px off the name`);
   },
 });
 
@@ -241,8 +247,9 @@ __webTests.push({
   fn: async () => {
     const chip = document.getElementById('deviceChip');
     __assert(!chip.hidden, 'the chip is hidden on the published app');
-    __assert(chip.textContent.includes('Renamed'), `the chip reads "${chip.textContent}"`);
-    __assert(chip.textContent.includes('▾'), 'the chip does not read as a control');
+    const label = document.getElementById('deviceChipLabel').textContent;
+    __assert(label.includes('Renamed'), `the chip reads "${label}"`);
+    __assert(chip.querySelector('svg'), 'the chip has no chevron icon');
     __assert(chip.getAttribute('aria-label').startsWith('Change device'),
       'the chip has no accessible name for what it does');
   },

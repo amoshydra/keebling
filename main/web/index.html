@@ -25,7 +25,10 @@
   <!-- Which dongle this page is typing into, and the way back to the list.
        Only the published UI has more than one, so the firmware's copy leaves it
        hidden. -->
-  <button id="deviceChip" class="devicechip" type="button" hidden></button>
+  <button id="deviceChip" class="devicechip" type="button" hidden>
+    <span id="deviceChipLabel"></span>
+    <svg data-icon="chevron-down" class="ico"></svg>
+  </button>
   <!-- Always reachable, never adjacent to a button you press in a hurry. It is
        the one action you look for when something is stuck on the host. -->
   <button id="bRelease" class="releasechip" type="button">Release</button>
@@ -80,7 +83,7 @@
     <ul class="hub-list" data-role="list"></ul>
     <p class="err hub-err" data-role="err"></p>
     <details class="hub-add" data-role="add">
-      <summary>Add a device</summary>
+      <summary><svg data-icon="chevron-right" class="ico summary-ico"></svg>Add a device</summary>
       <input data-role="name" name="device-name" aria-label="Device name"
              type="text" autocomplete="off" placeholder="Name (optional)">
       <input data-role="addr" name="device-address" aria-label="Device address"
@@ -93,6 +96,17 @@
       <button data-role="go" class="primary" type="button">Add and connect</button>
     </details>
   </div>
+</template>
+
+<!-- The row's actions. A template so the build inlines the same Lucide set as
+     the rest of the shell; the JS only wires and labels them. -->
+<template id="device-actions">
+  <button type="button" data-action="edit" class="iconbtn hub-act">
+    <svg data-icon="pencil" class="ico"></svg>
+  </button>
+  <button type="button" data-action="remove" class="iconbtn hub-del">
+    <svg data-icon="x" class="ico"></svg>
+  </button>
 </template>
 
 <!-- The router clones one template here. Templates are inert, so their IDs do

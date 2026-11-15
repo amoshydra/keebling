@@ -535,40 +535,45 @@ export function mountDevices(host, opts) {
       const dot = document.createElement('span');
       dot.className = 'dot ' + (DOT[state] || 'off');
 
-      // Two lines, not one with a right-aligned badge. The badge is what pushed
-      // a full address into the ellipsis: "OFFLINE" costs more width than the
-      // last two octets are worth. The address gets the first line (or the name
-      // does, when there is one), and the second carries the detail.
+      // Two lines: the name (or the host) above, the other detail below. The
+      // dot is a grid cell in the first row, so it is centred on the name, not
+      // floating between the two lines.
       const stateLabel = LABEL[state] || state;
-      const text = document.createElement('span');
-      text.className = 'hub-text';
       const name = document.createElement('span');
       name.className = 'hub-name';
       name.textContent = dev.name || hostOf(dev.hosts[0]);
       const sub = document.createElement('span');
       sub.className = 'hub-sub';
-      // The scheme is dropped here too: it is implied, and it is the five
-      // characters that decide whether "· offline" fits.
+      // The scheme is implied, and it is the five characters that decide
+      // whether "· offline" fits.
       sub.textContent = dev.name ? `${hostOf(dev.hosts[0])} · ${stateLabel}` : stateLabel;
-      text.append(name, sub);
 
-      chooseBtn.append(dot, text);
+      chooseBtn.append(dot, name, sub);
       chooseBtn.title = `${dev.hosts[0]} — ${stateLabel}`;
       chooseBtn.setAttribute('aria-label',
         `${dev.name || hostOf(dev.hosts[0])} at ${dev.hosts[0]}, ${stateLabel}`);
       chooseBtn.addEventListener('click', () => choose(dev));
 
-      const edit = act('✎', () => { editingId = dev.id; render(); }, 'hub-act iconbtn');
-      edit.setAttribute('aria-label', `Edit ${dev.name || hostOf(dev.hosts[0])}`);
-
-      const del = act('×', () => {
-        devices.splice(devices.indexOf(dev), 1);
-        save();
-        render();
-      }, 'hub-del iconbtn');
-      del.setAttribute('aria-label', `Remove ${dev.name || hostOf(dev.hosts[0])}`);
-
-      row.append(chooseBtn, edit, del);
+      // The actions are Lucide SVGs cloned from the shell's template, so the
+      // build inlines them the same way as every other icon.
+      const actions = document.getElementById('device-actions');
+      const label = dev.name || hostOf(dev.hosts[0]);
+      if (actions) {
+        const frag = actions.content.cloneNode(true);
+        const edit = frag.querySelector('[data-action="edit"]');
+        const del = frag.querySelector('[data-action="remove"]');
+        edit.setAttribute('aria-label', `Edit ${label}`);
+        del.setAttribute('aria-label', `Remove ${label}`);
+        edit.addEventListener('click', () => { editingId = dev.id; render(); });
+        del.addEventListener('click', () => {
+          devices.splice(devices.indexOf(dev), 1);
+          save();
+          render();
+        });
+        row.append(chooseBtn, edit, del);
+      } else {
+        row.append(chooseBtn);
+      }
       listEl.append(row);
     }
   };
@@ -706,8 +711,9 @@ function setupDeviceChip() {
   const base = currentBase();
   const dev = loadDevices().find((d) => d.hosts.includes(base));
   const label = (dev && dev.name) || hostOf(base);
-  // The chevron is the affordance: a bare pill reads as a label, not a control.
-  chip.textContent = `${label} ▾`;
+  // The chevron is a real icon in the markup; only the label is replaced.
+  const text = document.getElementById('deviceChipLabel');
+  if (text) text.textContent = label;
   chip.title = `${base} — change device`;
   chip.setAttribute('aria-label', `Change device, currently ${label}`);
   chip.hidden = false;

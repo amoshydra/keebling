@@ -2,6 +2,11 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* Chrome gives controls their own family (Arial, here) and their own sizes, so
+   every button and field was a different typeface from the text beside it.
+   Only the family is inherited: the size declarations stay where they are. */
+button, input, select, textarea { font-family: inherit; }
+
 :root {
   --bg: #111;
   --panel: #1c1c1c;
@@ -19,6 +24,19 @@
      target; sharing it is what makes a row of controls line up. */
   --icon: 44px;
   --icon-radius: 10px;
+  /* 4px spacing scale: 8 for gaps inside a component, 16 and 24 between
+     blocks. Anything else (6, 9, 12, 14) was accumulating as noise. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --radius-control: 10px;
+  --radius-card: 12px;
+  --control: 44px;
+  /* Small text on #0d0d0d/#1a1a1a. #777 was 4.1:1 — under AA at 11px. */
+  --ink-2: #b8b8b8;
+  --ink-3: #8f8f8f;
 }
 
 /* Nothing in this UI is meant to be selected, dragged or scrolled by the
@@ -124,6 +142,9 @@ button:disabled { opacity: .45; }
   line-height: 1;
   cursor: pointer;
 }
+/* 18px of ink in a 44px target: 16 read small, and 20 crowded the corner. */
+.iconbtn .ico,
+.kbtool .ico { width: 18px; height: 18px; }
 
 label { font-size: 13px; display: flex; align-items: center; gap: 8px; }
 input[type=range] { width: 120px; }
@@ -272,24 +293,27 @@ textarea { font-family: ui-monospace, SFMono-Regular, monospace; resize: vertica
 #gate.hidden { display: none; }
 .gate-box {
   background: #1a1a1a;
-  padding: 24px;
-  border-radius: 12px;
-  max-width: 340px;
+  padding: var(--space-6);
+  border-radius: var(--radius-card);
+  /* 360 rather than 340: at 390 the old card left 25px margins and still had
+     to squeeze a 15-character address. */
+  max-width: 360px;
   width: 100%;
   text-align: center;
 }
-.gate-mark { width: 72px; height: 72px; display: block; margin: 0 auto 12px; }
-.gate-box h1 { font-size: 18px; margin-bottom: 6px; }
-.gate-box p { font-size: 13px; color: #999; margin-bottom: 16px; line-height: 1.5; }
+.gate-mark { width: 64px; height: 64px; display: block; margin: 0 auto var(--space-4); }
+.gate-box h1 { font-size: 18px; line-height: 1.25; margin-bottom: var(--space-2); }
+.gate-box p { font-size: 13px; line-height: 1.5; color: #9a9a9a; margin-bottom: var(--space-4); }
 .gate-box input {
   width: 100%;
-  padding: 12px;
+  height: var(--control);
+  padding: 0 var(--space-3);
   font-size: 15px;
   background: #0d0d0d;
   color: var(--ink);
   border: 1px solid var(--line);
-  border-radius: 8px;
-  margin-bottom: 12px;
+  border-radius: var(--radius-control);
+  margin-bottom: var(--space-3);
 }
 /* The access code is read off an LCD and typed blind, so it gets the wide,
    spaced, monospaced treatment the address fields do not. */
@@ -300,78 +324,110 @@ textarea { font-family: ui-monospace, SFMono-Regular, monospace; resize: vertica
   font-family: ui-monospace, monospace;
   text-transform: uppercase;
 }
-.gate-box button.primary { width: 100%; }
-.gate-box .err { color: #ff6b6b; font-size: 13px; margin: 10px 0 0; min-height: 16px; }
+.gate-box button.primary { width: 100%; height: var(--control); }
+.gate-box .err { color: #ff8a80; font-size: 13px; margin: var(--space-2) 0 0; }
+.gate-box .err:empty { display: none; }
 
 /* The published UI's device list. The row is the whole tap target: this is a
    phone first, and there is nothing else on the screen to aim at. */
 .hub-list { list-style: none; margin: 0; padding: 0; text-align: left; }
-/* Spacing lives on the row now that its children are fixed-height squares:
-   per-child margins were what let the two buttons differ in height. */
-.hub-row { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
-.hub-pick {
-  flex: 1 1 auto;
+.hub-row {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+/* The row is a grid: an 8px status column beside name-over-address. The dot
+   occupies the first row, so it is centred on the name rather than floating
+   between the two lines. Fixed rows also make the height font-independent. */
+.hub-pick {
+  flex: 1 1 auto;
   min-width: 0;
-  padding: 12px 10px;
+  height: 56px;
+  padding: 0 var(--space-3);
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr);
+  grid-template-rows: 20px 14px;
+  column-gap: var(--space-2);
+  row-gap: 2px;
+  align-content: center;
   background: #0d0d0d;
   color: var(--ink);
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: var(--radius-control);
   font: inherit;
   font-size: 14px;
   text-align: left;
   cursor: pointer;
 }
 .hub-pick:hover { border-color: #3a3a3a; }
-.hub-text {
-  flex: 1 1 auto;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
+.hub-pick .dot { grid-column: 1; grid-row: 1; align-self: center; margin: 0; }
 .hub-name {
+  grid-column: 2;
+  grid-row: 1;
   min-width: 0;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* The address (with a name above it) or the state alone (when the address is
-   the name). Always present, so the row's height does not change with status. */
 .hub-sub {
-  font-size: 11px;
-  color: #777;
+  grid-column: 2;
+  grid-row: 2;
+  min-width: 0;
+  font-size: 11.5px;
+  line-height: 14px;
+  color: var(--ink-3);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.hub-del {
-  background: #0d0d0d;
-  color: #777;
-  border: 1px solid var(--line);
+/* Quiet actions: the device is the one surface in the row that carries weight. */
+.hub-act, .hub-del {
+  background: transparent;
+  border-color: transparent;
+  color: var(--ink-3);
 }
-.hub-del:hover { color: #ff6b6b; border-color: #4a2a2a; }
-.hub-empty { font-size: 13px; color: #777; text-align: left; margin-bottom: 10px; }
-.hub-add { text-align: left; margin: 2px 0 0; }
-.hub-add summary { font-size: 13px; color: #bbb; cursor: pointer; padding: 6px 0; }
-.hub-intro { font-size: 13px; color: #999; margin-bottom: 12px; text-align: left; }
-.hub-err { color: #ff6b6b; font-size: 13px; min-height: 16px; margin: 8px 0 0; text-align: left; }
+.hub-act:hover, .hub-act:active { background: rgba(255, 255, 255, .06); color: var(--ink); }
+.hub-del:hover, .hub-del:active { background: rgba(255, 255, 255, .06); color: #ff8a80; }
+.hub-empty { font-size: 12.5px; line-height: 1.5; color: var(--ink-3); text-align: left; margin-bottom: var(--space-3); }
+/* 16 above the disclosure: the last row's 8 and this rule share the gap, so
+   the value that wins is the larger one (vertical margins collapse). */
+.hub-add { text-align: left; margin: var(--space-4) 0 0; }
+.hub-add summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--control);
+  list-style: none;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.hub-add summary::-webkit-details-marker { display: none; }
+.hub-add summary::marker { content: ''; }
+.summary-ico { width: 16px; height: 16px; transition: transform .15s ease; }
+.hub-add[open] .summary-ico { transform: rotate(90deg); }
+.hub-intro { font-size: 13px; line-height: 1.5; color: #9a9a9a; margin-bottom: var(--space-4); text-align: left; }
+.hub-err { color: #ff8a80; font-size: 13px; margin: var(--space-2) 0 0; text-align: left; }
+.hub-err:empty { display: none; }
 
 /* Inputs are styled here, not by .gate-box: the same list is also a page of
    its own, outside the gate. */
 .hub-add input,
 .hub-input {
   width: 100%;
-  padding: 10px 12px;
+  height: var(--control);
+  padding: 0 var(--space-3);
   font-size: 15px;
   background: #0d0d0d;
   color: var(--ink);
   border: 1px solid var(--line);
-  border-radius: 8px;
-  margin-bottom: 8px;
+  border-radius: var(--radius-control);
+  margin-bottom: var(--space-2);
 }
 .hub-add input.code {
   font-size: 18px;
@@ -380,18 +436,15 @@ textarea { font-family: ui-monospace, SFMono-Regular, monospace; resize: vertica
   font-family: ui-monospace, monospace;
   text-transform: uppercase;
 }
-.hub-editrow { display: flex; gap: 6px; }
+.hub-editrow { display: flex; gap: var(--space-2); }
 .hub-editrow input { flex: 1 1 auto; min-width: 0; }
-.hub-editrow button { flex: 0 0 auto; }
+.hub-editrow button { flex: 0 0 auto; height: var(--control); }
 .hub-editrow button.primary { width: auto; padding: 0 14px; }
+/* The form's action matches its fields: a 34px button under 44px inputs was
+   the one row on this screen that did not line up. */
+.hub-add button.primary { height: var(--control); }
 .hub-editing { display: block; }
-.hub-editing .hub-input { margin-bottom: 6px; }
-.hub-act {
-  background: #0d0d0d;
-  color: #bbb;
-  border: 1px solid var(--line);
-}
-.hub-act:hover { color: #fff; border-color: #3a3a3a; }
+.hub-editing .hub-input { margin-bottom: var(--space-2); }
 
 /* The Devices page, reached from the chip or from Setup. */
 .wrap-devices { max-width: 560px; }
@@ -402,21 +455,29 @@ textarea { font-family: ui-monospace, SFMono-Regular, monospace; resize: vertica
 /* Which dongle this page is typing into. Ellipsised rather than wrapped: the
    bar's height must not move when a long name is chosen. */
 .devicechip {
-  max-width: 42%;
+  max-width: 45%;
   height: 30px;
-  padding: 0 12px;
+  padding: 0 10px 0 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
   border-radius: 999px;
   background: #21262d;
   color: #bbb;
   border: 1px solid var(--line);
   font-size: 12px;
-  white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis;
   cursor: pointer;
 }
 .devicechip:hover { color: #fff; border-color: #3a3a3a; }
 .devicechip[hidden] { display: none; }
+#deviceChipLabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.devicechip .ico { width: 14px; height: 14px; }
 
 /* ---------------------------------------------------------------- shell */
 /* The shell owns the top bar and one <main>. The control view is a flex
