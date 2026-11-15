@@ -204,23 +204,27 @@ function renderSavedNetworks(d) {
     name.textContent = n.ssid || '(hidden)';
     top.appendChild(name);
     if (n.hidden) top.appendChild(wifiBadge('hidden', 'wifiMuted'));
-    if (n.secure) top.appendChild(wifiBadge('🔒', 'wifiMuted'));
+    // A word, not the 🔒 emoji: the badge is 10px, and a colour bitmap at that
+    // size is unreadable and ignores the badge's colour.
+    if (n.secure) top.appendChild(wifiBadge('secure', 'wifiMuted'));
     if (n.ssid === joined) top.appendChild(wifiBadge('active', 'wifiActive'));
     if (n.last) top.appendChild(wifiBadge('last good', 'wifiLast'));
 
     const acts = document.createElement('div');
     acts.className = 'wifiActs';
-    const move = (delta, label, glyph) => {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'wifiMove';
-      b.dataset.move = delta < 0 ? 'up' : 'down';
-      b.textContent = glyph;
-      b.setAttribute('aria-label', label);
-      b.disabled = delta < 0 ? i === 0 : i === nets.length - 1;
-      b.addEventListener('click', () => moveSaved(i, delta));
-      return b;
-    };
+
+    // Icons from the shell template: the build inlines them, and the row keeps
+    // one icon language. The words were 40.9px inside a 44px slot.
+    const moveFrag = document.getElementById('wifi-move-actions').content.cloneNode(true);
+    const moveUp = moveFrag.querySelector('[data-move="up"]');
+    const moveDown = moveFrag.querySelector('[data-move="down"]');
+    moveUp.setAttribute('aria-label', `Move ${n.ssid} up`);
+    moveDown.setAttribute('aria-label', `Move ${n.ssid} down`);
+    moveUp.disabled = i === 0;
+    moveDown.disabled = i === nets.length - 1;
+    moveUp.addEventListener('click', () => moveSaved(i, -1));
+    moveDown.addEventListener('click', () => moveSaved(i, 1));
+
     const use = document.createElement('button');
     use.type = 'button';
     use.dataset.act = 'use';
@@ -235,8 +239,7 @@ function renderSavedNetworks(d) {
     forget.textContent = pendingForget === n.ssid ? 'Forget?' : 'Forget';
     forget.addEventListener('click', () => forgetSaved(n.ssid, forget));
 
-    acts.append(move(-1, `Move ${n.ssid} up`, 'Up'),
-               move(1, `Move ${n.ssid} down`, 'Down'), use, forget);
+    acts.append(moveUp, moveDown, use, forget);
     row.append(top, acts);
     box.appendChild(row);
   });

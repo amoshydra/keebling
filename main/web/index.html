@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
-<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%20128%20128%22%3E%20%3Crect%20x%3D%224%22%20y%3D%2252%22%20width%3D%2226%22%20height%3D%2228%22%20rx%3D%223%22%20fill%3D%22%23c9c4ba%22%2F%3E%20%3Crect%20x%3D%2226%22%20y%3D%2252%22%20width%3D%224%22%20height%3D%2228%22%20fill%3D%22%239a958c%22%2F%3E%20%3Crect%20x%3D%2211%22%20y%3D%2259%22%20width%3D%226%22%20height%3D%226%22%20rx%3D%221%22%20fill%3D%22%236b6660%22%2F%3E%20%3Crect%20x%3D%2211%22%20y%3D%2268%22%20width%3D%226%22%20height%3D%226%22%20rx%3D%221%22%20fill%3D%22%236b6660%22%2F%3E%20%3Crect%20x%3D%2224%22%20y%3D%2242%22%20width%3D%2296%22%20height%3D%2248%22%20rx%3D%2218%22%20fill%3D%22%23d8ebe4%22%2F%3E%20%3Crect%20x%3D%2230%22%20y%3D%2248%22%20width%3D%2284%22%20height%3D%2236%22%20rx%3D%2212%22%20fill%3D%22%235a9a6a%22%2F%3E%20%3Crect%20x%3D%2240%22%20y%3D%2253%22%20width%3D%2264%22%20height%3D%2226%22%20rx%3D%227%22%20fill%3D%22%230e1211%22%2F%3E%20%3Ccircle%20cx%3D%2264%22%20cy%3D%2238%22%20r%3D%2212%22%20fill%3D%22%23f4f7f2%22%20stroke%3D%22%23cfd8d2%22%20stroke-width%3D%221.5%22%2F%3E%20%3Ccircle%20cx%3D%2286%22%20cy%3D%2236%22%20r%3D%2211%22%20fill%3D%22%23f4f7f2%22%20stroke%3D%22%23cfd8d2%22%20stroke-width%3D%221.5%22%2F%3E%20%3Ccircle%20cx%3D%2268%22%20cy%3D%2241%22%20r%3D%224.5%22%20fill%3D%22%231b1a17%22%2F%3E%20%3Ccircle%20cx%3D%2283%22%20cy%3D%2233%22%20r%3D%224.2%22%20fill%3D%22%231b1a17%22%2F%3E%20%3Ccircle%20cx%3D%2266.5%22%20cy%3D%2239%22%20r%3D%221.3%22%20fill%3D%22%23fff%22%2F%3E%20%3Ccircle%20cx%3D%2281.5%22%20cy%3D%2231%22%20r%3D%221.2%22%20fill%3D%22%23fff%22%2F%3E%20%3Crect%20x%3D%2298%22%20y%3D%2279%22%20width%3D%2210%22%20height%3D%225%22%20rx%3D%222%22%20fill%3D%22%23e8d5b5%22%2F%3E%20%3C%2Fsvg%3E" type="image/svg+xml">
+<link rel="icon" href="icon-192.png">
 <meta name="theme-color" content="#111">
 <meta name="apple-mobile-web-app-title" content="Keebling">
 <!-- Relative, not root-absolute: the same shell is served by the device at /
@@ -16,6 +16,27 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+
+<!-- The brand mark, once. The gate draws it with <use> and the favicon is the
+     PNG the build already ships, so the artwork is not duplicated per element. -->
+<svg class="sprite" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+  <symbol id="mark" viewBox="0 0 128 128">
+    <rect x="4" y="52" width="26" height="28" rx="3" fill="#c9c4ba"/>
+    <rect x="26" y="52" width="4" height="28" fill="#9a958c"/>
+    <rect x="11" y="59" width="6" height="6" rx="1" fill="#6b6660"/>
+    <rect x="11" y="68" width="6" height="6" rx="1" fill="#6b6660"/>
+    <rect x="24" y="42" width="96" height="48" rx="18" fill="#d8ebe4"/>
+    <rect x="30" y="48" width="84" height="36" rx="12" fill="#5a9a6a"/>
+    <rect x="40" y="53" width="64" height="26" rx="7" fill="#0e1211"/>
+    <circle cx="64" cy="38" r="12" fill="#f4f7f2" stroke="#cfd8d2" stroke-width="1.5"/>
+    <circle cx="86" cy="36" r="11" fill="#f4f7f2" stroke="#cfd8d2" stroke-width="1.5"/>
+    <circle cx="68" cy="41" r="4.5" fill="#1b1a17"/>
+    <circle cx="83" cy="33" r="4.2" fill="#1b1a17"/>
+    <circle cx="66.5" cy="39" r="1.3" fill="#fff"/>
+    <circle cx="81.5" cy="31" r="1.2" fill="#fff"/>
+    <rect x="98" y="79" width="10" height="5" rx="2" fill="#e8d5b5"/>
+  </symbol>
+</svg>
 
 <!-- One shell for every view. The top bar and the status dot live here, so a
      view script always reports into the same elements; the views themselves
@@ -38,22 +59,7 @@
      finds no valid saved code; the markup lives here so it is parsed once. -->
 <div id="gate" class="hidden">
   <div class="gate-box">
-    <svg class="gate-mark" viewBox="0 0 128 128" aria-hidden="true">
-      <rect x="4" y="52" width="26" height="28" rx="3" fill="#c9c4ba"/>
-      <rect x="26" y="52" width="4" height="28" fill="#9a958c"/>
-      <rect x="11" y="59" width="6" height="6" rx="1" fill="#6b6660"/>
-      <rect x="11" y="68" width="6" height="6" rx="1" fill="#6b6660"/>
-      <rect x="24" y="42" width="96" height="48" rx="18" fill="#d8ebe4"/>
-      <rect x="30" y="48" width="84" height="36" rx="12" fill="#5a9a6a"/>
-      <rect x="40" y="53" width="64" height="26" rx="7" fill="#0e1211"/>
-      <circle cx="64" cy="38" r="12" fill="#f4f7f2" stroke="#cfd8d2" stroke-width="1.5"/>
-      <circle cx="86" cy="36" r="11" fill="#f4f7f2" stroke="#cfd8d2" stroke-width="1.5"/>
-      <circle cx="68" cy="41" r="4.5" fill="#1b1a17"/>
-      <circle cx="83" cy="33" r="4.2" fill="#1b1a17"/>
-      <circle cx="66.5" cy="39" r="1.3" fill="#fff"/>
-      <circle cx="81.5" cy="31" r="1.2" fill="#fff"/>
-      <rect x="98" y="79" width="10" height="5" rx="2" fill="#e8d5b5"/>
-    </svg>
+    <svg class="gate-mark" viewBox="0 0 128 128" aria-hidden="true"><use href="#mark"/></svg>
     <h1>Keebling</h1>
 
     <!-- The device's own UI: one dongle, so all it needs is the code. -->
@@ -271,6 +277,18 @@
         action first.</p>
     </div>
   </div>
+</template>
+
+<!-- Reorder actions for a saved network. The words Up/Down measured 40.9px in
+     a 44px slot; icons fit, match the rest of the shell, and keep the label
+     for assistive tech. -->
+<template id="wifi-move-actions">
+  <button type="button" class="wifiMove iconbtn" data-move="up">
+    <svg data-icon="arrow-up" class="ico"></svg>
+  </button>
+  <button type="button" class="wifiMove iconbtn" data-move="down">
+    <svg data-icon="arrow-down" class="ico"></svg>
+  </button>
 </template>
 
 <template id="view-devices">
