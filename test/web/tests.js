@@ -10,6 +10,18 @@ const __webTests = [];
 const __sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const __assert = (cond, msg) => { if (!cond) throw new Error(msg || 'assertion failed'); };
 
+// Poll rather than sleep: boot and the first probe are asynchronous, and a
+// runner is slower than a developer's laptop. A fixed wait that is comfortable
+// locally is a flake in CI.
+const __waitFor = async (cond, ms = 2000) => {
+  const until = performance.now() + ms;
+  while (performance.now() < until) {
+    if (cond()) return true;
+    await __sleep(25);
+  }
+  return !!cond();
+};
+
 // Every icon-only button is the same square (--icon in the stylesheet). Two of
 // them shipped with different widths and a stretched height; this is the guard.
 const __iconBox = (el, label) => {
@@ -97,10 +109,11 @@ async function __playMacro(text) {
 // hand-off. Both drive the device stub across origins, which is the real path.
 
 const __openDevices = async () => {
-  if (location.hash !== '#/devices') {
-    location.hash = '#/devices';
-    await __sleep(350);
-  }
+  if (location.hash !== '#/devices') location.hash = '#/devices';
+  await __waitFor(() => {
+    const host = document.getElementById('devicesHost');
+    return host && (host.querySelector('.hub-row') || host.querySelector('.hub-empty'));
+  });
   return document.getElementById('devicesHost');
 };
 
@@ -108,7 +121,7 @@ __webTests.push({
   page: 'gate-published',
   name: 'the published gate offers the device list, not a code form',
   fn: async () => {
-    await __sleep(600);
+    await __waitFor(() => document.querySelector('#hub [data-role="list"]'));
     __assert(!(await window.isDeviceOrigin()), 'the published stub was taken for a device');
     __assert(!document.getElementById('gate').classList.contains('hidden'), 'the gate is hidden');
     __assert(document.getElementById('gateCode').hidden, 'the single-code form is showing');
@@ -123,7 +136,9 @@ __webTests.push({
   page: 'devices',
   name: 'the hand-off paired the device and scrubbed the code',
   fn: async () => {
-    await __sleep(600);
+    // The scrub is the hand-off's own last step, so it is also the sign that
+    // boot reached the point the rest of the assertions rely on.
+    await __waitFor(() => location.hash === '#/');
     const base = window.currentBase();
     __assert(base.startsWith('http://127.0.0.1:'), `the base is ${base}`);
     __assert(window.loadDevices().length === 1, `stored ${window.loadDevices().length} devices`);
@@ -146,6 +161,7 @@ __webTests.push({
     // The default label is the host, not the URL: "http://" spent the width the
     // address needed and the ellipsis cut the address itself.
     __assert(name === base, `the row names "${name}", not ${base}`);
+    await __waitFor(() => rows[0].querySelector('.hub-sub').textContent === 'online');
     const sub = rows[0].querySelector('.hub-sub').textContent;
     __assert(sub === 'online', `the second line says "${sub}"`);
   },
@@ -250,7 +266,10 @@ __webTests.push({
   page: 'device-page',
   name: 'the dongle points at the hosted app instead of listing devices',
   fn: async () => {
-    await __sleep(400);
+    await __waitFor(() => {
+      const n = document.getElementById('devicesDeviceNote');
+      return n && !n.hidden;
+    });
     const note = document.getElementById('devicesDeviceNote');
     const host = document.getElementById('devicesHost');
     __assert(await window.isDeviceOrigin(), 'the device stub was taken for the published app');
@@ -265,7 +284,10 @@ __webTests.push({
   page: 'device-page',
   name: 'its link is a hand-off for this device',
   fn: async () => {
-    await __sleep(400);
+    await __waitFor(() => {
+      const n = document.getElementById('devicesDeviceNote');
+      return n && !n.hidden;
+    });
     let opened = null;
     const real = window.open;
     window.open = (u) => { opened = u; return null; };
@@ -4242,6 +4264,7 @@ __webTests.push({
   page: 'keys-deck',
   name: 'both keyboard tool buttons are the shared icon square',
   fn: async () => {
+    await __waitView('control');
     __iconBox(document.getElementById('kbToolSource'), 'the keyboard button');
     __iconBox(document.getElementById('kbToolText'), 'the paste button');
   },

@@ -53,6 +53,14 @@ jobs:
               tail -60 /tmp/web-tests.log
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
+
+            # The job log needs repository admin to read; annotations do not.
+            # The failing assertion and its detail line are what matter.
+            lines=$(grep -A1 -m5 "FAIL" /tmp/web-tests.log || tail -5 /tmp/web-tests.log)
+            while IFS= read -r line; do
+              line=${line//'%'/'%25'}
+              echo "::error title=Web tests::$line"
+            done <<< "$lines"
           fi
           exit "$code"
 
