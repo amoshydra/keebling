@@ -236,21 +236,6 @@ static bool host_is_ours(const char *host) {
     return false;
 }
 
-// The published UI is a fixed origin, so the answer can be a literal. It has to
-// be: httpd_resp_set_hdr stores the value pointer rather than copying it.
-static const char *const APP_ORIGINS[] = { WEB_APP_ORIGIN, WEB_APP_ORIGIN_DEV };
-
-// Returns the matching literal, or NULL. The array entries are also the strings
-// handed to httpd_resp_set_hdr, so their lifetime is the program's.
-static const char *app_origin(const char *origin) {
-    for (size_t i = 0; i < sizeof(APP_ORIGINS) / sizeof(APP_ORIGINS[0]); i++) {
-        if (APP_ORIGINS[i][0] && strcasecmp(origin, APP_ORIGINS[i]) == 0) {
-            return APP_ORIGINS[i];
-        }
-    }
-    return NULL;
-}
-
 // Queue CORS headers for whatever this handler sends next. Called once at the
 // top, because the headers ride on the request and survive into
 // httpd_resp_send_err: without that, a 403 with no Access-Control-Allow-Origin
@@ -260,7 +245,7 @@ static void cors_apply(httpd_req_t *req) {
     if (httpd_req_get_hdr_value_str(req, "Origin", origin, sizeof(origin)) != ESP_OK) {
         return;   // not a browser request; nothing to negotiate
     }
-    const char *allowed = app_origin(origin);
+    const char *allowed = web_app_origin(origin);
     if (!allowed) return;
 
     httpd_resp_set_hdr(req, "Access-Control-Allow-Origin", allowed);
@@ -290,7 +275,7 @@ static bool req_origin_allowed(httpd_req_t *req) {
     }
     // The page served from the published origin is as legitimate as the one the
     // device serves itself, and it is not one of our hostnames.
-    if (app_origin(origin)) return true;
+    if (web_app_origin(origin)) return true;
 
     const char *p = origin;
     if (strncmp(p, "http://", 7) == 0)       p += 7;

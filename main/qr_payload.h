@@ -5,11 +5,18 @@
 // manager and security code itself. That keeps the rule in one place and makes
 // it checkable on the host, where the radio is out of reach.
 //
-// - On a network with an address, or with a client on its own access point: the
-//   URL for that address, so scanning opens the UI already authenticated.
-// - Otherwise the only way in is the access point itself, so the payload becomes
-//   the standard Wi-Fi join string, which a phone camera understands and which
-//   saves typing the twelve-character code.
+// - On a real network (a station address): the published app with a pairing
+//   fragment, "https://amoshydra.github.io/keebling/app/#h=<host>&t=<code>".
+//   The phone keeps its internet on that network, so the hosted page loads and
+//   reads the fragment itself; the host is bare because the page supplies the
+//   scheme, which saves seven characters in the QR.
+// - Reachable only through its own access point (a client is on it): the
+//   device's URL, "http://<ap_ip>/?token=<code>". The phone is on that network,
+//   where the hosted app has no internet, but the device UI works there (and
+//   may already be cached).
+// - Otherwise the only way in is the access point itself, so the payload
+//   becomes the standard Wi-Fi join string, which a phone camera understands
+//   and which saves typing the twelve-character code.
 //
 // Gating on "a client is connected" alone was wrong: a device associated to a
 // network has a perfectly good address even with nobody on its AP.
@@ -18,6 +25,13 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+
+// The largest payload qr_payload_build() can write, NUL included. The station
+// form is the longest: 44 bytes of published-app URL through "#h=", a
+// 15-character IPv4 address, then "&t=" and the 12-character code - 74
+// characters. Anything past 78 pushes the QR beyond version 4, which no longer
+// fits the panel at 2px modules, so 96 is slack rather than a target.
+#define QR_PAYLOAD_MAX 96
 
 // True when the device has an address a browser could open. False means the QR
 // has to be a join payload, and the labels beside it must say so.

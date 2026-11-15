@@ -553,12 +553,16 @@ bool display_rgb565(FILE *f) {
     return true;
 }
 
-// Render the device code as a QR on the left half, white-on-black with a light
-// quiet zone (scanners need that margin to be the *light* colour).
+// Render the device code's payload as a QR on the left half, white-on-black
+// with a light quiet zone (scanners need that margin to be the *light* colour).
 //
-// Payload is the bare 12-character code, not a URL: the code never changes
-// while the URL can (DHCP address, mDNS name), and 12 bytes fits version 1 at
-// EC level Q, which keeps the modules large enough to actually scan.
+// The payload changes with state (see qr_payload.h): the published app with a
+// pairing fragment when there is a station address, the device's own URL when
+// only the access point is reachable, the Wi-Fi join string when neither. The
+// hosted-app URL is about 74 characters, which lands on version 4 at 2 px
+// modules - still readable, and the largest version that fits the panel at that
+// module size.
+//
 // Rightmost column the QR used, so the text beside it starts past the code
 // instead of at a guessed x. A hard-coded 80 left only 13 character cells,
 // which quietly truncated any IPv4 address ending in three digits.
@@ -599,7 +603,15 @@ bool display_qr(const char *text) {
     const int quiet = 2;                       // modules of light margin
     const int total = n + quiet * 2;
     int scale = LCD_H / total;                 // largest whole module that fits
-    if (scale < 1) scale = 1;
+    // 2 px is the smallest module that scans reliably off this panel, and
+    // version 4 (33 modules + the quiet zone, 74 px) is the largest that fits
+    // at that size in 80 px. Anything denser would drop to 1 px modules: refuse
+    // it so the caller falls back to the status screen instead of drawing a
+    // code no camera can resolve.
+    if (scale < 2) {
+        ESP_LOGW(TAG, "QR too dense for the panel: %d x %d modules", n, n);
+        return false;
+    }
     const int side = total * scale;
     const int ox = 2;
     const int oy = (LCD_H - side) / 2;

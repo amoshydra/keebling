@@ -46,6 +46,9 @@ build_and_run test_screen_image \
 build_and_run test_qr_payload \
     test_qr_payload.c ../../main/qr_payload.c
 
+build_and_run test_web_origin \
+    test_web_origin.c ../../main/web_origin.c
+
 if [ "$failed" -ne 0 ]; then
     echo
     echo "firmware tests FAILED" >&2

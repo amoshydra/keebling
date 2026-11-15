@@ -10,6 +10,7 @@ idf_component_register(
         "main.c"
         "usb_hid.c"
         "web_server.c"
+        "web_origin.c"
         "display.c"
         "input_state.c"
         "security.c"

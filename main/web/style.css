@@ -1075,8 +1075,17 @@ textarea { font-family: ui-monospace, SFMono-Regular, monospace; resize: vertica
 .setuprow .vl { font-size: var(--fs-caption); color: #7d7d7d; }
 /* #555 was 2.3:1: the affordance that says the row opens was the least
    legible thing on it. --dim is 5.2:1. */
-.setuprow .ch { color: var(--dim); font-size: var(--fs-title); }
+.setuprow .ch {
+  display: flex;
+  align-items: center;
+  color: var(--dim);
+  font-size: var(--fs-title);
+}
+.setuprow .ch .ico { width: 18px; height: 18px; }
 .setupback {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   height: var(--control);
   margin: 4px 0 14px;
   padding: 0 14px;
@@ -1116,14 +1125,12 @@ details.tool > summary {
   color: #aaa;
 }
 details.tool > summary::-webkit-details-marker { display: none; }
-details.tool > summary::after {
-  content: '+';
+details.tool > summary .tool-ico {
   margin-left: auto;
   color: var(--dim);
-  font-size: var(--fs-title);
-  line-height: 1;
+  transition: transform .15s ease;
 }
-details.tool[open] > summary::after { content: '−'; }
+details.tool[open] > summary .tool-ico { transform: rotate(90deg); }
 details.tool > .toolbody { padding: 0 14px 14px; }
 code { font-family: ui-monospace, SFMono-Regular, monospace; font-size: var(--fs-caption); color: #bbb; }
 

@@ -1296,7 +1296,9 @@ function renderSetupList() {
     b.appendChild(h('span', 'lb', row.label));
     const value = typeof row.value === 'function' ? row.value() : '';
     if (value) b.appendChild(h('span', 'vl', value));
-    b.appendChild(h('span', 'ch', '\u203A'));
+    const ch = h('span', 'ch');
+    ch.appendChild(document.getElementById('setup-chevron').content.cloneNode(true));
+    b.appendChild(ch);
     b.addEventListener('click', () => goToPage(row.page));
     list.appendChild(b);
   }

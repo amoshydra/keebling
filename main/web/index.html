@@ -115,6 +115,10 @@
   </button>
 </template>
 
+<!-- The Setup row's affordance. A template because the rows are built in JS,
+     and the build inlines data-icon only in parsed markup. -->
+<template id="setup-chevron"><svg data-icon="chevron-right" class="ico"></svg></template>
+
 <!-- The router clones one template here. Templates are inert, so their IDs do
      not exist until they are mounted - which is what keeps the four views'
      colliding IDs (dot, statusText, ...) out of each other's way. -->
@@ -294,7 +298,7 @@
 <template id="view-devices">
   <div class="wrap wrap-devices">
     <div class="devhead">
-      <button id="devicesBack" class="setupback" type="button">‹ Back</button>
+      <button id="devicesBack" class="setupback" type="button"><svg data-icon="chevron-left" class="ico"></svg>Back</button>
       <h2>Devices</h2>
     </div>
     <!-- Served by the dongle: one device, itself. The published copy shows the
@@ -314,7 +318,7 @@
     <!-- A list of sections rather than one long page: nine screens of settings
          in a column is a scroll, not a menu. One section is open at a time. -->
     <div id="setupList"></div>
-    <button id="setupBack" class="setupback" type="button" hidden>‹ All settings</button>
+    <button id="setupBack" class="setupback" type="button" hidden><svg data-icon="chevron-left" class="ico"></svg>All settings</button>
 
     <section data-page="device">
       <h2>Device</h2>
@@ -665,7 +669,7 @@
 
 
     <details class="tool" id="pageImport">
-      <summary>Import a page</summary>
+      <summary><svg data-icon="chevron-right" class="ico tool-ico"></svg>Import a page</summary>
       <div class="toolbody">
         <p class="note">Paste the JSON the editor exports, or open the file. The
           pages are added beside the ones you already have; an id or a name that
@@ -682,7 +686,7 @@
     </details>
 
     <details class="tool" id="pageEditor">
-      <summary>Editor</summary>
+      <summary><svg data-icon="chevron-right" class="ico tool-ico"></svg>Editor</summary>
       <div class="toolbody">
         <p class="note">The same editor as
           <a href="https://amoshydra.github.io/keebling/editor/" target="_blank" rel="noopener">the hosted one</a>,
@@ -693,7 +697,7 @@
     </details>
 
     <details class="tool" id="pageGrammar">
-      <summary>Script tokens</summary>
+      <summary><svg data-icon="chevron-right" class="ico tool-ico"></svg>Script tokens</summary>
       <div class="toolbody">
       <p class="note">Anything outside braces is typed as literal text. A literal
         brace is written <code>{{</code> or <code>}}</code>. Tokens are not case

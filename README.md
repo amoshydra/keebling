@@ -116,23 +116,32 @@ you drive it from never has to leave its own WiFi. If nothing is configured, or
 the network can't be reached, it runs its own access point instead.
 
 1. Power-cycle the board.
-2. **Scan the QR on the LCD** with your phone — it carries the 12-character
-   device code, and your phone will offer to copy it. The QR stays up for 20
-   seconds, then the status screen takes over (power-cycle to see it again).
+2. **Scan the QR on the LCD** with your phone. It stays up for 20 seconds, then
+   the status screen takes over (power-cycle to see it again), and it carries
+   one of three things:
+   - **on your network** — the [hosted app](https://amoshydra.github.io/keebling/app/)
+     with the device address and code in the URL fragment, so it opens already
+     paired;
+   - **on the device's own access point** — the device's UI at that address, with
+     the code in the URL, so it needs no typing;
+   - **with nothing reachable** — the Wi-Fi join payload, which joins `keebling`
+     (the password is the code printed beside the QR).
 3. **Join the device.** Either:
    - **its own AP** — network `keebling`, password is the code, then browse
      to `http://192.168.4.1`; or
    - **your own network** — open **📶 Network**, scan, pick your SSID, enter the
      password, and save. The device restarts and joins it; the LCD then shows
      `STA: <ssid>` and its address.
-4. Open the device's address and paste the code when prompted.
+4. Open the device's address (or the app the QR opened) and paste the code when
+   prompted.
 5. Tap the pad to capture the pointer. Your mouse and keyboard now drive the
    host — physical keys are forwarded only while the pad is captured.
    **Esc** releases both.
 
 The code is remembered in `localStorage`, so step 4 is a one-time thing per
 browser. You can also skip it entirely with
-`http://<address>/?token=YOURCODE`.
+`http://<address>/?token=YOURCODE`, or, on a device that has an address, with
+`https://amoshydra.github.io/keebling/app/#h=<address>&t=YOURCODE`.
 
 Driving it from <https://amoshydra.github.io/keebling/app/> is the desktop
 option: HTTPS is what lets the browser hand over Esc, Win and Alt+Tab, and a
@@ -347,6 +356,29 @@ burn, which is permanent, so it's a deliberate separate decision.
 
 It changes with state, because what is useful changes.
 
+**The device has a station address** — it is on your network, so the phone still
+has internet — so the QR hands off to the published app:
+
+```
+https://amoshydra.github.io/keebling/app/#h=<address>&t=<code>
+```
+
+The fragment is read by the page, never sent to a server, and scrubbed once
+used; scanning it stores the device and boots straight into it. The host goes in
+bare, with no `http://`: the page supplies the scheme, and dropping seven
+characters keeps the code smaller.
+
+**Only the access point is reachable** (a client is on it) — the phone has no
+internet on that network, so the hosted app cannot load, but the device serves
+its own UI from that address:
+
+```
+http://<ap address>/?token=<code>
+```
+
+so scanning opens the device page already authenticated. That page is served by
+the dongle itself, so no internet is needed.
+
 **The device has no usable address** — that is, access-point only with nobody on
 it — so the only way in is to join the network. The standard Wi-Fi join payload:
 
@@ -357,25 +389,23 @@ WIFI:T:WPA;S:keebling;P:<code>;;
 A phone camera understands that, so joining the access point no longer means
 typing a twelve-character password.
 
-**The device has an address** — associated to a network, or with a client on its
-own access point — so the URL for that address, with the code already in it:
-
-```
-http://<address>/?token=<code>
-```
-
-so scanning it opens the page authenticated.
-
 The earlier design encoded only the bare code, and argued against a URL because
 the address is the part that moves. That is why the URL appears only once the
 device actually has one: it is read at draw time, so it cannot be stale, and the
 join payload covers the case where there is nothing to point at.
 
-The cost is module size. 40 characters needs QR **version 3** rather than
-version 1, which on an 80px panel means **2px modules (0.27mm)** instead of 3px
-(0.41mm). Two pixels is harder for a camera at a glancing angle, so the access
-code is also printed as text beside the QR — the QR is the convenience, not the
-only way in.
+The cost is module size. The join payload and the device URL are about 38
+characters and need QR **version 3**; the hosted-app payload is 71–74 characters
+(depending on the address) and needs **version 4**, 33 modules. On an 80px panel
+that is still **2px modules (0.27mm)** — 74px square including the quiet zone,
+the largest version that fits at 2px. A payload dense enough to need version 5
+would fall to 1px modules, so `display_qr()` refuses it and the LCD falls back
+to the status screen rather than draw an unscannable code. Two pixels is harder
+for a camera at a glancing angle, so the access code is also printed as text
+beside the QR — the QR is the convenience, not the only way in. So is the
+address: the version-4 code leaves 13 character cells, and a dotted quad can
+need 15, so when it does not fit the panel reads `BOOT: address` and a tap
+brings up the status screen with the address in full.
 
 `qrcodegen` is vendored under `main/qr/` (Nayuki, MIT) and `boostEcl` is
 enabled, so a small payload gets upgraded to a higher EC level for free.
@@ -402,7 +432,7 @@ is scrubbed from the URL bar after load so it does not linger in history.
 **3. Origin validation.** Any page you visit can attempt
 `new WebSocket('ws://192.168.1.50/ws')` against a LAN address. Requests whose
 `Origin` is neither one of our own hostnames nor the published UI's fixed origin
-(`WEB_APP_ORIGIN` in `web_server.h`) are rejected, which blocks cross-site
+(`WEB_APP_ORIGIN` in `web_origin.h`) are rejected, which blocks cross-site
 WebSocket hijacking. That origin is a `github.io` address shared with every other
 project page on the same account, so it is one trusted app, not a per-device
 boundary.

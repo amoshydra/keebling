@@ -101,14 +101,30 @@ static const char *reset_reason_str(esp_reset_reason_t r) {
     }
 }
 
-// Right-hand panel beside the QR. x = 80 leaves 13 characters.
-static void draw_qr_panel(void) {
-    const bool url = qr_payload_is_url(wifi_mgr_ip(), wifi_mgr_ap_ip(),
-                                       wifi_mgr_client_count());
+// An address is worth printing only when the whole quad fits beside the QR.
+// Version 4 leaves 13 cells and a dotted quad can need 15; a cut address looks
+// like a real one, so send the reader to the status screen, which shows it in
+// full.
+static void draw_qr_address(int x, int line, const char *addr) {
+    if (x + 6 * (int)strlen(addr) <= LCD_W) display_text_line(x, line, addr);
+    else display_text_line(x, line, "BOOT: address");
+}
 
-    // Start past the code, whatever width it turned out to be. An IPv4 address
-    // needs 15 cells; starting at a fixed x=80 left 13 and cut the last digit,
-    // which printed a perfectly plausible address that nothing answered.
+// Right-hand panel beside the QR. Version 3 (the join and access-point
+// payloads) starts at x=70 and leaves 15 cells; version 4 (the hosted-app URL)
+// starts at x=78 and leaves 13. The address line therefore needs a width check
+// of its own.
+static void draw_qr_panel(void) {
+    const char *sta_ip = wifi_mgr_ip();
+    const bool url = qr_payload_is_url(sta_ip, wifi_mgr_ap_ip(),
+                                       wifi_mgr_client_count());
+    // Same rule as qr_payload_build(): a station address is what sends the QR
+    // to the published app; the access point keeps it on the device UI.
+    const bool hosted = sta_ip && sta_ip[0];
+
+    // Start past the code, whatever width it turned out to be. A hard-coded
+    // x truncated addresses and printed a perfectly plausible one that nothing
+    // answered.
     const int x = display_qr_right() + 2;
 
     display_text_line(x, 0, "Keebling");
@@ -116,14 +132,15 @@ static void draw_qr_panel(void) {
         char l[16];
         snprintf(l, sizeof(l), "STA %.9s", wifi_mgr_joined_ssid());
         display_text_line(x, 1, l);
-        display_text_line(x, 2, wifi_mgr_ip());
+        draw_qr_address(x, 2, sta_ip);
     } else {
         display_text_line(x, 1, "AP " AP_SSID);
-        display_text_line(x, 2, wifi_mgr_ap_ip());
+        draw_qr_address(x, 2, wifi_mgr_ap_ip());
     }
 
     display_text_line(x, 4, url ? "scan to open" : "scan to join");
-    display_text_line(x, 5, url ? "the web UI" : "this Wi-Fi");
+    if (hosted) display_text_line(x, 5, "the web app");
+    else display_text_line(x, 5, url ? "the web UI" : "this Wi-Fi");
     display_text_line(x, 6, security_code());
 }
 
@@ -161,7 +178,7 @@ static void show_status_screen(void) {
 static void apply_display_mode(void) {
     switch (s_mode) {
     case DISP_QR: {
-        char payload[96];
+        char payload[QR_PAYLOAD_MAX];
         qr_payload_build(payload, sizeof(payload),
                          wifi_mgr_ip(),        // "" when not associated
                          wifi_mgr_ap_ip(),     // "" when the AP is down
