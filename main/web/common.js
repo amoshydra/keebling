@@ -27,6 +27,15 @@ function normalizeBase(base) {
   } catch (_) { return ''; }
 }
 
+// The part of an origin a person recognises. The scheme is noise in a row, and
+// it is what pushed the address out of view: a 340px gate shows about twenty
+// characters, and "http://" spends seven of them on nothing.
+function hostOf(origin) {
+  try { return new URL(origin).host; } catch (_) {
+    return String(origin || '').replace(/^https?:\/\//, '');
+  }
+}
+
 export function setDeviceBase(base) {
   const next = normalizeBase(base);
   deviceBase = next;
@@ -511,7 +520,8 @@ export function mountDevices(host, opts) {
         actions.className = 'hub-editrow';
         actions.append(
           act('Save', () => commitEdit(dev, name, addr), 'primary'),
-          act('Cancel', () => { editingId = null; render(); }, 'hub-act'));
+          // A text button, not a square: "Cancel" is not a glyph.
+          act('Cancel', () => { editingId = null; render(); }, 'hub-cancel'));
 
         row.append(fields, actions);
         listEl.append(row);
@@ -524,24 +534,39 @@ export function mountDevices(host, opts) {
       chooseBtn.className = 'hub-pick';
       const dot = document.createElement('span');
       dot.className = 'dot ' + (DOT[state] || 'off');
+
+      // Two lines, not one with a right-aligned badge. The badge is what pushed
+      // a full address into the ellipsis: "OFFLINE" costs more width than the
+      // last two octets are worth. The address gets the first line (or the name
+      // does, when there is one), and the second carries the detail.
+      const stateLabel = LABEL[state] || state;
+      const text = document.createElement('span');
+      text.className = 'hub-text';
       const name = document.createElement('span');
       name.className = 'hub-name';
-      name.textContent = dev.name || dev.hosts[0];
-      const label = document.createElement('span');
-      label.className = 'hub-state';
-      label.textContent = LABEL[state] || state;
-      chooseBtn.append(dot, name, label);
+      name.textContent = dev.name || hostOf(dev.hosts[0]);
+      const sub = document.createElement('span');
+      sub.className = 'hub-sub';
+      // The scheme is dropped here too: it is implied, and it is the five
+      // characters that decide whether "· offline" fits.
+      sub.textContent = dev.name ? `${hostOf(dev.hosts[0])} · ${stateLabel}` : stateLabel;
+      text.append(name, sub);
+
+      chooseBtn.append(dot, text);
+      chooseBtn.title = `${dev.hosts[0]} — ${stateLabel}`;
+      chooseBtn.setAttribute('aria-label',
+        `${dev.name || hostOf(dev.hosts[0])} at ${dev.hosts[0]}, ${stateLabel}`);
       chooseBtn.addEventListener('click', () => choose(dev));
 
-      const edit = act('✎', () => { editingId = dev.id; render(); }, 'hub-act');
-      edit.setAttribute('aria-label', `Edit ${dev.name || dev.hosts[0]}`);
+      const edit = act('✎', () => { editingId = dev.id; render(); }, 'hub-act iconbtn');
+      edit.setAttribute('aria-label', `Edit ${dev.name || hostOf(dev.hosts[0])}`);
 
       const del = act('×', () => {
         devices.splice(devices.indexOf(dev), 1);
         save();
         render();
-      }, 'hub-del');
-      del.setAttribute('aria-label', `Remove ${dev.name || dev.hosts[0]}`);
+      }, 'hub-del iconbtn');
+      del.setAttribute('aria-label', `Remove ${dev.name || hostOf(dev.hosts[0])}`);
 
       row.append(chooseBtn, edit, del);
       listEl.append(row);
@@ -680,7 +705,7 @@ function setupDeviceChip() {
 
   const base = currentBase();
   const dev = loadDevices().find((d) => d.hosts.includes(base));
-  const label = (dev && dev.name) || base.replace(/^https?:\/\//, '');
+  const label = (dev && dev.name) || hostOf(base);
   // The chevron is the affordance: a bare pill reads as a label, not a control.
   chip.textContent = `${label} ▾`;
   chip.title = `${base} — change device`;

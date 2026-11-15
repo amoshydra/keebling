@@ -15,6 +15,10 @@
   --accent: #f2a93b;
   --danger: #b3261e;
   --warn: #ff8a65;
+  /* One shape for every icon-only button. 44px is the smallest reliable thumb
+     target; sharing it is what makes a row of controls line up. */
+  --icon: 44px;
+  --icon-radius: 10px;
 }
 
 /* Nothing in this UI is meant to be selected, dragged or scrolled by the
@@ -103,6 +107,23 @@ button:active { background: #555; }
 button.primary { background: var(--accent); color: #1b1308; }
 button.danger { background: var(--danger); }
 button:disabled { opacity: .45; }
+
+/* An icon-only button is a square, always: same width, height and corner as
+   every other one. Text buttons keep their own padding; this class is for
+   glyphs and SVGs, where an arbitrary width reads as a mistake. */
+.iconbtn {
+  flex: 0 0 auto;
+  width: var(--icon);
+  height: var(--icon);
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--icon-radius);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
 
 label { font-size: 13px; display: flex; align-items: center; gap: 8px; }
 input[type=range] { width: 120px; }
@@ -285,7 +306,9 @@ textarea { font-family: ui-monospace, SFMono-Regular, monospace; resize: vertica
 /* The published UI's device list. The row is the whole tap target: this is a
    phone first, and there is nothing else on the screen to aim at. */
 .hub-list { list-style: none; margin: 0; padding: 0; text-align: left; }
-.hub-row { display: flex; align-items: stretch; gap: 6px; }
+/* Spacing lives on the row now that its children are fixed-height squares:
+   per-child margins were what let the two buttons differ in height. */
+.hub-row { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; }
 .hub-pick {
   flex: 1 1 auto;
   display: flex;
@@ -293,7 +316,6 @@ textarea { font-family: ui-monospace, SFMono-Regular, monospace; resize: vertica
   gap: 9px;
   min-width: 0;
   padding: 12px 10px;
-  margin-bottom: 8px;
   background: #0d0d0d;
   color: var(--ink);
   border: 1px solid var(--line);
@@ -304,31 +326,32 @@ textarea { font-family: ui-monospace, SFMono-Regular, monospace; resize: vertica
   cursor: pointer;
 }
 .hub-pick:hover { border-color: #3a3a3a; }
-.hub-name {
+.hub-text {
   flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.hub-name {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.hub-state {
-  flex: 0 0 auto;
+/* The address (with a name above it) or the state alone (when the address is
+   the name). Always present, so the row's height does not change with status. */
+.hub-sub {
   font-size: 11px;
   color: #777;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .hub-del {
-  flex: 0 0 auto;
-  width: 42px;
-  margin-bottom: 8px;
   background: #0d0d0d;
   color: #777;
   border: 1px solid var(--line);
-  border-radius: 8px;
-  font-size: 18px;
-  line-height: 1;
-  cursor: pointer;
 }
 .hub-del:hover { color: #ff6b6b; border-color: #4a2a2a; }
 .hub-empty { font-size: 13px; color: #777; text-align: left; margin-bottom: 10px; }
@@ -361,19 +384,12 @@ textarea { font-family: ui-monospace, SFMono-Regular, monospace; resize: vertica
 .hub-editrow input { flex: 1 1 auto; min-width: 0; }
 .hub-editrow button { flex: 0 0 auto; }
 .hub-editrow button.primary { width: auto; padding: 0 14px; }
-.hub-editing { display: block; margin-bottom: 8px; }
+.hub-editing { display: block; }
 .hub-editing .hub-input { margin-bottom: 6px; }
 .hub-act {
-  flex: 0 0 auto;
-  width: 38px;
-  margin-bottom: 8px;
   background: #0d0d0d;
   color: #bbb;
   border: 1px solid var(--line);
-  border-radius: 8px;
-  font-size: 15px;
-  line-height: 1;
-  cursor: pointer;
 }
 .hub-act:hover { color: #fff; border-color: #3a3a3a; }
 
@@ -594,10 +610,10 @@ textarea { font-family: ui-monospace, SFMono-Regular, monospace; resize: vertica
   right: 12px;
   bottom: 12px;
   z-index: 2;
-  width: 44px;
-  height: 44px;
+  width: var(--icon);
+  height: var(--icon);
   padding: 0;
-  border-radius: 50%;
+  border-radius: var(--icon-radius);
   background: rgba(255, 255, 255, .08);
   color: #aaa;
   font-size: 18px;
@@ -747,9 +763,9 @@ textarea { font-family: ui-monospace, SFMono-Regular, monospace; resize: vertica
 
 .kbtool { display: flex; gap: 4px; flex: 0 0 auto; }
 .kbtool button {
-  width: 44px;
-  height: 44px;
-  border-radius: 9px;
+  width: var(--icon);
+  height: var(--icon);
+  border-radius: var(--icon-radius);
   background: #191919;
   border: 1px solid #272727;
   color: #8d8d8d;

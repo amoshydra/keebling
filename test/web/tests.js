@@ -10,6 +10,16 @@ const __webTests = [];
 const __sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const __assert = (cond, msg) => { if (!cond) throw new Error(msg || 'assertion failed'); };
 
+// Every icon-only button is the same square (--icon in the stylesheet). Two of
+// them shipped with different widths and a stretched height; this is the guard.
+const __iconBox = (el, label) => {
+  const r = el.getBoundingClientRect();
+  __assert(Math.round(r.width) === Math.round(r.height),
+    `${label} is ${Math.round(r.width)}x${Math.round(r.height)}, not square`);
+  __assert(Math.round(r.width) === 44, `${label} is ${Math.round(r.width)}px, not 44`);
+  return Math.round(r.width);
+};
+
 // The gate is part of the shell and stays hidden once a code is accepted.
 const __gateHidden = () => {
   const gate = document.getElementById('gate');
@@ -132,9 +142,23 @@ __webTests.push({
     const rows = [...host.querySelectorAll('.hub-row')];
     __assert(rows.length === 1, `listed ${rows.length} rows`);
     const base = window.currentBase().replace(/^https?:\/\//, '');
-    __assert(rows[0].textContent.includes(base), `the row does not name ${base}`);
-    const state = rows[0].querySelector('.hub-state').textContent;
-    __assert(state === 'online', `state is "${state}"`);
+    const name = rows[0].querySelector('.hub-name').textContent;
+    // The default label is the host, not the URL: "http://" spent the width the
+    // address needed and the ellipsis cut the address itself.
+    __assert(name === base, `the row names "${name}", not ${base}`);
+    const sub = rows[0].querySelector('.hub-sub').textContent;
+    __assert(sub === 'online', `the second line says "${sub}"`);
+  },
+});
+
+__webTests.push({
+  page: 'devices',
+  name: 'the row actions are the same square',
+  fn: async () => {
+    const host = await __openDevices();
+    const edit = __iconBox(host.querySelector('.hub-act'), 'the edit button');
+    const del = __iconBox(host.querySelector('.hub-del'), 'the remove button');
+    __assert(edit === del, `the actions are ${edit} and ${del}px wide`);
   },
 });
 
@@ -152,6 +176,13 @@ __webTests.push({
     __assert(stored[0].name === 'Renamed', `stored name is "${stored[0].name}"`);
     const shown = host.querySelector('.hub-name').textContent;
     __assert(shown === 'Renamed', `the row still says "${shown}"`);
+
+    // The second line carries the origin once a name takes the first, so the
+    // address is still visible.
+    const sub = host.querySelector('.hub-sub').textContent;
+    const address = window.currentBase().replace(/^https?:\/\//, '');
+    __assert(sub.includes(address), `the second line says "${sub}"`);
+    __assert(sub.includes('online'), `the second line says "${sub}"`);
   },
 });
 
@@ -170,7 +201,7 @@ __webTests.push({
       `the address became "${stored[0].hosts[0]}"`);
     __assert(host.querySelector('[data-role="err"]').textContent.includes('address'),
       'no error was shown');
-    host.querySelector('.hub-editrow button.hub-act').click();   // cancel
+    host.querySelector('.hub-editrow button.hub-cancel').click();
   },
 });
 
@@ -460,6 +491,14 @@ __webTests.push({
 
     help.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     __assert(help.hidden, 'tapping the backdrop did not dismiss the help');
+  },
+});
+
+__webTests.push({
+  page: 'control',
+  name: 'the help button is the shared icon square',
+  fn: async () => {
+    __iconBox(document.getElementById('helpOpen'), 'the help button');
   },
 });
 
@@ -4198,6 +4237,15 @@ __webTests.push({
   },
 });
 
+
+__webTests.push({
+  page: 'keys-deck',
+  name: 'both keyboard tool buttons are the shared icon square',
+  fn: async () => {
+    __iconBox(document.getElementById('kbToolSource'), 'the keyboard button');
+    __iconBox(document.getElementById('kbToolText'), 'the paste button');
+  },
+});
 
 __webTests.push({
   page: 'keys-deck',
