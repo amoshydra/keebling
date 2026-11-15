@@ -483,6 +483,24 @@ __webTests.push({
 
 __webTests.push({
   page: 'control',
+  name: 'a heartbeat and a keyboard report cross the real socket',
+  fn: async () => {
+    // Runs before the __capture() tests, which replace PadView.ws with a
+    // recorder: this is the only point where the socket is the real one.
+    await __waitFor(() => PadView.wsReady && PadView.ws instanceof WebSocket, 3000);
+    __assert(PadView.wsReady, 'the pad is not connected');
+    __assert(PadView.ws instanceof WebSocket, 'the socket is a recorder, not a WebSocket');
+
+    // The app's heartbeat is every second. Let one leave before the recorder
+    // tests take the binding over, then prove a report uses the same wire.
+    await __sleep(1100);
+    PadView.ws.send(new Uint8Array([0x02, 0, 0x04, 0, 0, 0, 0, 0]));
+    await __sleep(80);
+  },
+});
+
+__webTests.push({
+  page: 'control',
   name: 'gesture help opens on the first visit and is remembered',
   fn: async () => {
     const help = document.getElementById('help');

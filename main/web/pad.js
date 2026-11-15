@@ -114,6 +114,9 @@ function scheduleReconnect() {
 }
 
 function setStatus(text, cls) {
+  // A socket that outlives the view can still deliver open/close after
+  // destroy(); the refs are gone by then and the event is not worth a throw.
+  if (!statusText || !dot) return;
   statusText.textContent = text;
   dot.className = 'dot ' + cls;
 }

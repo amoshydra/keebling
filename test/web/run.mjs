@@ -70,11 +70,12 @@ function findChrome() {
 
 // ---------------------------------------------------------------- CDP
 class Session {
-  constructor(ws, sessionId) {
+  constructor(ws, sessionId, onEvent) {
     this.ws = ws;
     this.sessionId = sessionId;
     this.nextId = 1;
     this.pending = new Map();
+    this.onEvent = onEvent;
     ws.addEventListener('message', (ev) => {
       const msg = JSON.parse(ev.data);
       if (msg.id && this.pending.has(msg.id)) {
@@ -82,6 +83,8 @@ class Session {
         this.pending.delete(msg.id);
         if (msg.error) reject(new Error(`${msg.error.message} (${msg.error.code})`));
         else resolve(msg.result);
+      } else if (msg.method && this.onEvent) {
+        this.onEvent(msg);
       }
     });
   }
@@ -221,9 +224,42 @@ try {
 
   const { targetId } = await browser.send('Target.createTarget', { url: 'about:blank' });
   const { sessionId } = await browser.send('Target.attachToTarget', { targetId, flatten: true });
-  const page = new Session(ws, sessionId);
+
+  // Errors the browser logs (CORS, mixed content, 404s) are not exceptions and
+  // do not fail an assertion, but they are exactly how a broken endpoint reads
+  // on the page. Collected per target and reported below.
+  let consoleErrors = [];
+  const noteError = (text) => {
+    if (!text || consoleErrors.includes(text)) return;
+    consoleErrors.push(text);
+  };
+  // The tests deliberately exercise failure answers (a wrong code, an
+  // unreachable address, an invalid image). Those log network errors by
+  // design; everything else is a defect.
+  const expectedFailure = (e) => {
+    if (e.source !== 'network' || !e.url) return false;
+    if (e.url.includes('/screen/image') && /\b(400|403|404)\b/.test(e.text)) return true;
+    if (e.url.includes('/auth?token=ZZZZZZZZZZZZ')) return true;   // wrong-code test
+    if (e.url.includes('127.0.0.1:1/')) return true;               // unreachable test
+    return false;
+  };
+
+  const page = new Session(ws, sessionId, (msg) => {
+    if (msg.method === 'Log.entryAdded' && msg.params.entry.level === 'error') {
+      const e = msg.params.entry;
+      if (expectedFailure(e)) return;
+      noteError(`${e.source}: ${e.text}${e.url ? ` (${e.url})` : ''}`);
+    } else if (msg.method === 'Runtime.exceptionThrown') {
+      const d = msg.params.exceptionDetails;
+      noteError(`exception: ${d.exception?.description || d.text || 'thrown'}`);
+    } else if (msg.method === 'Runtime.consoleAPICalled' && msg.params.type === 'error') {
+      noteError('console.error: ' + msg.params.args
+        .map((a) => a.value ?? a.description ?? '').join(' '));
+    }
+  });
   await page.send('Page.enable');
   await page.send('Runtime.enable');
+  await page.send('Log.enable');
 
   const testSource = readFileSync(path.join(HERE, 'tests.js'), 'utf8');
 
@@ -265,7 +301,8 @@ try {
       clearStorage: true,
       legacyMacros: [{ name: 'Left Behind', steps: '{ENTER}' }] },
     // The upload view, with nothing stored: every file is the built-in one.
-    { page: 'ui', url: `${base}/?token=${CODE}#/ui`, metrics: PHONE },
+    // It uploads broken archives on purpose, so its HTTP failures are expected.
+    { page: 'ui', url: `${base}/?token=${CODE}#/ui`, metrics: PHONE, ignoreConsole: true },
     // ...and the recovery story: one view's script has been replaced by a
     // broken upload, so the shell and the upload view have to still work and
     // be able to reset it.
@@ -338,6 +375,17 @@ try {
     return `${basePart}${basePart.includes('?') ? '&' : '?'}run=${n}${hash}`;
   };
 
+  const report = (ok, name, detail) => {
+    if (ok) {
+      passed++;
+      if (VERBOSE) console.log(`  ok    ${name}`);
+    } else {
+      failures++;
+      console.log(`\n  FAIL  ${name}`);
+      console.log(`        ${detail}`);
+    }
+  };
+
   for (const [n, target] of targets.entries()) {
     await page.send('Emulation.setDeviceMetricsOverride', target.metrics);
 
@@ -359,6 +407,10 @@ try {
     for (const [name, body] of Object.entries(target.storedUiFiles || {})) {
       device.uiFiles.set(name, Buffer.from(body));
     }
+
+    // Only the target's own page logs count; the seed navigation above may
+    // have been a deliberate 404.
+    consoleErrors = [];
 
     await page.goto(tagged(target.url, n));
     if (target.reloadFirst) {
@@ -389,25 +441,39 @@ try {
       }
     }
 
+    // A page that logs an error has a broken endpoint even if every assertion
+    // passed: this is how CORS, mixed content and 404s read in the console.
+    // The UI-files pass deliberately uploads broken archives, so its 400/413
+    // answers are the subject of the test rather than a defect.
+    await delay(50);
+    if (target.ignoreConsole) {
+      // nothing: this target exists to exercise failure answers
+    } else if (consoleErrors.length) {
+      report(false, `${target.page}: console is clean`,
+        consoleErrors.slice(0, 6).join(' | '));
+    } else {
+      report(true, `${target.page}: console is clean`);
+    }
+
+    // The first control target is where the real socket is exercised.
+    if (target.page === 'control') {
+      const frames = device.wsFrames;
+      report(device.wsConnections >= 1, 'the pad opened a real WebSocket',
+        `handshakes: ${device.wsConnections}`);
+      report(frames.some((f) => f.length === 1 && f[0] === 0x04),
+        'a heartbeat crossed the socket',
+        `frames: ${JSON.stringify(frames.slice(0, 8))}`);
+      report(frames.some((f) => f.length === 8 && f[0] === 0x02 && f[2] === 0x04),
+        'a keyboard report crossed the socket',
+        `frames: ${JSON.stringify(frames.slice(0, 8))}`);
+    }
+
     // What the settings page itself saved, before later pages add their own.
     if (target.page === 'settings') {
       settingsSaves = device.saved.slice();
       uiResetsAtSettings = device.uiResets;
     }
   }
-
-  // The stubbed device records what it was sent, which is how we check the
-  // save actually reached it rather than only updating the form.
-  const report = (ok, name, detail) => {
-    if (ok) {
-      passed++;
-      if (VERBOSE) console.log(`  ok    ${name}`);
-    } else {
-      failures++;
-      console.log(`\n  FAIL  ${name}`);
-      console.log(`        ${detail}`);
-    }
-  };
 
   const parse = (s) => { try { return JSON.parse(s); } catch (_) { return {}; } };
   const payloads = device.saved.map(parse);

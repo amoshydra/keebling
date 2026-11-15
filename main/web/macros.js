@@ -47,6 +47,8 @@ let heartbeatTimer = null;
 let mountGen = 0;              // invalidates an init that is still awaiting
 
 function setStatus(text, cls) {
+  // A socket can deliver open/close after the view is gone; the refs are null.
+  if (!statusText || !dot) return;
   statusText.textContent = text;
   dot.className = 'dot ' + cls;
 }

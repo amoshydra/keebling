@@ -8,6 +8,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -156,6 +157,11 @@ export function startStub(port = 0, opts = {}) {
     uiFiles: new Map(), // name -> Buffer, the uploaded UI files
     uiResets: 0,        // /ui/reset calls, including reset-all
     screenImage: null,  // Buffer, the stored screen.img (null = nothing)
+    // WebSocket. The pad opens a real socket, so the tests can assert what
+    // actually crosses the wire rather than only the report builders.
+    wsConnections: 0,   // completed handshakes
+    wsOpen: 0,          // currently open
+    wsFrames: [],       // every binary payload, as arrays of bytes
   };
 
   const server = http.createServer((req, res) => {
@@ -550,6 +556,67 @@ export function startStub(port = 0, opts = {}) {
       'Cache-Control': 'no-store',
     });
     res.end(body);
+  });
+
+  // A real WebSocket handshake and binary frame decoder. The UI sends masked
+  // client frames of at most 8 bytes; this handles that and ignores the rest.
+  server.on('upgrade', (req, socket) => {
+    const url = new URL(req.url, 'http://localhost');
+    const authed = (url.searchParams.get('token') || '').toUpperCase() === CODE;
+    if (url.pathname !== '/ws' || !authed || !req.headers['sec-websocket-key']) {
+      socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+
+    const accept = createHash('sha1')
+      .update(req.headers['sec-websocket-key'] + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11')
+      .digest('base64');
+    socket.write(
+      'HTTP/1.1 101 Switching Protocols\r\n' +
+      'Upgrade: websocket\r\n' +
+      'Connection: Upgrade\r\n' +
+      `Sec-WebSocket-Accept: ${accept}\r\n\r\n`);
+
+    device.wsConnections++;
+    device.wsOpen++;
+
+    let buf = Buffer.alloc(0);
+    socket.on('data', (chunk) => {
+      buf = Buffer.concat([buf, chunk]);
+      for (;;) {
+        if (buf.length < 2) return;
+        const opcode = buf[0] & 0x0f;
+        const masked = (buf[1] & 0x80) !== 0;
+        let len = buf[1] & 0x7f;
+        let off = 2;
+        if (len === 126) {
+          if (buf.length < 4) return;
+          len = buf.readUInt16BE(2);
+          off = 4;
+        } else if (len === 127) {
+          if (buf.length < 10) return;
+          len = Number(buf.readBigUInt64BE(2));
+          off = 10;
+        }
+        const maskLen = masked ? 4 : 0;
+        if (buf.length < off + maskLen + len) return;
+
+        const mask = masked ? buf.subarray(off, off + 4) : null;
+        off += maskLen;
+        const payload = Buffer.from(buf.subarray(off, off + len));
+        if (mask) {
+          for (let i = 0; i < payload.length; i++) payload[i] ^= mask[i % 4];
+        }
+        buf = buf.subarray(off + len);
+
+        if (opcode === 0x8) { socket.end(); return; }     // close
+        if (opcode === 0x9) continue;                      // ping: no pong needed
+        if (opcode === 0x1 || opcode === 0x2) device.wsFrames.push([...payload]);
+      }
+    });
+    socket.on('close', () => { device.wsOpen--; });
+    socket.on('error', () => { /* the page closed it */ });
   });
 
   return new Promise((resolve) => {
