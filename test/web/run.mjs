@@ -53,12 +53,13 @@ function findChrome() {
   if (found.length) return found[0];
 
   // A CI runner has no Playwright cache: it has Chrome on PATH. Checked after
-  // the caches so a developer's tests keep using the browser they already have,
-  // and in this order so the real Chrome beats a snap shim that needs snapd.
-  const names = ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser'];
-  for (const dir of (process.env.PATH || '').split(path.delimiter)) {
-    if (!dir) continue;
-    for (const name of names) {
+  // the caches so a developer's tests keep using the browser they already have.
+  // By name first, not directory first: an earlier PATH entry can hold a
+  // chromium shim (a snap wrapper, on Ubuntu) that fails where the real Chrome
+  // in a later directory would not.
+  const dirs = (process.env.PATH || '').split(path.delimiter).filter(Boolean);
+  for (const name of ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser']) {
+    for (const dir of dirs) {
       const candidate = path.join(dir, name);
       if (existsSync(candidate)) return candidate;
     }
@@ -158,6 +159,7 @@ const appBase = `http://127.0.0.1:${app.port}`;
 // on purpose.
 
 const debugPort = 9333;
+const chromeBin = findChrome();
 const chromeArgs = [
   '--headless=new',
   `--remote-debugging-port=${debugPort}`,
@@ -173,13 +175,26 @@ const chromeArgs = [
 if (process.env.CI) chromeArgs.push('--no-sandbox', '--disable-setuid-sandbox');
 chromeArgs.push('about:blank');
 
-const chrome = spawn(findChrome(), chromeArgs, { stdio: 'ignore' });
+const chrome = spawn(chromeBin, chromeArgs, { stdio: ['ignore', 'ignore', 'pipe'] });
+
+// A browser that refuses to start says why on stderr, and that is the only
+// place it says it. Kept so the failure names the binary and the reason
+// instead of only "never opened its devtools port".
+let chromeErr = '';
+chrome.stderr.on('data', (d) => { chromeErr += d.toString(); });
+chrome.on('error', (e) => { chromeErr += `\n[spawn error] ${e.message}`; });
+chrome.on('exit', (code, signal) => {
+  chromeErr += `\n[chrome exited code=${code} signal=${signal}]`;
+});
 
 let failures = 0;
 let passed = 0;
 
 try {
-  const wsUrl = await waitForDevtools(debugPort);
+  const wsUrl = await waitForDevtools(debugPort).catch((e) => {
+    throw new Error(`${e.message}\n  binary: ${chromeBin}\n  args: ${chromeArgs.join(' ')}\n` +
+                    chromeErr.slice(-2000));
+  });
   const ws = new WebSocket(wsUrl);
   await new Promise((res, rej) => {
     ws.addEventListener('open', res, { once: true });
